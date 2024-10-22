@@ -61,3 +61,14 @@ ignore = [
     "PLW0603",  # Globa statement updates are discouraged.
     "PLW2901",  # For loop variable overwritten.
 ]
+
+[tool.pyright]
+include = ["src"]
+exclude = [
+    "**/node_modules",
+    "**/__pycache__",
+    "third_party/apex",
+    "third_party/hamer",
+]
+ignore = [
+]

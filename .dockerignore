@@ -16,9 +16,8 @@ htmlcov
 lightning_logs/
 outputs/
 
-datasets/
-
 data/
+datasets/
 egoallo_checkpoint_*
 egoallo_example_*
 
