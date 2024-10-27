@@ -2,15 +2,14 @@ import abc
 from typing import (
     ClassVar,
     Generic,
-    Self,
     Tuple,
     Type,
     TypeVar,
     Union,
     final,
     overload,
-    override,
 )
+from overrides import overrides
 
 import numpy as onp
 import torch
@@ -123,7 +122,7 @@ class MatrixLieGroup(abc.ABC):
         """
 
     @abc.abstractmethod
-    def multiply(self: Self, other: Self) -> Self:
+    def multiply(self, other):
         """Composes this transformation with another.
 
         Returns:
@@ -258,12 +257,12 @@ class SEBase(Generic[ContainedSOType], MatrixLieGroup):
     # Overrides.
 
     @final
-    @override
+    @overrides
     def apply(self, target: Tensor) -> Tensor:
         return self.rotation() @ target + self.translation()  # type: ignore
 
     @final
-    @override
+    @overrides
     def multiply(self: SEGroupType, other: SEGroupType) -> SEGroupType:
         return type(self).from_rotation_and_translation(
             rotation=self.rotation() @ other.rotation(),
@@ -271,7 +270,7 @@ class SEBase(Generic[ContainedSOType], MatrixLieGroup):
         )
 
     @final
-    @override
+    @overrides
     def inverse(self: SEGroupType) -> SEGroupType:
         R_inv = self.rotation().inverse()
         return type(self).from_rotation_and_translation(
@@ -280,7 +279,7 @@ class SEBase(Generic[ContainedSOType], MatrixLieGroup):
         )
 
     @final
-    @override
+    @overrides
     def normalize(self: SEGroupType) -> SEGroupType:
         return type(self).from_rotation_and_translation(
             rotation=self.rotation().normalize(),

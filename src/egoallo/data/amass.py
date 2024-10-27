@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Any, Literal, assert_never, cast
+from typing import Any, Literal, cast
 
 import h5py
 import numpy as np
@@ -97,6 +97,7 @@ class EgoAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
                     cast(h5py.Group, hdf5_file[p])["T_world_root"],
                 ).shape[0]
                 >= (subseq_len if min_subseq_len is None else min_subseq_len)
+                # NOTE: min_subseq_len should be larger than subseq_len as every element in self._groups should be larger than subseq_len.
                 # These datasets had weird joint positions in the original
                 # version of the processed data. They should be fine now.
                 # and not p.endswith("KIT/317/run05_poses.npz")
@@ -117,6 +118,12 @@ class EgoAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
                 )
                 // subseq_len
             )
+            self._group_lengths = [
+                cast(
+                    h5py.Dataset, cast(h5py.Group, hdf5_file[g])["T_world_root"]
+                ).shape[0]
+                for g in self._groups
+            ]
 
         self._cache: dict[str, dict[str, Any]] | None = {} if cache_files else None
 
@@ -179,7 +186,7 @@ class EgoAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
             end_t = start_t + random_subseq_len
             mask[random_subseq_len:] = False
         else:
-            assert_never(self._slice_strategy)
+            assert False
 
         # Read slices of the dataset.
         kwargs: dict[str, Any] = {}

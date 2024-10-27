@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Union, override
+from typing import Union
+from overrides import overrides
 
 import numpy as np
 import torch
@@ -30,7 +31,7 @@ class SO3(_base.SOBase):
     wxyz: Tensor
     """Internal parameters. `(w, x, y, z)` quaternion."""
 
-    @override
+    @overrides
     def __repr__(self) -> str:
         wxyz = np.round(self.wxyz.numpy(force=True), 5)
         return f"{self.__class__.__name__}(wxyz={wxyz})"
@@ -120,12 +121,12 @@ class SO3(_base.SOBase):
     # Factory.
 
     @classmethod
-    @override
+    @overrides
     def identity(cls, device: Union[torch.device, str], dtype: torch.dtype) -> SO3:
         return SO3(wxyz=torch.tensor([1.0, 0.0, 0.0, 0.0], device=device, dtype=dtype))
 
     @classmethod
-    @override
+    @overrides
     def from_matrix(cls, matrix: Tensor) -> SO3:
         assert matrix.shape[-2:] == (3, 3)
 
@@ -210,7 +211,7 @@ class SO3(_base.SOBase):
 
     # Accessors.
 
-    @override
+    @overrides
     def as_matrix(self) -> Tensor:
         norm_sq = torch.square(self.wxyz).sum(dim=-1, keepdim=True)
         qvec = self.wxyz * torch.sqrt(2.0 / norm_sq)  # (*, 4)
@@ -230,13 +231,13 @@ class SO3(_base.SOBase):
             dim=-1,
         ).reshape(*qvec.shape[:-1], 3, 3)
 
-    @override
+    @overrides
     def parameters(self) -> Tensor:
         return self.wxyz
 
     # Operations.
 
-    @override
+    @overrides
     def apply(self, target: Tensor) -> Tensor:
         assert target.shape[-1] == 3
 
@@ -245,7 +246,7 @@ class SO3(_base.SOBase):
         out = self.multiply(SO3(wxyz=padded_target).multiply(self.inverse()))
         return out.wxyz[..., 1:]
 
-    @override
+    @overrides
     def multiply(self, other: SO3) -> SO3:
         w0, x0, y0, z0 = self.wxyz.unbind(dim=-1)
         w1, x1, y1, z1 = other.wxyz.unbind(dim=-1)
@@ -262,7 +263,7 @@ class SO3(_base.SOBase):
         return SO3(wxyz=wxyz2)
 
     @classmethod
-    @override
+    @overrides
     def exp(cls, tangent: Tensor) -> SO3:
         # Reference:
         # > https://github.com/strasdat/Sophus/blob/a0fe89a323e20c42d3cecb590937eb7a06b8343a/sophus/so3.hpp#L583
@@ -304,7 +305,7 @@ class SO3(_base.SOBase):
             )
         )
 
-    @override
+    @overrides
     def log(self) -> Tensor:
         # Reference:
         # > https://github.com/strasdat/Sophus/blob/a0fe89a323e20c42d3cecb590937eb7a06b8343a/sophus/so3.hpp#L247
@@ -337,16 +338,16 @@ class SO3(_base.SOBase):
 
         return atan_factor * xyz
 
-    @override
+    @overrides
     def adjoint(self) -> Tensor:
         return self.as_matrix()
 
-    @override
+    @overrides
     def inverse(self) -> SO3:
         # Negate complex terms.
         w, xyz = torch.split(self.wxyz, [1, 3], dim=-1)
         return SO3(wxyz=torch.cat([w, -xyz], dim=-1))
 
-    @override
+    @overrides
     def normalize(self) -> SO3:
         return SO3(wxyz=self.wxyz / torch.linalg.norm(self.wxyz, dim=-1, keepdim=True))

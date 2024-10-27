@@ -12,11 +12,13 @@ import tyro
 import yaml
 from accelerate import Accelerator, DataLoaderConfiguration
 from accelerate.utils import ProjectConfiguration
-from loguru import logger
 
 from egoallo import network, training_loss, training_utils
 from egoallo.data.amass import EgoAmassHdf5Dataset
 from egoallo.data.dataclass import collate_dataclass
+from egoallo.setup_logger import setup_logger
+
+logger = setup_logger(output=None, name=__name__)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -40,9 +42,6 @@ class EgoAlloTrainConfig:
     """Only used if dataset_slice_strategy == 'random_variable_len'."""
     train_splits: tuple[Literal["train", "val", "test", "just_humaneva"], ...] = (
         "train",
-        "val",
-        "test",
-        "just_humaneva"
     )
 
     # Optimizer options.
@@ -112,6 +111,7 @@ def run_training(
         logger.add(experiment_dir / "trainlog.log", rotation="100 MB")
 
     # Setup.
+    # import ipdb; ipdb.set_trace()
     model = network.EgoDenoiser(config.model)
     train_loader = torch.utils.data.DataLoader(
         dataset=EgoAmassHdf5Dataset(

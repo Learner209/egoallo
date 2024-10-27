@@ -88,6 +88,7 @@ class InferenceTrajectoryPaths:
             hamer_outputs = output_dir / hamer_outputs.name
             if not hamer_outputs.exists():
                 hamer_outputs.symlink_to(hamer_outputs)
+        hamer_outputs = None
 
         wrist_and_palm_poses_csv = tuple(traj_root.glob("**/wrist_and_palm_poses.csv"))
         if len(wrist_and_palm_poses_csv) == 0:
@@ -100,6 +101,7 @@ class InferenceTrajectoryPaths:
                 wrist_and_palm_poses_csv_path = output_dir / wrist_and_palm_poses_csv[0].name
                 if not wrist_and_palm_poses_csv_path.exists():
                     wrist_and_palm_poses_csv_path.symlink_to(wrist_and_palm_poses_csv[0])
+        wrist_and_palm_poses_csv_path = None
 
         splat_path = traj_root / "splat.ply"
         if not splat_path.exists():

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Union, cast, override
+from typing import Union, cast
+from overrides import overrides
 
 import numpy as np
 import torch
@@ -46,7 +47,7 @@ class SE3(_base.SEBase[SO3]):
     wxyz_xyz: Tensor
     """Internal parameters. wxyz quaternion followed by xyz translation."""
 
-    @override
+    @overrides
     def __repr__(self) -> str:
         quat = np.round(self.wxyz_xyz[..., :4].numpy(force=True), 5)
         trans = np.round(self.wxyz_xyz[..., 4:].numpy(force=True), 5)
@@ -55,7 +56,7 @@ class SE3(_base.SEBase[SO3]):
     # SE-specific.
 
     @classmethod
-    @override
+    @overrides
     def from_rotation_and_translation(
         cls,
         rotation: SO3,
@@ -64,18 +65,18 @@ class SE3(_base.SEBase[SO3]):
         assert translation.shape[-1] == 3
         return SE3(wxyz_xyz=torch.cat([rotation.wxyz, translation], dim=-1))
 
-    @override
+    @overrides
     def rotation(self) -> SO3:
         return SO3(wxyz=self.wxyz_xyz[..., :4])
 
-    @override
+    @overrides
     def translation(self) -> Tensor:
         return self.wxyz_xyz[..., 4:]
 
     # Factory.
 
     @classmethod
-    @override
+    @overrides
     def identity(cls, device: Union[torch.device, str], dtype: torch.dtype) -> SE3:
         return SE3(
             wxyz_xyz=torch.tensor(
@@ -84,7 +85,7 @@ class SE3(_base.SEBase[SO3]):
         )
 
     @classmethod
-    @override
+    @overrides
     def from_matrix(cls, matrix: Tensor) -> SE3:
         assert matrix.shape[-2:] == (4, 4) or matrix.shape[-2:] == (3, 4)
         # Currently assumes bottom row is [0, 0, 0, 1].
@@ -95,7 +96,7 @@ class SE3(_base.SEBase[SO3]):
 
     # Accessors.
 
-    @override
+    @overrides
     def as_matrix(self) -> Tensor:
         R = self.rotation().as_matrix()  # (*, 3, 3)
         t = self.translation().unsqueeze(-1)  # (*, 3, 1)
@@ -107,14 +108,14 @@ class SE3(_base.SEBase[SO3]):
         )
         return torch.cat([torch.cat([R, t], dim=-1), bottom], dim=-2)
 
-    @override
+    @overrides
     def parameters(self) -> Tensor:
         return self.wxyz_xyz
 
     # Operations.
 
     @classmethod
-    @override
+    @overrides
     def exp(cls, tangent: Tensor) -> SE3:
         # Reference:
         # > https://github.com/strasdat/Sophus/blob/a0fe89a323e20c42d3cecb590937eb7a06b8343a/sophus/se3.hpp#L761
@@ -163,7 +164,7 @@ class SE3(_base.SEBase[SO3]):
             translation=torch.einsum("...ij,...j->...i", V, tangent[..., :3]),
         )
 
-    @override
+    @overrides
     def log(self) -> Tensor:
         # Reference:
         # > https://github.com/strasdat/Sophus/blob/a0fe89a323e20c42d3cecb590937eb7a06b8343a/sophus/se3.hpp#L223
@@ -208,7 +209,7 @@ class SE3(_base.SEBase[SO3]):
             [torch.einsum("...ij,...j->...i", V_inv, self.translation()), omega], dim=-1
         )
 
-    @override
+    @overrides
     def adjoint(self) -> Tensor:
         R = self.rotation().as_matrix()
         dims = R.shape[:-2]

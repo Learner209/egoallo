@@ -1,10 +1,11 @@
 import dataclasses
-from typing import Any, Callable, Self, dataclass_transform
+from typing import Any, Callable, TypeVar
+from dataclasses import dataclass
 
 import torch
 
 
-@dataclass_transform()
+@dataclass()
 class TensorDataclass:
     """A lighter version of nerfstudio's TensorDataclass:
     https://github.com/nerfstudio-project/nerfstudio/blob/main/nerfstudio/utils/tensor_dataclass.py
@@ -13,7 +14,7 @@ class TensorDataclass:
     def __init_subclass__(cls) -> None:
         dataclasses.dataclass(cls)
 
-    def to(self, device: torch.device | str) -> Self:
+    def to(self, device: torch.device | str):
         """Move the tensors in the dataclass to the given device.
 
         Args:
@@ -44,7 +45,7 @@ class TensorDataclass:
 
         return _to_dict(self)
 
-    def map(self, fn: Callable[[torch.Tensor], torch.Tensor]) -> Self:
+    def map(self, fn: Callable[[torch.Tensor], torch.Tensor]):
         """Apply a function to all tensors in the dataclass.
 
         Also recurses into lists, tuples, and dictionaries.
@@ -56,7 +57,8 @@ class TensorDataclass:
             A new dataclass.
         """
 
-        def _map_impl[MapT](
+        MapT = TypeVar("MapT")
+        def _map_impl(
             fn: Callable[[torch.Tensor], torch.Tensor],
             val: MapT,
         ) -> MapT:

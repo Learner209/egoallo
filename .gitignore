@@ -16,6 +16,7 @@ htmlcov
 lightning_logs/
 outputs/
 experiments/
+blendify_assets/
 
 datasets/
 

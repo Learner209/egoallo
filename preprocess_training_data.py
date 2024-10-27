@@ -9,15 +9,18 @@ import h5py
 import torch
 import torch.cuda
 import tyro
+import tempfile
 
 from egoallo import fncsmpl
 from egoallo.data.amass import EgoTrainingData
-from egoallo import network, training_loss, training_utils
+from egoallo.setup_logger import setup_logger
+
+logger = setup_logger(output=None, name=__name__)
 
 def main(
     smplh_npz_path: Path = Path("./data/smplh/neutral/model.npz"),
     data_npz_dir: Path = Path("./data/processed_30fps_no_skating/"),
-    output_file: Path = Path("./data/egoalgo_no_skating_dataset.hdf5"),
+    output_file: Path = Path("./data/test.hdf5"),
     output_list_file: Path = Path("./data/egoalgo_no_skating_dataset_files.txt"),
     include_hands: bool = True,
 ) -> None:
@@ -33,65 +36,76 @@ def main(
     total_count = task_queue.qsize()
     start_time = time.time()
 
-    output_hdf5 = h5py.File(output_file, "w")
-    file_list: list[str] = []
+    npz_path = task_queue.get_nowait()
+    train_data = EgoTrainingData.load_from_npz(
+        body_model, npz_path, include_hands=include_hands
+    )
+    EgoTrainingData.visualize_ego_training_data(ego_data=train_data, body_model=body_model)
 
-    def worker(device_idx: int) -> None:
-        device_idx = 0
-        device_body_model = body_model.to("cuda:" + str(device_idx))
+    with tempfile.NamedTemporaryFile(delete=True) as temp:
+        output_file = temp.name
+        output_hdf5 = h5py.File(output_file, "w")
+        file_list: list[str] = []
 
-        while True:
-            try:
-                npz_path = task_queue.get_nowait()
-            except queue.Empty:
-                break
+        def worker(device_idx: int) -> None:
+            device_idx = 0
+            device_body_model = body_model.to("cuda:" + str(device_idx))
 
-            print(f"Processing {npz_path} on device {device_idx}...")
-            train_data = EgoTrainingData.load_from_npz(
-                device_body_model, npz_path, include_hands=include_hands
-            )
+            while True:
+                try:
+                    npz_path = task_queue.get_nowait()
+                except queue.Empty:
+                    break
 
-            assert "processed_30fps_no_skating" in str(npz_path)
-            group_name = str(npz_path).rpartition("processed_30fps_no_skating/")[2]
-            print(f"Writing to group {group_name} on {device_idx}...")
-            group = output_hdf5.create_group(group_name)
-            file_list.append(group_name)
+                print(f"Processing {npz_path} on device {device_idx}...")
+                train_data = EgoTrainingData.load_from_npz(
+                    device_body_model, npz_path, include_hands=include_hands
+                )
+                EgoTrainingData.visualize_ego_training_data(ego_data=train_data, body_model=body_model)
 
-            # import ipdb; ipdb.set_trace()
-            for k, v in vars(train_data).items():
-                # No need to write the mask, which will always be ones when we
-                # load from the npz file!
-                if k == "mask":
-                    continue
+                assert "processed_30fps_no_skating" in str(npz_path)
+                group_name = str(npz_path).rpartition("processed_30fps_no_skating/")[2]
+                print(f"Writing to group {group_name} on {device_idx}...")
+                group = output_hdf5.create_group(group_name)
+                file_list.append(group_name)
 
-                # Chunk into 32 timesteps at a time.
-                assert v.dtype == torch.float32
-                if v.shape[0] == train_data.T_world_cpf.shape[0]:
-                    chunks = (min(32, v.shape[0]),) + v.shape[1:]
-                else:
-                    assert v.shape[0] == 1
-                    chunks = v.shape
-                group.create_dataset(k, data=v.numpy(force=True), chunks=chunks)
+                # import ipdb; ipdb.set_trace()
+                for k, v in vars(train_data).items():
+                    # No need to write the mask, which will always be ones when we
+                    # load from the npz file!
+                    if k == "mask":
+                        continue
 
-            print(
-                f"Finished ~{total_count - task_queue.qsize()}/{total_count},",
-                f"{(total_count - task_queue.qsize())/total_count * 100:.2f}% in",
-                f"{time.time() - start_time} seconds",
-            )
+                    # Chunk into 32 timesteps at a time.
+                    assert v.dtype == torch.float32
+                    if v.shape[0] == train_data.T_world_cpf.shape[0]:
+                        chunks = (min(32, v.shape[0]),) + v.shape[1:]
+                    else:
+                        assert v.shape[0] == 1
+                        chunks = v.shape
+                    group.create_dataset(k, data=v.numpy(force=True), chunks=chunks)
 
-    workers = [
-        # threading.Thread(target=worker, args=(i,))
-        # for i in range(torch.cuda.device_count())
-        threading.Thread(target=worker, args=(i,))
-        for i in range(20)
-    ]
-    for w in workers:
-        w.start()
-    for w in workers:
-        w.join()
-    output_list_file.write_text("\n".join(file_list))
+                print(
+                    f"Finished ~{total_count - task_queue.qsize()}/{total_count},",
+                    f"{(total_count - task_queue.qsize())/total_count * 100:.2f}% in",
+                    f"{time.time() - start_time} seconds",
+                )
+
+        workers = [
+            # threading.Thread(target=worker, args=(i,))
+            # for i in range(torch.cuda.device_count())
+            threading.Thread(target=worker, args=(i,))
+            for i in range(20)
+        ]
+        for w in workers:
+            w.start()
+        for w in workers:
+            w.join()
+        # output_list_file.write_text("\n".join(file_list))
 
 
 if __name__ == "__main__":
     # training_utils.pdb_safety_net()
+    from egoallo.utilities import debug_on_error
+    debug_on_error(debug=True, logger=logger)
     tyro.cli(main)

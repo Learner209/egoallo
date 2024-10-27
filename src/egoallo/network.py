@@ -2,20 +2,21 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import cache, cached_property
-from typing import Literal, assert_never
+from typing import Literal
 
 import numpy as np
 import torch
 from einops import rearrange
 from jaxtyping import Bool, Float
-from loguru import logger
 from rotary_embedding_torch import RotaryEmbedding
+from egoallo.setup_logger import setup_logger
 from torch import Tensor, nn
 
 from .fncsmpl import SmplhModel, SmplhShapedAndPosed
 from .tensor_dataclass import TensorDataclass
 from .transforms import SE3, SO3
 
+logger = setup_logger(output=None, name=__name__)
 
 def project_rotmats_via_svd(
     rotmats: Float[Tensor, "*batch 3 3"],
@@ -179,7 +180,7 @@ class EgoDenoiserConfig:
             # Both absolute and relative!
             d_cond = 24
         else:
-            assert_never(self.cond_param)
+            assert False
 
         # Add two 3D positions to the conditioning dimension if we're including
         # hand conditioning.
@@ -286,7 +287,7 @@ class EgoDenoiserConfig:
                 dim=-1,
             )
         else:
-            assert_never(self.cond_param)
+            assert False
 
         # Condition on hand poses as well.
         # We didn't use this for the paper.
@@ -481,7 +482,7 @@ class EgoDenoiser(nn.Module):
             )[None, ...].to(x_t_encoded.device)
             assert pos_enc.shape == (1, time, config.d_latent)
         else:
-            assert_never(config.positional_encoding)
+            assert False
 
         encoder_out = self.latent_from_cond(cond) + pos_enc
         decoder_out = x_t_encoded + pos_enc

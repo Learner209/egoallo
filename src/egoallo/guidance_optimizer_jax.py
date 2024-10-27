@@ -15,7 +15,7 @@ os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 import dataclasses
 import time
 from functools import partial
-from typing import Callable, Literal, Unpack, assert_never, cast
+from typing import Callable, Literal, cast, TypeVar
 
 import jax
 import jax_dataclasses as jdc
@@ -293,7 +293,7 @@ class JaxGuidanceParams:
                 ),
             }[phase]
         else:
-            assert_never(mode)
+            assert False
 
 
 def _optimize(
@@ -350,17 +350,16 @@ def _optimize(
     # We'll populate a list of factors (cost terms).
     factors = list[jaxls.Factor]()
 
-    def cost_with_args[*CostArgs](
-        *args: Unpack[tuple[*CostArgs]],
-    ) -> Callable[
-        [Callable[[jaxls.VarValues, *CostArgs], jax.Array]],
-        Callable[[jaxls.VarValues, *CostArgs], jax.Array],
-    ]:
+    CostArgs = TypeVar("CostArgs")
+
+    def cost_with_args(
+        *args: Any,
+    ) -> Callable:
         """Decorator for appending to the factor list."""
 
         def inner(
-            cost_func: Callable[[jaxls.VarValues, *CostArgs], jax.Array],
-        ) -> Callable[[jaxls.VarValues, *CostArgs], jax.Array]:
+            cost_func: Callable[[jaxls.VarValues, *args], jax.Array],
+        ) -> Callable:
             factors.append(jaxls.Factor.make(cost_func, args))
             return cost_func
 

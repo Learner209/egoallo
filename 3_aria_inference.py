@@ -31,7 +31,7 @@ from egoallo.vis_helpers import visualize_traj_and_hand_detections
 
 @dataclasses.dataclass
 class Args:
-    traj_root: Path
+    traj_root: Path = Path("./egoallo_example_trajectories/coffeemachine/")
     """Search directory for trajectories. This should generally be laid out as something like:
 
     traj_dir/
@@ -41,10 +41,11 @@ class Args:
             ...
         ...
     """
-    output_dir: Path
+    output_dir: Path = Path("./egoallo_example_trajectories/coffeemachine/")
     """Output directory for the results. It can be separated from traj_root."""
 
     checkpoint_dir: Path = Path("./egoallo_checkpoint_april13/checkpoints_3000000/")
+    # checkpoint_dir: Path = Path("./experiments/april13/v0/checkpoints_40000")
     smplh_npz_path: Path = Path("./data/smplh/neutral/model.npz")
 
     glasses_x_angle_offset: float = 0.0
@@ -55,7 +56,7 @@ class Args:
     """How many timesteps to estimate body motion for."""
     num_samples: int = 1
     """Number of samples to take."""
-    guidance_mode: GuidanceMode = "aria_hamer"
+    guidance_mode: GuidanceMode = "no_hands"
     """Which guidance mode to use."""
     guidance_inner: bool = True
     """Whether to apply guidance optimizer between denoising steps. This is
@@ -74,7 +75,7 @@ def main(args: Args) -> None:
     device = torch.device("cuda")
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    traj_paths = InferenceTrajectoryPaths.find(args.traj_root, args.output_dir, soft_link=True)
+    traj_paths = InferenceTrajectoryPaths.find(args.traj_root, args.output_dir, soft_link=False)
     if traj_paths.splat_path is not None:
         print("Found splat at", traj_paths.splat_path)
     else:
