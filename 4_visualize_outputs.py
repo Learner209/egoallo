@@ -180,7 +180,7 @@ def load_and_visualize(
 
     # Get point cloud + floor.
     points_data, floor_z = load_point_cloud_and_find_ground(
-        paths.points_path, "filtered"
+        points_path=paths.points_path, return_points= "filtered", cached_pts_path=traj_dir
     )
 
     traj = EgoDenoiseTraj(

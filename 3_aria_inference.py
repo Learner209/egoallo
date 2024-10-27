@@ -4,6 +4,9 @@ import dataclasses
 import time
 from pathlib import Path
 
+import os
+os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"]="false"
+
 import numpy as np
 import torch
 import viser
@@ -38,6 +41,9 @@ class Args:
             ...
         ...
     """
+    output_dir: Path
+    """Output directory for the results. It can be separated from traj_root."""
+
     checkpoint_dir: Path = Path("./egoallo_checkpoint_april13/checkpoints_3000000/")
     smplh_npz_path: Path = Path("./data/smplh/neutral/model.npz")
 
@@ -64,15 +70,17 @@ class Args:
 
 
 def main(args: Args) -> None:
+    # import ipdb; ipdb.set_trace()
     device = torch.device("cuda")
 
-    traj_paths = InferenceTrajectoryPaths.find(args.traj_root)
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    traj_paths = InferenceTrajectoryPaths.find(args.traj_root, args.output_dir, soft_link=True)
     if traj_paths.splat_path is not None:
         print("Found splat at", traj_paths.splat_path)
     else:
         print("No scene splat found.")
     # Get point cloud + floor.
-    points_data, floor_z = load_point_cloud_and_find_ground(traj_paths.points_path)
+    points_data, floor_z = load_point_cloud_and_find_ground(points_path=traj_paths.points_path, cached_pts_path=args.output_dir)
 
     # Read transforms from VRS / MPS, downsampled.
     transforms = InferenceInputTransforms.load(
@@ -80,6 +88,7 @@ def main(args: Args) -> None:
     ).to(device=device)
 
     # Note the off-by-one for Ts_world_cpf, which we need for relative transform computation.
+    args.traj_length = len(transforms.Ts_world_cpf) - args.start_index - 1
     Ts_world_cpf = (
         SE3(
             transforms.Ts_world_cpf[
@@ -151,10 +160,10 @@ def main(args: Args) -> None:
             time.strftime("%Y%m%d-%H%M%S")
             + f"_{args.start_index}-{args.start_index + args.traj_length}"
         )
-        out_path = args.traj_root / "egoallo_outputs" / (save_name + ".npz")
+        out_path = args.output_dir / "egoallo_outputs" / (save_name + ".npz")
         out_path.parent.mkdir(parents=True, exist_ok=True)
         assert not out_path.exists()
-        (args.traj_root / "egoallo_outputs" / (save_name + "_args.yaml")).write_text(
+        (args.output_dir / "egoallo_outputs" / (save_name + "_args.yaml")).write_text(
             yaml.dump(dataclasses.asdict(args))
         )
 

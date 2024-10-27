@@ -47,12 +47,12 @@ def run_hamer_and_save(
 ) -> None:
     if not overwrite:
         assert not pickle_out.exists()
-        assert not hamer_render_out.exists()
+        # assert not hamer_render_out.exists()
     else:
         pickle_out.unlink(missing_ok=True)
-        shutil.rmtree(hamer_render_out, ignore_errors=True)
+        # shutil.rmtree(hamer_render_out, ignore_errors=True)
 
-    hamer_render_out.mkdir(exist_ok=True)
+    # hamer_render_out.mkdir(exist_ok=True)
     hamer_helper = HamerHelper()
 
     # VRS data provider setup.
@@ -131,62 +131,62 @@ def run_hamer_and_save(
                 "mano_hand_global_orient": hamer_out_right["mano_hand_global_orient"],
             }
 
-        composited = undistorted_image
-        composited = hamer_helper.composite_detections(
-            composited,
-            hamer_out_left,
-            border_color=(255, 100, 100),
-            focal_length=450,
-        )
-        composited = hamer_helper.composite_detections(
-            composited,
-            hamer_out_right,
-            border_color=(100, 100, 255),
-            focal_length=450,
-        )
-        composited = put_text(
-            composited,
-            "L detections: "
-            + (
-                "0" if hamer_out_left is None else str(hamer_out_left["verts"].shape[0])
-            ),
-            0,
-            color=(255, 100, 100),
-            font_scale=10.0 / 2880.0 * undistorted_image.shape[0],
-        )
-        composited = put_text(
-            composited,
-            "R detections: "
-            + (
-                "0"
-                if hamer_out_right is None
-                else str(hamer_out_right["verts"].shape[0])
-            ),
-            1,
-            color=(100, 100, 255),
-            font_scale=10.0 / 2880.0 * undistorted_image.shape[0],
-        )
-        composited = put_text(
-            composited,
-            f"ns={timestamp_ns}",
-            2,
-            color=(255, 255, 255),
-            font_scale=10.0 / 2880.0 * undistorted_image.shape[0],
-        )
+        # composited = undistorted_image
+        # composited = hamer_helper.composite_detections(
+        #     composited,
+        #     hamer_out_left,
+        #     border_color=(255, 100, 100),
+        #     focal_length=450,
+        # )
+        # composited = hamer_helper.composite_detections(
+        #     composited,
+        #     hamer_out_right,
+        #     border_color=(100, 100, 255),
+        #     focal_length=450,
+        # )
+        # composited = put_text(
+        #     composited,
+        #     "L detections: "
+        #     + (
+        #         "0" if hamer_out_left is None else str(hamer_out_left["verts"].shape[0])
+        #     ),
+        #     0,
+        #     color=(255, 100, 100),
+        #     font_scale=10.0 / 2880.0 * undistorted_image.shape[0],
+        # )
+        # composited = put_text(
+        #     composited,
+        #     "R detections: "
+        #     + (
+        #         "0"
+        #         if hamer_out_right is None
+        #         else str(hamer_out_right["verts"].shape[0])
+        #     ),
+        #     1,
+        #     color=(100, 100, 255),
+        #     font_scale=10.0 / 2880.0 * undistorted_image.shape[0],
+        # )
+        # composited = put_text(
+        #     composited,
+        #     f"ns={timestamp_ns}",
+        #     2,
+        #     color=(255, 255, 255),
+        #     font_scale=10.0 / 2880.0 * undistorted_image.shape[0],
+        # )
 
-        print(f"Saving image {i:06d} to {hamer_render_out / f'{i:06d}.jpeg'}")
-        iio.imwrite(
-            str(hamer_render_out / f"{i:06d}.jpeg"),
-            np.concatenate(
-                [
-                    # Darken input image, just for contrast...
-                    (undistorted_image * 0.6).astype(np.uint8),
-                    composited,
-                ],
-                axis=1,
-            ),
-            quality=90,
-        )
+        # print(f"Saving image {i:06d} to {hamer_render_out / f'{i:06d}.jpeg'}")
+        # iio.imwrite(
+        #     str(hamer_render_out / f"{i:06d}.jpeg"),
+        #     np.concatenate(
+        #         [
+        #             # Darken input image, just for contrast...
+        #             (undistorted_image * 0.6).astype(np.uint8),
+        #             composited,
+        #         ],
+        #         axis=1,
+        #     ),
+        #     quality=90,
+        # )
 
     outputs = SavedHamerOutputs(
         mano_faces_right=hamer_helper.get_mano_faces("right"),

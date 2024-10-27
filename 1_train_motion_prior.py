@@ -21,9 +21,9 @@ from egoallo.data.dataclass import collate_dataclass
 
 @dataclasses.dataclass(frozen=True)
 class EgoAlloTrainConfig:
-    experiment_name: str
-    dataset_hdf5_path: Path
-    dataset_files_path: Path
+    experiment_name: str = "april13"
+    dataset_hdf5_path: Path = Path("./data/egoalgo_no_skating_dataset.hdf5")
+    dataset_files_path: Path = Path("./data/egoalgo_no_skating_dataset_files.txt")
 
     model: network.EgoDenoiserConfig = network.EgoDenoiserConfig()
     loss: training_loss.TrainingLossConfig = training_loss.TrainingLossConfig()
@@ -41,6 +41,8 @@ class EgoAlloTrainConfig:
     train_splits: tuple[Literal["train", "val", "test", "just_humaneva"], ...] = (
         "train",
         "val",
+        "test",
+        "just_humaneva"
     )
 
     # Optimizer options.
@@ -201,8 +203,8 @@ def run_training(
                 logger.info(
                     f"step: {step} ({loop_metrics.iterations_per_sec:.2f} it/sec)"
                     f" mem: {(mem_total-mem_free)/1024**3:.2f}/{mem_total/1024**3:.2f}G"
-                    f" lr: {scheduler.get_last_lr()[0]:.7f}"
-                    f" loss: {loss.item():.6f}"
+                    f" lr: {scheduler.get_last_lr()[0]:.7e}"
+                    f" loss: {loss.item():.6e}"
                 )
 
             # Checkpointing.

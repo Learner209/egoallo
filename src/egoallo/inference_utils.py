@@ -62,9 +62,13 @@ class InferenceTrajectoryPaths:
     splat_path: Path | None
 
     @staticmethod
-    def find(traj_root: Path) -> InferenceTrajectoryPaths:
-        vrs_files = tuple(traj_root.glob("**/*.vrs"))
-        assert len(vrs_files) == 1, f"Found {len(vrs_files)} VRS files!"
+    def find(traj_root: Path, output_dir: Path | None = None, soft_link=False) -> InferenceTrajectoryPaths:
+        vrs_files = tuple(traj_root.glob("**/aria01.vrs"))
+        assert len(vrs_files) == 1, f"Found {len(vrs_files)} VRS files, {vrs_files}!"
+        if output_dir is not None and output_dir.exists() and soft_link:
+            vrs_file = output_dir / vrs_files[0].name
+            if not vrs_file.exists():
+                vrs_file.symlink_to(vrs_files[0])
 
         points_paths = tuple(traj_root.glob("**/semidense_points.csv.gz"))
         assert len(points_paths) <= 1, f"Found multiple points files! {points_paths}"
@@ -72,9 +76,18 @@ class InferenceTrajectoryPaths:
             points_paths = tuple(traj_root.glob("**/global_points.csv.gz"))
         assert len(points_paths) == 1, f"Found {len(points_paths)} files!"
 
+        if output_dir is not None and output_dir.exists() and soft_link:
+            points_path = output_dir / points_paths[0].name
+            if not points_path.exists():
+                points_path.symlink_to(points_paths[0])
+
         hamer_outputs = traj_root / "hamer_outputs.pkl"
         if not hamer_outputs.exists():
             hamer_outputs = None
+        elif output_dir is not None and output_dir.exists() and soft_link:
+            hamer_outputs = output_dir / hamer_outputs.name
+            if not hamer_outputs.exists():
+                hamer_outputs.symlink_to(hamer_outputs)
 
         wrist_and_palm_poses_csv = tuple(traj_root.glob("**/wrist_and_palm_poses.csv"))
         if len(wrist_and_palm_poses_csv) == 0:
@@ -83,6 +96,10 @@ class InferenceTrajectoryPaths:
             assert (
                 len(wrist_and_palm_poses_csv) == 1
             ), "Found multiple wrist and palm poses files!"
+            if output_dir is not None and output_dir.exists() and soft_link:
+                wrist_and_palm_poses_csv_path = output_dir / wrist_and_palm_poses_csv[0].name
+                if not wrist_and_palm_poses_csv_path.exists():
+                    wrist_and_palm_poses_csv_path.symlink_to(wrist_and_palm_poses_csv[0])
 
         splat_path = traj_root / "splat.ply"
         if not splat_path.exists():
@@ -92,6 +109,10 @@ class InferenceTrajectoryPaths:
             splat_path = None
         else:
             print("Found splat at", splat_path)
+            if output_dir is not None and output_dir.exists() and soft_link:
+                splat_path = output_dir / splat_path.name
+                if not splat_path.exists():
+                    splat_path.symlink_to(splat_path)
 
         return InferenceTrajectoryPaths(
             vrs_file=vrs_files[0],

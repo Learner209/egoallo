@@ -12,7 +12,7 @@ import tyro
 
 from egoallo import fncsmpl
 from egoallo.data.amass import EgoTrainingData
-
+from egoallo import network, training_loss, training_utils
 
 def main(
     smplh_npz_path: Path = Path("./data/smplh/neutral/model.npz"),
@@ -26,6 +26,7 @@ def main(
     assert torch.cuda.is_available()
 
     task_queue = queue.Queue[Path]()
+    print(f"Loading paths: {list(data_npz_dir.glob('**/*.npz'))}")
     for path in list(data_npz_dir.glob("**/*.npz")):
         task_queue.put_nowait(path)
 
@@ -36,6 +37,7 @@ def main(
     file_list: list[str] = []
 
     def worker(device_idx: int) -> None:
+        device_idx = 0
         device_body_model = body_model.to("cuda:" + str(device_idx))
 
         while True:
@@ -49,12 +51,13 @@ def main(
                 device_body_model, npz_path, include_hands=include_hands
             )
 
-            assert "neutral" in str(npz_path)
-            group_name = str(npz_path).rpartition("neutral/")[2]
+            assert "processed_30fps_no_skating" in str(npz_path)
+            group_name = str(npz_path).rpartition("processed_30fps_no_skating/")[2]
             print(f"Writing to group {group_name} on {device_idx}...")
             group = output_hdf5.create_group(group_name)
             file_list.append(group_name)
 
+            # import ipdb; ipdb.set_trace()
             for k, v in vars(train_data).items():
                 # No need to write the mask, which will always be ones when we
                 # load from the npz file!
@@ -77,8 +80,10 @@ def main(
             )
 
     workers = [
+        # threading.Thread(target=worker, args=(i,))
+        # for i in range(torch.cuda.device_count())
         threading.Thread(target=worker, args=(i,))
-        for i in range(torch.cuda.device_count())
+        for i in range(20)
     ]
     for w in workers:
         w.start()
@@ -88,4 +93,5 @@ def main(
 
 
 if __name__ == "__main__":
+    # training_utils.pdb_safety_net()
     tyro.cli(main)

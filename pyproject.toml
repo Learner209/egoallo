@@ -67,8 +67,8 @@ include = ["src"]
 exclude = [
     "**/node_modules",
     "**/__pycache__",
-    "third_party/apex",
-    "third_party/hamer",
+    "assets/",
 ]
 ignore = [
+    "third_party",
 ]

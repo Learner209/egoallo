@@ -15,6 +15,7 @@ htmlcov
 .envrc
 lightning_logs/
 outputs/
+experiments/
 
 datasets/
 

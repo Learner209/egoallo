@@ -1,0 +1,14 @@
+{
+	"files": [
+		{
+			"path": "src/egoallo/data/amass.py",
+			"bookmarks": [
+				{
+					"line": 11,
+					"column": 13,
+					"label": "amass_splits"
+				}
+			]
+		}
+	]
+}

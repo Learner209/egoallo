@@ -1,3 +1,6 @@
 [submodule "third_party/hamer"]
 	path = third_party/hamer
 	url = git@github.com:Learner209/hamer.git
+[submodule "third_party/humor"]
+	path = third_party/humor
+	url = git@github.com:Learner209/humor.git

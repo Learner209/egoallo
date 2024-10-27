@@ -9,13 +9,18 @@ from projectaria_tools.core.mps.utils import filter_points_from_confidence
 def load_point_cloud_and_find_ground(
     points_path: Path,
     return_points: Literal["all", "filtered", "less_filtered"] = "less_filtered",
+    cached_pts_path: Path | None = None,
 ) -> tuple[np.ndarray, float]:
     """Load an Aria MPS point cloud and find the ground plane."""
 
-    filtered_points_npz_cache_path = points_path.parent / "_cached_filtered_points.npz"
-    less_filtered_points_npz_cache_path = (
-        points_path.parent / "_cached_less_filtered_points.npz"
-    )
+    if cached_pts_path is None:
+        filtered_points_npz_cache_path = points_path.parent / "_cached_filtered_points.npz"
+        less_filtered_points_npz_cache_path = (
+            points_path.parent / "_cached_less_filtered_points.npz"
+        )
+    else:
+        filtered_points_npz_cache_path = cached_pts_path / "_cached_filtered_points.npz"
+        less_filtered_points_npz_cache_path = cached_pts_path / "_cached_less_filtered_points.npz"
 
     # Read world points as an Nx3 array.
     if (

@@ -86,7 +86,7 @@ class EgoTrainingData(TensorDataclass):
         hand_quats = tf.SO3.exp(raw_fields["pose_hand"].reshape(timesteps, 30, 3)).wxyz
 
         device = body_model.weights.device
-        shaped = body_model.with_shape(raw_fields["betas"][0:1, :].to(device))
+        shaped = body_model.with_shape(raw_fields["betas"][None].to(device))
 
         # Batch the SMPL body model operations, this can be pretty memory-intensive...
         posed = shaped.with_pose_decomposed(
@@ -102,7 +102,7 @@ class EgoTrainingData(TensorDataclass):
         return EgoTrainingData(
             T_world_root=T_world_root[1:].cpu(),
             contacts=raw_fields["contacts"][1:, 1:].cpu(),  # Root is no longer a joint.
-            betas=raw_fields["betas"][0:1, :].cpu(),
+            betas=raw_fields["betas"][None].cpu(),
             # joints_wrt_world=raw_fields["joints"][
             #     1:, 1:
             # ].cpu(),  # Root is no longer a joint.
