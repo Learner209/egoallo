@@ -147,6 +147,7 @@ class InferenceInputTransforms(TensorDataclass):
         if not closed_loop_path.exists():
             # Aria digital twins.
             closed_loop_path = slam_root_dir / "aria_trajectory.csv"
+        # import ipdb; ipdb.set_trace()
         closed_loop_traj = mps.read_closed_loop_trajectory(str(closed_loop_path))  # type: ignore
 
         provider = create_vrs_data_provider(str(vrs_path))

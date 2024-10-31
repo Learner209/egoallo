@@ -19,6 +19,9 @@ from .hand_detection_structs import (
 )
 from .tensor_dataclass import TensorDataclass
 from .transforms import SE3
+from src.egoallo.setup_logger import setup_logger
+
+logger = setup_logger(output=None, name=__name__)
 
 
 def quadratic_ts() -> np.ndarray:
@@ -122,8 +125,9 @@ def run_sampling_with_stitching(
         .to(device)
         .to(torch.float32)
     )
+    start_time = time.time()
     for i in tqdm(range(len(ts) - 1)):
-        print(f"Sampling {i}/{len(ts) - 1}")
+        print(f"Sampling {i}/{len(ts) - 1}, Overall size: {seq_len}")
         t = ts[i]
         t_next = ts[i + 1]
 
@@ -212,6 +216,8 @@ def run_sampling_with_stitching(
                 x_t_packed, include_hands=denoiser_network.config.include_hands
             )
         )
+    duration = time.time() - start_time
+    logger.info(f"RUNTIME: {duration:.6f}, SEQ_LEN: {seq_len:2d}, FPS: {seq_len / duration:.2f}")
 
     if guidance_mode != "off" and guidance_post:
         constrained_traj = x_t_list[-1]
@@ -232,3 +238,161 @@ def run_sampling_with_stitching(
         assert start_time is not None
         print("RUNTIME (exclude first optimization)", time.time() - start_time)
         return x_t_list[-1]
+
+def real_time_sampling_with_stitching(
+    denoiser_network: network.EgoDenoiser,
+    body_model: fncsmpl.SmplhModel,
+    guidance_mode: GuidanceMode,
+    guidance_post: bool,
+    guidance_inner: bool,
+    Ts_world_cpf: Float[Tensor, "time 7"],
+    floor_z: float,
+    hamer_detections: None | CorrespondedHamerDetections,
+    aria_detections: None | CorrespondedAriaHandWristPoseDetections,
+    num_samples: int,
+    device: torch.device,
+) -> network.EgoDenoiseTraj:
+    # Offset the T_world_cpf transform to place the floor at z=0 for the
+    # denoiser network. All of the network outputs are local, so we don't need to
+    # unoffset when returning.
+    Ts_world_cpf_shifted = Ts_world_cpf.clone()
+    Ts_world_cpf_shifted[..., 6] -= floor_z
+
+    noise_constants = CosineNoiseScheduleConstants.compute(timesteps=1000).to(
+        device=device
+    )
+    alpha_bar_t = noise_constants.alpha_bar_t
+    alpha_t = noise_constants.alpha_t
+
+    T_cpf_tm1_cpf_t = (
+        SE3(Ts_world_cpf[..., :-1, :]).inverse() @ SE3(Ts_world_cpf[..., 1:, :])
+    ).wxyz_xyz
+
+    x_t_packed = torch.randn(
+        (num_samples, Ts_world_cpf.shape[0] - 1, denoiser_network.get_d_state()),
+        device=device,
+    )
+
+    ts = quadratic_ts()
+
+    seq_len = x_t_packed.shape[1]
+
+    start_time = None
+
+    window_size = 128
+    overlap_size = 32
+    canonical_overlap_weights = (
+        torch.from_numpy(
+            np.minimum(
+                # Make this shape /```\
+                overlap_size,
+                np.minimum(
+                    # Make this shape: /
+                    np.arange(1, seq_len + 1),
+                    # Make this shape: \
+                    np.arange(1, seq_len + 1)[::-1],
+                ),
+            )
+            / overlap_size,
+        )
+        .to(device)
+        .to(torch.float32)
+    )
+    start_time = time.time()
+    # Chop everything into windows.
+    x_0_packed_pred = torch.zeros_like(x_t_packed)
+    overlap_weights = torch.zeros((1, seq_len, 1), device=x_t_packed.device)
+    sigma_t = torch.cat(
+        [
+            torch.zeros((1,), device=device),
+            torch.sqrt(
+                (1.0 - alpha_bar_t[:-1]) / (1 - alpha_bar_t[1:]) * (1 - alpha_t)
+            )
+            * 0.8,
+        ]
+    )
+    
+    # Denoise each window.
+    with torch.inference_mode():
+        for start_t in tqdm(range(0, seq_len, window_size - overlap_size)):
+            end_t = min(start_t + window_size, seq_len)
+            assert end_t - start_t > 0
+            overlap_weights_slice = canonical_overlap_weights[
+                None, : end_t - start_t, None
+            ]
+            overlap_weights[:, start_t:end_t, :] += overlap_weights_slice
+
+            x_t_packed_pred_slice = x_t_packed[:, start_t:end_t, :]
+    
+            for i in tqdm(range(len(ts) - 1)):
+                t = ts[i]
+                t_next = ts[i + 1]
+
+                
+                x_0_packed_pred_slice = denoiser_network.forward(
+                        x_t_packed_pred_slice,
+                        torch.tensor([t], device=device).expand((num_samples,)),
+                        T_cpf_tm1_cpf_t=T_cpf_tm1_cpf_t[None, start_t:end_t, :].repeat(
+                            (num_samples, 1, 1)
+                        ),
+                        T_world_cpf=Ts_world_cpf_shifted[
+                            None, start_t + 1 : end_t + 1, :
+                        ].repeat((num_samples, 1, 1)),
+                        project_output_rotmats=False,
+                        hand_positions_wrt_cpf=None,  # TODO: this should be filled in!!
+                        mask=None,
+                    ) * overlap_weights_slice
+
+                # print(sigma_t)
+                x_t_packed_pred_slice = (
+                    torch.sqrt(alpha_bar_t[t_next]) * x_0_packed_pred_slice
+                    + (
+                        torch.sqrt(1 - alpha_bar_t[t_next] - sigma_t[t] ** 2)
+                        * (x_t_packed_pred_slice - torch.sqrt(alpha_bar_t[t]) * x_0_packed_pred_slice)
+                        / torch.sqrt(1 - alpha_bar_t[t] + 1e-1)
+                    )
+                    + sigma_t[t] * torch.randn(x_0_packed_pred_slice.shape, device=device)
+                )
+
+            if guidance_mode != "off" and guidance_post:
+                constrained_traj = network.EgoDenoiseTraj.unpack(
+                    x_t_packed_pred_slice,
+                    include_hands=denoiser_network.config.include_hands,
+                    project_rotmats=True,
+                )
+                constrained_traj, _ = do_guidance_optimization(
+                    # It's important that we _don't_ use the shifted transforms here.
+                    Ts_world_cpf=Ts_world_cpf[start_t+1:end_t+1, :],
+                    traj=constrained_traj,
+                    body_model=body_model,
+                    guidance_mode=guidance_mode,
+                    phase="post",
+                    hamer_detections=hamer_detections,
+                    aria_detections=aria_detections,
+                )
+                assert start_time is not None
+                print("RUNTIME (exclude first optimization)", time.time() - start_time)
+                x_0_packed_pred[:, start_t:end_t, :] += constrained_traj.pack()
+            else:
+                assert start_time is not None
+                print("RUNTIME (exclude first optimization)", time.time() - start_time)
+                x_0_packed_pred[:, start_t:end_t, :] += x_t_packed_pred_slice
+
+
+    # Take the mean for overlapping regions.
+    x_0_packed_pred /= overlap_weights
+
+    x_0_packed_pred = network.EgoDenoiseTraj.unpack(
+        x_0_packed_pred,
+        include_hands=denoiser_network.config.include_hands,
+        project_rotmats=True,
+    )
+
+    if torch.any(torch.isnan(x_0_packed_pred.pack())):
+        raise RuntimeWarning("found nan")
+    
+    duration = time.time() - start_time
+    logger.info(f"RUNTIME: {duration:.6f}, SEQ_LEN: {seq_len:2d}, FPS: {seq_len / duration:.2f}")
+
+    return x_0_packed_pred
+

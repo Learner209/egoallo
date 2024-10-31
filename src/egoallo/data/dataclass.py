@@ -32,11 +32,11 @@ from .. import fncsmpl, fncsmpl_extensions
 from .. import transforms as tf
 from ..tensor_dataclass import TensorDataclass
 import numpy as np
-from blendify import scene
-from blendify.colors import UniformColors, FacesUV, FileTextureColors
-from blendify.materials import PrincipledBSDFMaterial
-from blendify.utils.image import blend_with_background
-from blendify.utils.smpl_wrapper import SMPLWrapper
+# from blendify import scene
+# from blendify.colors import UniformColors, FacesUV, FileTextureColors
+# from blendify.materials import PrincipledBSDFMaterial
+# from blendify.utils.image import blend_with_background
+# from blendify.utils.smpl_wrapper import SMPLWrapper
 
 from egoallo.setup_logger import setup_logger
 from egoallo.fncsmpl import SmplhModel, SmplhShaped, SmplhShapedAndPosed, SmplMesh

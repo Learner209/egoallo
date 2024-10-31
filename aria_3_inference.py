@@ -24,9 +24,10 @@ from egoallo.inference_utils import (
     InferenceTrajectoryPaths,
     load_denoiser,
 )
-from egoallo.sampling import run_sampling_with_stitching
+from egoallo.sampling import run_sampling_with_stitching, real_time_sampling_with_stitching
 from egoallo.transforms import SE3, SO3
 from egoallo.vis_helpers import visualize_traj_and_hand_detections
+from egoallo.training_utils import pdb_safety_net, ipdb_safety_net
 
 
 @dataclasses.dataclass
@@ -58,7 +59,7 @@ class Args:
     """Number of samples to take."""
     guidance_mode: GuidanceMode = "no_hands"
     """Which guidance mode to use."""
-    guidance_inner: bool = True
+    guidance_inner: bool = False
     """Whether to apply guidance optimizer between denoising steps. This is
     important if we're doing anything with hands. It can be turned off to speed
     up debugging/experiments, or if we only care about foot skating losses."""
@@ -71,9 +72,12 @@ class Args:
 
 
 def main(args: Args) -> None:
+
     # import ipdb; ipdb.set_trace()
+
     device = torch.device("cuda")
 
+    # import ipdb; ipdb.set_trace()
     args.output_dir.mkdir(parents=True, exist_ok=True)
     traj_paths = InferenceTrajectoryPaths.find(args.traj_root, args.output_dir, soft_link=False)
     if traj_paths.splat_path is not None:
@@ -141,7 +145,8 @@ def main(args: Args) -> None:
     denoiser_network = load_denoiser(args.checkpoint_dir).to(device)
     body_model = fncsmpl.SmplhModel.load(args.smplh_npz_path).to(device)
 
-    traj = run_sampling_with_stitching(
+    # traj = run_sampling_with_stitching(
+    traj = real_time_sampling_with_stitching(
         denoiser_network,
         body_model=body_model,
         guidance_mode=args.guidance_mode,
@@ -159,7 +164,7 @@ def main(args: Args) -> None:
     if args.save_traj:
         save_name = (
             time.strftime("%Y%m%d-%H%M%S")
-            + f"_{args.start_index}-{args.start_index + args.traj_length}"
+            + f"_start_{args.start_index}_end_{args.start_index + args.traj_length}_guidance_mode_{args.guidance_mode}_guidance_post_{args.guidance_post}"
         )
         out_path = args.output_dir / "egoallo_outputs" / (save_name + ".npz")
         out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -207,5 +212,6 @@ def main(args: Args) -> None:
 
 if __name__ == "__main__":
     import tyro
+    ipdb_safety_net()
 
     main(tyro.cli(Args))

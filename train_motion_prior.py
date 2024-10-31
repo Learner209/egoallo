@@ -15,6 +15,7 @@ from accelerate.utils import ProjectConfiguration
 
 from egoallo import network, training_loss, training_utils
 from egoallo.data.amass import EgoAmassHdf5Dataset
+from egoallo.data.amass_dataset_dynamic import EgoAmassHdf5DatasetDynamic
 from egoallo.data.dataclass import collate_dataclass
 from egoallo.setup_logger import setup_logger
 
@@ -37,7 +38,7 @@ class EgoAlloTrainConfig:
     subseq_len: int = 128
     dataset_slice_strategy: Literal[
         "deterministic", "random_uniform_len", "random_variable_len"
-    ] = "random_uniform_len"
+    ] = "deterministic"
     dataset_slice_random_variable_len_proportion: float = 0.3
     """Only used if dataset_slice_strategy == 'random_variable_len'."""
     train_splits: tuple[Literal["train", "val", "test", "just_humaneva"], ...] = (
@@ -108,13 +109,22 @@ def run_training(
         )
 
         # Write logs to file.
-        logger.add(experiment_dir / "trainlog.log", rotation="100 MB")
+        # logger.add(experiment_dir / "trainlog.log", rotation="100 MB")
 
     # Setup.
     # import ipdb; ipdb.set_trace()
     model = network.EgoDenoiser(config.model)
     train_loader = torch.utils.data.DataLoader(
-        dataset=EgoAmassHdf5Dataset(
+        # dataset=EgoAmassHdf5Dataset(
+        #     config.dataset_hdf5_path,
+        #     config.dataset_files_path,
+        #     splits=config.train_splits,
+        #     subseq_len=config.subseq_len,
+        #     cache_files=True,
+        #     slice_strategy=config.dataset_slice_strategy,
+        #     random_variable_len_proportion=config.dataset_slice_random_variable_len_proportion,
+        # ),
+        dataset=EgoAmassHdf5DatasetDynamic(
             config.dataset_hdf5_path,
             config.dataset_files_path,
             splits=config.train_splits,
