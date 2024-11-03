@@ -9,6 +9,21 @@
 					"label": "amass_splits"
 				}
 			]
+		},
+		{
+			"path": "aria_3_inference.py",
+			"bookmarks": [
+				{
+					"line": 75,
+					"column": 0,
+					"label": "inference_ipdb"
+				},
+				{
+					"line": 147,
+					"column": 0,
+					"label": "run_sampling_with_stitching"
+				}
+			]
 		}
 	]
 }

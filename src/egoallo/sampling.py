@@ -125,6 +125,9 @@ def run_sampling_with_stitching(
         .to(device)
         .to(torch.float32)
     )
+
+    # canonical_overlap_weights = torch.ones((seq_len,), device=x_t_packed.device)
+
     start_time = time.time()
     for i in tqdm(range(len(ts) - 1)):
         print(f"Sampling {i}/{len(ts) - 1}, Overall size: {seq_len}")
@@ -181,6 +184,8 @@ def run_sampling_with_stitching(
                 * 0.8,
             ]
         )
+        sigma_t = sigma_t.to(device)
+        
 
         if guidance_mode != "off" and guidance_inner:
             x_0_pred, _ = do_guidance_optimization(
@@ -191,7 +196,7 @@ def run_sampling_with_stitching(
                 ),
                 body_model=body_model,
                 guidance_mode=guidance_mode,
-                phase="inner",
+                phase="inner", 
                 hamer_detections=hamer_detections,
                 aria_detections=aria_detections,
             )
@@ -280,7 +285,7 @@ def real_time_sampling_with_stitching(
     start_time = None
 
     window_size = 128
-    overlap_size = 32
+    overlap_size = 64
     canonical_overlap_weights = (
         torch.from_numpy(
             np.minimum(
@@ -311,76 +316,81 @@ def real_time_sampling_with_stitching(
             * 0.8,
         ]
     )
-    
-    # Denoise each window.
+        
     with torch.inference_mode():
+        prev_window_x_t = None  # Store the latent representations from the previous window
+
         for start_t in tqdm(range(0, seq_len, window_size - overlap_size)):
             end_t = min(start_t + window_size, seq_len)
-            assert end_t - start_t > 0
-            overlap_weights_slice = canonical_overlap_weights[
-                None, : end_t - start_t, None
-            ]
+            window_len = end_t - start_t
+            assert window_len > 0
+
+            overlap_weights_slice = canonical_overlap_weights[start_t:end_t][None, :, None]
             overlap_weights[:, start_t:end_t, :] += overlap_weights_slice
 
-            x_t_packed_pred_slice = x_t_packed[:, start_t:end_t, :]
-    
-            for i in tqdm(range(len(ts) - 1)):
+            # Initialize x_t_packed for the current window
+            x_t_packed_slice = torch.randn(
+                (num_samples, window_len, denoiser_network.get_d_state()), device=device
+            )
+
+
+            # Denoising timesteps
+            ts = quadratic_ts()
+            x_0_packed_pred_slice = None
+            for i in range(len(ts) - 1):
                 t = ts[i]
                 t_next = ts[i + 1]
 
-                
-                x_0_packed_pred_slice = denoiser_network.forward(
-                        x_t_packed_pred_slice,
-                        torch.tensor([t], device=device).expand((num_samples,)),
-                        T_cpf_tm1_cpf_t=T_cpf_tm1_cpf_t[None, start_t:end_t, :].repeat(
-                            (num_samples, 1, 1)
-                        ),
-                        T_world_cpf=Ts_world_cpf_shifted[
-                            None, start_t + 1 : end_t + 1, :
-                        ].repeat((num_samples, 1, 1)),
-                        project_output_rotmats=False,
-                        hand_positions_wrt_cpf=None,  # TODO: this should be filled in!!
-                        mask=None,
-                    ) * overlap_weights_slice
+                # Blend the latent representations in the overlapping region
+                if prev_window_x_t is not None:
+                    num_overlap = min(overlap_size, end_t - start_t)
+                    # Initialize overlapping region with previous output
+                    x_t_packed_slice[:, :num_overlap, :] = prev_window_x_t[:, -num_overlap:, :]
 
-                # print(sigma_t)
-                x_t_packed_pred_slice = (
+                x_0_packed_pred_slice = denoiser_network.forward(
+                    x_t_packed_slice,
+                    torch.full((num_samples,), t, device=device),
+                    T_cpf_tm1_cpf_t=T_cpf_tm1_cpf_t[None, start_t:end_t, :].repeat(num_samples, 1, 1),
+                    T_world_cpf=Ts_world_cpf_shifted[None, start_t + 1:end_t + 1, :].repeat(num_samples, 1, 1),
+                    project_output_rotmats=False,
+                    hand_positions_wrt_cpf=None,
+                    mask=None,
+                )
+
+                x_t_packed_slice = (
                     torch.sqrt(alpha_bar_t[t_next]) * x_0_packed_pred_slice
                     + (
                         torch.sqrt(1 - alpha_bar_t[t_next] - sigma_t[t] ** 2)
-                        * (x_t_packed_pred_slice - torch.sqrt(alpha_bar_t[t]) * x_0_packed_pred_slice)
+                        * (x_t_packed_slice - torch.sqrt(alpha_bar_t[t]) * x_0_packed_pred_slice)
                         / torch.sqrt(1 - alpha_bar_t[t] + 1e-1)
                     )
-                    + sigma_t[t] * torch.randn(x_0_packed_pred_slice.shape, device=device)
+                    + sigma_t[t] * torch.randn_like(x_0_packed_pred_slice)
                 )
 
             if guidance_mode != "off" and guidance_post:
-                constrained_traj = network.EgoDenoiseTraj.unpack(
-                    x_t_packed_pred_slice,
-                    include_hands=denoiser_network.config.include_hands,
-                    project_rotmats=True,
-                )
-                constrained_traj, _ = do_guidance_optimization(
+                x_0_packed_pred_slice, _ = do_guidance_optimization(
                     # It's important that we _don't_ use the shifted transforms here.
-                    Ts_world_cpf=Ts_world_cpf[start_t+1:end_t+1, :],
-                    traj=constrained_traj,
+                    Ts_world_cpf=Ts_world_cpf[1 + start_t:end_t + 1, :],
+                    traj=network.EgoDenoiseTraj.unpack(
+                        x_0_packed_pred_slice, include_hands=denoiser_network.config.include_hands
+                    ),
                     body_model=body_model,
                     guidance_mode=guidance_mode,
-                    phase="post",
+                    phase="post", 
                     hamer_detections=hamer_detections,
                     aria_detections=aria_detections,
                 )
-                assert start_time is not None
-                print("RUNTIME (exclude first optimization)", time.time() - start_time)
-                x_0_packed_pred[:, start_t:end_t, :] += constrained_traj.pack()
+                x_0_packed_pred_slice = x_0_packed_pred_slice.pack()
+
+            # Store the latent representations for the next window
+            prev_window_x_t = x_0_packed_pred_slice.clone()
+
+            # Accumulate the denoised outputs
+            if start_t > 0:
+                x_0_packed_pred[:, start_t + overlap_size : end_t, :] = x_0_packed_pred_slice[:, overlap_size:, :]
             else:
-                assert start_time is not None
-                print("RUNTIME (exclude first optimization)", time.time() - start_time)
-                x_0_packed_pred[:, start_t:end_t, :] += x_t_packed_pred_slice
+                x_0_packed_pred[:, start_t : end_t, :] = x_0_packed_pred_slice 
 
-
-    # Take the mean for overlapping regions.
-    x_0_packed_pred /= overlap_weights
 
     x_0_packed_pred = network.EgoDenoiseTraj.unpack(
         x_0_packed_pred,

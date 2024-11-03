@@ -67,7 +67,7 @@ class Args:
     """Whether to apply guidance optimizer after diffusion sampling."""
     save_traj: bool = True
     """Whether to save the output trajectory, which will be placed under `traj_dir/egoallo_outputs/some_name.npz`."""
-    visualize_traj: bool = False
+    visualize_traj: bool = True
     """Whether to visualize the trajectory after sampling."""
 
 
