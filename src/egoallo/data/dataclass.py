@@ -22,7 +22,7 @@ import torch.utils.data
 from tqdm import tqdm
 import typeguard
 from jaxtyping import Bool, Float, jaxtyped
-from typing import TypeVar
+from typing import TypeVar, Optional
 from torch import Tensor
 import trimesh
 
@@ -57,13 +57,6 @@ class EgoTrainingData(TensorDataclass):
     betas: Float[Tensor, "*#batch 1 16"]
     """Body shape parameters."""
 
-    # Excluded because not needed.
-    # joints_wrt_world: Float[Tensor, "*#batch timesteps 21 3"]
-    # """Joint positions relative to the world frame."""
-    @property
-    def joints_wrt_world(self) -> Tensor:
-        return tf.SE3(self.T_world_cpf[..., None, :]) @ self.joints_wrt_cpf
-
     body_quats: Float[Tensor, "*#batch timesteps 21 4"]
     """Local orientations for each body joint."""
 
@@ -85,6 +78,29 @@ class EgoTrainingData(TensorDataclass):
 
     hand_quats: Float[Tensor, "*#batch timesteps 30 4"] | None
     """Local orientations for each hand joint."""
+
+    prev_window: Optional[EgoTrainingData] = None
+    """Previous window of training data for conditioning."""
+
+    @property
+    def joints_wrt_world(self) -> Tensor:
+        return tf.SE3(self.T_world_cpf[..., None, :]) @ self.joints_wrt_cpf
+
+    def with_prev_window(self, prev_window: Optional[EgoTrainingData]) -> EgoTrainingData:
+        """Create a new EgoTrainingData instance with the given prev_window."""
+        return EgoTrainingData(
+            T_world_root=self.T_world_root,
+            contacts=self.contacts,
+            betas=self.betas,
+            body_quats=self.body_quats,
+            T_cpf_tm1_cpf_t=self.T_cpf_tm1_cpf_t,
+            T_world_cpf=self.T_world_cpf,
+            height_from_floor=self.height_from_floor,
+            joints_wrt_cpf=self.joints_wrt_cpf,
+            mask=self.mask,
+            hand_quats=self.hand_quats,
+            prev_window=prev_window
+        )
 
     @staticmethod
     def load_from_npz(

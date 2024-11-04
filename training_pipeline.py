@@ -53,6 +53,8 @@ class EgoAlloTrainConfig:
     train_splits: tuple[Literal["train", "val", "test", "just_humaneva"], ...] = (
         "train",
     )
+    condition_on_prev_window: bool = False
+    """Whether to condition on previous motion window."""
 
     # Optimizer options.
     learning_rate: float = 1e-4

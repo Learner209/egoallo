@@ -141,6 +141,57 @@ class MotionUNet(ModelMixin, nn.Module):
                 config.d_latent
             )
 
+        # Add encoder for previous window if enabled
+        if config.condition_on_prev_window:
+            # Projection for previous window features
+            self.prev_window_proj = nn.Linear(
+                config.d_latent,
+                config.d_latent
+            )
+
+    def _encode_window(
+        self,
+        window: EgoDenoiseTraj,
+        batch: int,
+        time: int,
+        device: torch.device,
+        noise_emb: torch.Tensor,
+    ) -> torch.Tensor:
+        """Encode window if provided."""
+            
+        # Encode window components
+        encoded = (
+            self.encoders["betas"](window.betas.reshape(batch, time, -1))
+            + self.encoders["body_rot6d"](window.body_rot6d.reshape(batch, time, -1))
+            + self.encoders["contacts"](window.contacts)
+        )
+        
+        if self.config.include_hands and window.hand_rot6d is not None:
+            encoded += self.encoders["hand_rot6d"](
+                window.hand_rot6d.reshape(batch, time, -1)
+            )
+
+        # Add positional encoding
+        if self.config.positional_encoding == "rope":
+            pos_enc = 0
+        elif self.config.positional_encoding == "transformer":
+            pos_enc = make_positional_encoding(
+                d_latent=self.config.d_latent,
+                length=time,
+                dtype=encoded.dtype,
+            )[None, ...].to(device)
+        else:
+            raise ValueError(f"Unknown positional encoding: {self.config.positional_encoding}")
+            
+        encoded = encoded + pos_enc
+
+        # Process through transformer layers
+        for layer in self.encoder_layers:
+            encoded = layer(encoded, None, noise_emb=noise_emb)
+            
+       
+        return encoded
+
     def forward(
         self,
         sample: torch.FloatTensor,
@@ -159,27 +210,27 @@ class MotionUNet(ModelMixin, nn.Module):
         # Unpack sample and get dimensions
         x_t = EgoDenoiseTraj.unpack(sample, include_hands=config.include_hands)
         batch, time = x_t.betas.shape[:2]
+        device = sample.device
         
-        # Encode trajectory components
-        x_t_encoded = (
-            self.encoders["betas"](x_t.betas.reshape(batch, time, -1))
-            + self.encoders["body_rot6d"](x_t.body_rot6d.reshape(batch, time, -1))
-            + self.encoders["contacts"](x_t.contacts)
-        )
-        
-        if config.include_hands and x_t.hand_rot6d is not None:
-            x_t_encoded += self.encoders["hand_rot6d"](
-                x_t.hand_rot6d.reshape(batch, time, -1)
-            )
-            
         # Embed noise level
         noise_emb = self.noise_emb(timestep)
         
+        # Encode current window
+        decoder_out = self._encode_window(
+            window=x_t,
+            batch=batch,
+            time=time,
+            device=device,
+            noise_emb=noise_emb
+        )
+        
+        # Process conditioning
         conditioning = config.make_cond(
             train_batch.T_cpf_tm1_cpf_t,
             T_world_cpf=train_batch.T_world_cpf,
             hand_positions_wrt_cpf=train_batch.joints_wrt_cpf[:, :, 19:21, :].reshape(batch, time, 6)
         )
+        
         # Process conditioning if provided
         if conditioning is not None:
             cond_embeds = []
@@ -189,9 +240,9 @@ class MotionUNet(ModelMixin, nn.Module):
                     embed = self.cond_embeddings[name](component)
                     cond_embeds.append(embed)
             cond = torch.cat(cond_embeds, dim=-1)
-            cond = self.latent_from_cond(cond)
+            encoder_out = self.latent_from_cond(cond)
         else:
-            cond = torch.zeros((batch, time, config.d_latent), device=sample.device)
+            encoder_out = torch.zeros((batch, time, config.d_latent), device=device)
             
         # Add positional encoding
         if config.positional_encoding == "rope":
@@ -201,13 +252,25 @@ class MotionUNet(ModelMixin, nn.Module):
                 d_latent=config.d_latent,
                 length=time,
                 dtype=sample.dtype,
-            )[None, ...].to(sample.device)
+            )[None, ...].to(device)
         else:
             raise ValueError(f"Unknown positional encoding: {config.positional_encoding}")
             
-        encoder_out = cond + pos_enc
-        decoder_out = x_t_encoded + pos_enc
+        encoder_out = encoder_out + pos_enc
         
+        # Encode previous window if configured
+        if config.condition_on_prev_window and x_t.prev_window is not None:
+            prev_encoded = self._encode_window(
+                window=x_t.prev_window,
+                batch=batch,
+                time=time,
+                device=device,
+                noise_emb=None  # No noise embedding needed for clean motion
+            )
+            # Project and add to encoder output
+            prev_encoded = self.prev_window_proj(prev_encoded)
+            encoder_out = encoder_out + prev_encoded
+            
         # Add noise token if configured
         if self.noise_emb_token_proj is not None:
             noise_emb_token = self.noise_emb_token_proj(noise_emb)

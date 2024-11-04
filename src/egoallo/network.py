@@ -56,35 +56,15 @@ class EgoDenoiseTraj(TensorDataclass):
     hand_rot6d: Float[Tensor, "*batch timesteps 30 6"] | None
     """Local orientations for each hand joint in rot6d representation."""
 
+    prev_window: Optional["EgoDenoiseTraj"] = None
+    """Previous window trajectory for conditioning."""
     @staticmethod
     def get_packed_dim(include_hands: bool) -> int:
-        packed_dim = 16 + 21 * 6 + 21
+        """Get dimension of packed representation."""
+        packed_dim = 16 + 21 * 6 + 21  # betas + body_rot6d + contacts
         if include_hands:
-            packed_dim += 30 * 6
+            packed_dim += 30 * 6  # hand_rot6d
         return packed_dim
-
-    def apply_to_body(self, body_model: SmplhModel) -> SmplhShapedAndPosed:
-        device = self.betas.device
-        dtype = self.betas.dtype
-        assert self.hand_rot6d is not None
-        shaped = body_model.with_shape(self.betas)
-
-        # Convert rot6d to rotation matrices
-        body_rotmats = SO3.from_rot6d(
-            self.body_rot6d.reshape(-1, 6)
-        ).as_matrix().reshape(self.body_rot6d.shape[:-1] + (3, 3))
-
-        hand_rotmats = SO3.from_rot6d(
-            self.hand_rot6d.reshape(-1, 6)
-        ).as_matrix().reshape(self.hand_rot6d.shape[:-1] + (3, 3))
-
-        posed = shaped.with_pose(
-            T_world_root=SE3.identity(device=device, dtype=dtype).parameters(),
-            local_quats=SO3.from_matrix(
-                torch.cat([body_rotmats, hand_rotmats], dim=-3)
-            ).wxyz,
-        )
-        return posed
 
     def pack(self) -> Float[Tensor, "*batch timesteps d_state"]:
         """Pack trajectory into a single flattened vector."""
@@ -108,6 +88,7 @@ class EgoDenoiseTraj(TensorDataclass):
         x: Float[Tensor, "*batch timesteps d_state"],
         include_hands: bool,
         project_rot6d: bool = False,
+        prev_window: Optional["EgoDenoiseTraj"] = None,
     ) -> "EgoDenoiseTraj":
         """Unpack trajectory from a single flattened vector."""
         (*batch, time, d_state) = x.shape
@@ -131,12 +112,47 @@ class EgoDenoiseTraj(TensorDataclass):
             if hand_rot6d is not None:
                 hand_rot6d = project_rot6d(hand_rot6d)
 
-        return EgoDenoiseTraj(
+        return cls(
             betas=betas,
             body_rot6d=body_rot6d,
             contacts=contacts,
             hand_rot6d=hand_rot6d,
+            prev_window=prev_window,
         )
+
+    def with_prev_window(self, prev_window: "EgoDenoiseTraj") -> "EgoDenoiseTraj":
+        """Create a new instance with a previous window for conditioning."""
+        return EgoDenoiseTraj(
+            betas=self.betas,
+            body_rot6d=self.body_rot6d,
+            contacts=self.contacts,
+            hand_rot6d=self.hand_rot6d,
+            prev_window=prev_window,
+        )
+
+    def apply_to_body(self, body_model: SmplhModel) -> SmplhShapedAndPosed:
+        """Apply trajectory to SMPL body model."""
+        device = self.betas.device
+        dtype = self.betas.dtype
+        assert self.hand_rot6d is not None
+        shaped = body_model.with_shape(self.betas)
+
+        # Convert rot6d to rotation matrices
+        body_rotmats = SO3.from_rot6d(
+            self.body_rot6d.reshape(-1, 6)
+        ).as_matrix().reshape(self.body_rot6d.shape[:-1] + (3, 3))
+
+        hand_rotmats = SO3.from_rot6d(
+            self.hand_rot6d.reshape(-1, 6)
+        ).as_matrix().reshape(self.hand_rot6d.shape[:-1] + (3, 3))
+
+        posed = shaped.with_pose(
+            T_world_root=SE3.identity(device=device, dtype=dtype).parameters(),
+            local_quats=SO3.from_matrix(
+                torch.cat([body_rotmats, hand_rotmats], dim=-3)
+            ).wxyz,
+        )
+        return posed
 
 @dataclass(frozen=True)
 class EgoDenoiserConfig:
@@ -177,6 +193,12 @@ class EgoDenoiserConfig:
 
     include_hand_positions_cond: bool = False
     """Whether to include hand positions in the conditioning information."""
+
+    condition_on_prev_window: bool = False
+    """Whether to condition on previous motion window."""
+    
+    prev_window_encoder_layers: int = 2
+    """Number of transformer layers for encoding previous window."""
 
     @cached_property
     def d_cond(self) -> int:
