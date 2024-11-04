@@ -20,6 +20,8 @@ blendify_assets/
 
 datasets/
 myenv/
+assets
+wandb/
 
 data/
 egoallo_checkpoint_*

@@ -10,6 +10,7 @@ from .hand_detection_structs import (
     CorrespondedAriaHandWristPoseDetections,
     CorrespondedHamerDetections,
 )
+from .transforms import SO3
 
 GuidanceMode = Literal["off", "hands", "full"]
 
@@ -20,12 +21,16 @@ def compute_hand_loss(
     aria_detections: CorrespondedAriaHandWristPoseDetections,
 ) -> Tuple[Float[Tensor, ""], dict]:
     """Compute loss between predicted and detected hand positions."""
+    # Convert rot6d to rotation matrices for SMPL model
+    body_rotmats = SO3.from_rot6d(traj.body_rot6d).as_matrix()
+    hand_rotmats = SO3.from_rot6d(traj.hand_rot6d).as_matrix() if traj.hand_rot6d is not None else None
+    
     # Get predicted hand positions
     smpl_output = body_model(
-        global_orient=traj.root_orient,
-        body_pose=traj.body_pose,
-        left_hand_pose=traj.left_hand_pose,
-        right_hand_pose=traj.right_hand_pose,
+        global_orient=body_rotmats[:, 0],  # First joint is global orientation
+        body_pose=body_rotmats[:, 1:21],   # Body joints
+        left_hand_pose=hand_rotmats[:, :15] if hand_rotmats is not None else None,
+        right_hand_pose=hand_rotmats[:, 15:] if hand_rotmats is not None else None,
         transl=traj.root_pos,
     )
     
@@ -70,12 +75,16 @@ def compute_full_body_loss(
     hamer_detections: CorrespondedHamerDetections,
 ) -> Tuple[Float[Tensor, ""], dict]:
     """Compute loss between predicted and detected full body poses."""
+    # Convert rot6d to rotation matrices for SMPL model
+    body_rotmats = SO3.from_rot6d(traj.body_rot6d).as_matrix()
+    hand_rotmats = SO3.from_rot6d(traj.hand_rot6d).as_matrix() if traj.hand_rot6d is not None else None
+    
     # Get predicted body positions
     smpl_output = body_model(
-        global_orient=traj.root_orient,
-        body_pose=traj.body_pose,
-        left_hand_pose=traj.left_hand_pose,
-        right_hand_pose=traj.right_hand_pose,
+        global_orient=body_rotmats[:, 0],  # First joint is global orientation
+        body_pose=body_rotmats[:, 1:21],   # Body joints
+        left_hand_pose=hand_rotmats[:, :15] if hand_rotmats is not None else None,
+        right_hand_pose=hand_rotmats[:, 15:] if hand_rotmats is not None else None,
         transl=traj.root_pos,
     )
     

@@ -12,6 +12,7 @@ import tyro
 import yaml
 from accelerate import Accelerator, DataLoaderConfiguration
 from accelerate.utils import ProjectConfiguration
+from egoallo.training_utils import get_experiment_dir
 
 from egoallo import network, training_loss, training_utils
 from egoallo.data.amass import EgoAmassHdf5Dataset
@@ -50,22 +51,6 @@ class EgoAlloTrainConfig:
     weight_decay: float = 1e-4
     warmup_steps: int = 1000
     max_grad_norm: float = 1.0
-
-
-def get_experiment_dir(experiment_name: str, version: int = 0) -> Path:
-    """Creates a directory to put experiment files in, suffixed with a version
-    number. Similar to PyTorch lightning."""
-    experiment_dir = (
-        Path(__file__).absolute().parent
-        / "experiments"
-        / experiment_name
-        / f"v{version}"
-    )
-    if experiment_dir.exists():
-        return get_experiment_dir(experiment_name, version + 1)
-    else:
-        return experiment_dir
-
 
 def run_training(
     config: EgoAlloTrainConfig,

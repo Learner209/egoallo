@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
+import json
 from functools import cache, cached_property
-from typing import Literal
+from typing import Literal, Optional, Dict, List
 
 import numpy as np
 import torch
@@ -25,99 +26,117 @@ def project_rotmats_via_svd(
     del s
     return torch.einsum("...ij,...jk->...ik", u, vh)
 
+def project_rot6d(rot6d: Float[Tensor, "*batch joints 6"]) -> Float[Tensor, "*batch joints 6"]:
+    """Project rot6d representations to valid rotations."""
+    a = rot6d[..., :3]
+    b = rot6d[..., 3:]
+    r1 = torch.nn.functional.normalize(a, dim=-1)
+    b_proj = b - torch.sum(r1 * b, dim=-1, keepdim=True) * r1
+    r2 = torch.nn.functional.normalize(b_proj, dim=-1)
+    projected_rot6d = torch.cat([r1, r2], dim=-1)
+    return projected_rot6d
+
+
 
 class EgoDenoiseTraj(TensorDataclass):
-    """Data structure for denoising. Contains tensors that we are denoising, as
-    well as utilities for packing + unpacking them."""
+    """
+    Data structure for denoising. Contains tensors that we are denoising, as
+    well as utilities for packing and unpacking them.
+    """
 
-    betas: Float[Tensor, "*#batch timesteps 16"]
-    """Body shape parameters. We don't really need the timesteps axis here,
-    it's just for convenience."""
+    betas: Float[Tensor, "*batch timesteps 16"]
+    """Body shape parameters."""
 
-    body_rotmats: Float[Tensor, "*#batch timesteps 21 3 3"]
-    """Local orientations for each body joint."""
+    body_rot6d: Float[Tensor, "*batch timesteps 21 6"]
+    """Local orientations for each body joint in rot6d representation."""
 
-    contacts: Float[Tensor, "*#batch timesteps 21"]
+    contacts: Float[Tensor, "*batch timesteps 21"]
     """Contact boolean for each joint."""
 
-    hand_rotmats: Float[Tensor, "*#batch timesteps 30 3 3"] | None
-    """Local orientations for each body joint."""
+    hand_rot6d: Float[Tensor, "*batch timesteps 30 6"] | None
+    """Local orientations for each hand joint in rot6d representation."""
 
     @staticmethod
     def get_packed_dim(include_hands: bool) -> int:
-        packed_dim = 16 + 21 * 9 + 21
+        packed_dim = 16 + 21 * 6 + 21
         if include_hands:
-            packed_dim += 30 * 9
+            packed_dim += 30 * 6
         return packed_dim
 
     def apply_to_body(self, body_model: SmplhModel) -> SmplhShapedAndPosed:
         device = self.betas.device
         dtype = self.betas.dtype
-        assert self.hand_rotmats is not None
+        assert self.hand_rot6d is not None
         shaped = body_model.with_shape(self.betas)
+
+        # Convert rot6d to rotation matrices
+        body_rotmats = SO3.from_rot6d(
+            self.body_rot6d.reshape(-1, 6)
+        ).as_matrix().reshape(self.body_rot6d.shape[:-1] + (3, 3))
+
+        hand_rotmats = SO3.from_rot6d(
+            self.hand_rot6d.reshape(-1, 6)
+        ).as_matrix().reshape(self.hand_rot6d.shape[:-1] + (3, 3))
+
         posed = shaped.with_pose(
             T_world_root=SE3.identity(device=device, dtype=dtype).parameters(),
             local_quats=SO3.from_matrix(
-                torch.cat([self.body_rotmats, self.hand_rotmats], dim=-3)
+                torch.cat([body_rotmats, hand_rotmats], dim=-3)
             ).wxyz,
         )
         return posed
 
-    def pack(self) -> Float[Tensor, "*#batch timesteps d_state"]:
+    def pack(self) -> Float[Tensor, "*batch timesteps d_state"]:
         """Pack trajectory into a single flattened vector."""
-        (*batch, time, num_joints, _, _) = self.body_rotmats.shape
-        assert num_joints == 21
-        return torch.cat(
-            [
-                x.reshape((*batch, time, -1))
-                for x in vars(self).values()
-                if x is not None
-            ],
-            dim=-1,
-        )
+        (*batch, time, num_joints, rot_dim) = self.body_rot6d.shape
+        assert num_joints == 21 and rot_dim == 6
+
+        to_cat = [
+            self.betas.reshape((*batch, time, -1)),
+            self.body_rot6d.reshape((*batch, time, -1)),
+            self.contacts,
+        ]
+
+        if self.hand_rot6d is not None:
+            to_cat.append(self.hand_rot6d.reshape((*batch, time, -1)))
+
+        return torch.cat(to_cat, dim=-1)
 
     @classmethod
     def unpack(
         cls,
-        x: Float[Tensor, "*#batch timesteps d_state"],
+        x: Float[Tensor, "*batch timesteps d_state"],
         include_hands: bool,
-        project_rotmats: bool = False,
-    ) -> EgoDenoiseTraj:
-        """Unpack trajectory from a single flattened vector.
-
-        Args:
-            x: Packed trajectory.
-            project_rotmats: If True, project the rotation matrices to SO(3) via SVD.
-        """
+        project_rot6d: bool = False,
+    ) -> "EgoDenoiseTraj":
+        """Unpack trajectory from a single flattened vector."""
         (*batch, time, d_state) = x.shape
         assert d_state == cls.get_packed_dim(include_hands)
 
         if include_hands:
-            betas, body_rotmats_flat, contacts, hand_rotmats_flat = torch.split(
-                x, [16, 21 * 9, 21, 30 * 9], dim=-1
+            betas, body_rot6d_flat, contacts, hand_rot6d_flat = torch.split(
+                x, [16, 21 * 6, 21, 30 * 6], dim=-1
             )
-            body_rotmats = body_rotmats_flat.reshape((*batch, time, 21, 3, 3))
-            hand_rotmats = hand_rotmats_flat.reshape((*batch, time, 30, 3, 3))
-            assert betas.shape == (*batch, time, 16)
+            body_rot6d = body_rot6d_flat.reshape((*batch, time, 21, 6))
+            hand_rot6d = hand_rot6d_flat.reshape((*batch, time, 30, 6))
         else:
-            betas, body_rotmats_flat, contacts = torch.split(
-                x, [16, 21 * 9, 21], dim=-1
+            betas, body_rot6d_flat, contacts = torch.split(
+                x, [16, 21 * 6, 21], dim=-1
             )
-            body_rotmats = body_rotmats_flat.reshape((*batch, time, 21, 3, 3))
-            hand_rotmats = None
-            assert betas.shape == (*batch, time, 16)
+            body_rot6d = body_rot6d_flat.reshape((*batch, time, 21, 6))
+            hand_rot6d = None
 
-        if project_rotmats:
-            # We might want to handle the -1 determinant case as well.
-            body_rotmats = project_rotmats_via_svd(body_rotmats)
+        if project_rot6d:
+            body_rot6d = project_rot6d(body_rot6d)
+            if hand_rot6d is not None:
+                hand_rot6d = project_rot6d(hand_rot6d)
 
         return EgoDenoiseTraj(
             betas=betas,
-            body_rotmats=body_rotmats,
+            body_rot6d=body_rot6d,
             contacts=contacts,
-            hand_rotmats=hand_rotmats,
+            hand_rot6d=hand_rot6d,
         )
-
 
 @dataclass(frozen=True)
 class EgoDenoiserConfig:
@@ -162,149 +181,186 @@ class EgoDenoiserConfig:
     @cached_property
     def d_cond(self) -> int:
         """Dimensionality of conditioning vector."""
-
         if self.cond_param == "ours":
             d_cond = 0
-            d_cond += 12  # Relative CPF pose, flattened 3x4 matrix.
+            d_cond += 6  # Relative CPF rotation in rot6d representation.
+            d_cond += 3  # Relative CPF translation.
             d_cond += 1  # Floor height.
             if self.include_canonicalized_cpf_rotation_in_cond:
-                d_cond += 9  # Canonicalized CPF rotation, flattened 3x3 matrix.
+                d_cond += 6  # Canonicalized CPF rotation in rot6d.
         elif self.cond_param == "canonicalized":
-            d_cond = 12
+            d_cond = 6 + 3  # Rotation (rot6d) and translation.
         elif self.cond_param == "absolute":
-            d_cond = 12
+            d_cond = 6 + 3  # Rotation (rot6d) and translation.
         elif self.cond_param == "absrel":
-            # Both absolute and relative!
-            d_cond = 24
+            # Both absolute and relative (rot6d + translation for each).
+            d_cond = (6 + 3) * 2
         elif self.cond_param == "absrel_global_deltas":
-            # Both absolute and relative!
-            d_cond = 24
+            # Absolute rotation and translation, plus relative rotation and translation.
+            d_cond = 6 + 3 + 6 + 3
         else:
             assert False
 
         # Add two 3D positions to the conditioning dimension if we're including
         # hand conditioning.
         if self.include_hand_positions_cond:
-            d_cond = d_cond + 6
+            d_cond += 6
 
+        # Apply Fourier encoding
         d_cond = d_cond + d_cond * self.fourier_enc_freqs * 2  # Fourier encoding.
+
         return d_cond
 
     def make_cond(
         self,
-        T_cpf_tm1_cpf_t: Float[Tensor, "batch time 7"],
-        T_world_cpf: Float[Tensor, "batch time 7"],
-        hand_positions_wrt_cpf: Float[Tensor, "batch time 6"] | None,
-    ) -> Float[Tensor, "batch time d_cond"]:
-        """Construct conditioning information from CPF pose."""
+        T_cpf_tm1_cpf_t: Tensor,  # Shape: (batch, time, 7)
+        T_world_cpf: Tensor,       # Shape: (batch, time, 7)
+        T_world_cpf_0: Optional[Tensor] = None,  # Shape: (batch, 7)
+        hand_positions_wrt_cpf: Optional[Tensor] = None,  # Shape: (batch, time, 6)
+    ) -> Dict[str, Tensor]:
+        """
+        Construct conditioning information based on the selected cond_param.
+        Returns a dictionary with separate tensors for each semantic component.
+        """
+        batch, time, _ = T_cpf_tm1_cpf_t.shape
+        device = T_cpf_tm1_cpf_t.device
+        dtype = T_cpf_tm1_cpf_t.dtype
+        cond_dict = {}
 
-        (batch, time, _) = T_cpf_tm1_cpf_t.shape
+        # Compute floor height (common to all cond_param options)
+        height_from_floor = T_world_cpf[..., 6:7]  # Shape: (batch, time, 1)
+        cond_dict['floor_height'] = height_from_floor  # Shape: (batch, time, 1)
 
-        # Construct device pose conditioning.
         if self.cond_param == "ours":
-            # Compute conditioning terms. +Z is up in the world frame. We want
-            # the translation to be invariant to translations in the world X/Y
-            # directions.
-            height_from_floor = T_world_cpf[..., 6:7]
+            # Relative CPF pose in rot6d and translation
+            rel_pose = SE3(T_cpf_tm1_cpf_t)
+            rel_rot6d = SO3(rel_pose.rotation().wxyz).as_rot6d()  # Shape: (batch, time, 6)
+            rel_trans = rel_pose.translation()                    # Shape: (batch, time, 3)
+            cond_dict['rel_rot6d'] = rel_rot6d
+            cond_dict['rel_trans'] = rel_trans
 
-            cond_parts = [
-                SE3(T_cpf_tm1_cpf_t).as_matrix()[..., :3, :].reshape((batch, time, 12)),
-                height_from_floor,
-            ]
             if self.include_canonicalized_cpf_rotation_in_cond:
-                # We want the rotation to be invariant to rotations around the
-                # world Z axis. Visualization of what's happening here:
-                #
-                # https://gist.github.com/brentyi/9226d082d2707132af39dea92b8609f6
-                #
-                # (The coordinate frame may differ by some axis-swapping
-                # compared to the exact equations in the paper. But to the
-                # network these will all look the same.)
-                R_world_cpf = SE3(T_world_cpf).rotation().wxyz
-                forward_cpf = R_world_cpf.new_tensor([0.0, 0.0, 1.0])
-                forward_world = SO3(R_world_cpf) @ forward_cpf
-                assert forward_world.shape == (batch, time, 3)
-                R_canonical_world = SO3.from_z_radians(
-                    -torch.arctan2(forward_world[..., 1], forward_world[..., 0])
-                ).wxyz
-                assert R_canonical_world.shape == (batch, time, 4)
-                cond_parts.append(
-                    (SO3(R_canonical_world) @ SO3(R_world_cpf))
-                    .as_matrix()
-                    .reshape((batch, time, 9)),
-                )
-            cond = torch.cat(cond_parts, dim=-1)
+                # Canonicalized CPF rotation in rot6d
+                R_world_cpf = SE3(T_world_cpf).rotation()
+                forward_cpf = torch.tensor([0.0, 0.0, 1.0], device=device, dtype=dtype)
+                forward_world = R_world_cpf @ forward_cpf
+                yaw_angles = -torch.atan2(forward_world[..., 1], forward_world[..., 0])
+                R_canonical_world = SO3.from_z_radians(yaw_angles)
+                R_canonical_cpf = R_canonical_world @ R_world_cpf
+                canonical_rot6d = R_canonical_cpf.as_rot6d()
+                cond_dict['canonical_rot6d'] = canonical_rot6d  # Shape: (batch, time, 6)
+
         elif self.cond_param == "canonicalized":
-            # Align the first timestep.
-            # Put poses so start is at origin, facing forward.
-            R_world_cpf = SE3(T_world_cpf[:, 0:1, :]).rotation().wxyz
-            forward_cpf = R_world_cpf.new_tensor([0.0, 0.0, 1.0])
-            forward_world = SO3(R_world_cpf) @ forward_cpf
-            assert forward_world.shape == (batch, 1, 3)
-            R_canonical_world = SO3.from_z_radians(
-                -torch.arctan2(forward_world[..., 1], forward_world[..., 0])
-            ).wxyz
-            assert R_canonical_world.shape == (batch, 1, 4)
+            assert T_world_cpf_0 is not None, "T_world_cpf_0 is required for 'canonicalized' cond_param."
+            # Compute canonicalized transformations relative to the first frame
+            T_world_cpf_0_inv = SE3.inv(SE3(T_world_cpf_0))  # Shape: (batch, 7)
+            T_cpf_0_cpf_t = SE3.compose(T_world_cpf_0_inv[:, None, :], T_world_cpf)  # Shape: (batch, time, 7)
+            canonical_pose = SE3(T_cpf_0_cpf_t)
+            canonical_rot6d = SO3(canonical_pose.rotation().wxyz).as_rot6d()  # Shape: (batch, time, 6)
+            canonical_trans = canonical_pose.translation()                    # Shape: (batch, time, 3)
+            cond_dict['canonical_rot6d'] = canonical_rot6d
+            cond_dict['canonical_trans'] = canonical_trans
 
-            R_canonical_cpf = SO3(R_canonical_world) @ SE3(T_world_cpf).rotation()
-            t_canonical_cpf = SO3(R_canonical_world) @ SE3(T_world_cpf).translation()
-            t_canonical_cpf = t_canonical_cpf - t_canonical_cpf[:, 0:1, :]
-
-            cond = (
-                SE3.from_rotation_and_translation(R_canonical_cpf, t_canonical_cpf)
-                .as_matrix()[..., :3, :4]
-                .reshape((batch, time, 12))
-            )
         elif self.cond_param == "absolute":
-            cond = SE3(T_world_cpf).as_matrix()[..., :3, :4].reshape((batch, time, 12))
+            # Use absolute CPF pose in world coordinates
+            abs_pose = SE3(T_world_cpf)
+            abs_rot6d = SO3(abs_pose.rotation().wxyz).as_rot6d()  # Shape: (batch, time, 6)
+            abs_trans = abs_pose.translation()                    # Shape: (batch, time, 3)
+            cond_dict['abs_rot6d'] = abs_rot6d
+            cond_dict['abs_trans'] = abs_trans
+
         elif self.cond_param == "absrel":
-            cond = torch.concatenate(
-                [
-                    SE3(T_world_cpf)
-                    .as_matrix()[..., :3, :4]
-                    .reshape((batch, time, 12)),
-                    SE3(T_cpf_tm1_cpf_t)
-                    .as_matrix()[..., :3, :4]
-                    .reshape((batch, time, 12)),
-                ],
-                dim=-1,
-            )
+            # Combine absolute and relative transformations
+            # Absolute CPF pose
+            abs_pose = SE3(T_world_cpf)
+            abs_rot6d = SO3(abs_pose.rotation().wxyz).as_rot6d()  # Shape: (batch, time, 6)
+            abs_trans = abs_pose.translation()                    # Shape: (batch, time, 3)
+            cond_dict['abs_rot6d'] = abs_rot6d
+            cond_dict['abs_trans'] = abs_trans
+            # Relative CPF pose
+            rel_pose = SE3(T_cpf_tm1_cpf_t)
+            rel_rot6d = SO3(rel_pose.rotation().wxyz).as_rot6d()
+            rel_trans = rel_pose.translation()
+            cond_dict['rel_rot6d'] = rel_rot6d
+            cond_dict['rel_trans'] = rel_trans
+
         elif self.cond_param == "absrel_global_deltas":
-            cond = torch.concatenate(
-                [
-                    SE3(T_world_cpf)
-                    .as_matrix()[..., :3, :4]
-                    .reshape((batch, time, 12)),
-                    SE3(T_cpf_tm1_cpf_t)
-                    .rotation()
-                    .as_matrix()
-                    .reshape((batch, time, 9)),
-                    (
-                        SE3(T_world_cpf).rotation()
-                        @ SE3(T_cpf_tm1_cpf_t).inverse().translation()
-                    ).reshape((batch, time, 3)),
-                ],
-                dim=-1,
-            )
+            # Similar to 'absrel' but includes global deltas
+            # Absolute CPF pose
+            abs_pose = SE3(T_world_cpf)
+            abs_rot6d = SO3(abs_pose.rotation().wxyz).as_rot6d()
+            abs_trans = abs_pose.translation()
+            cond_dict['abs_rot6d'] = abs_rot6d
+            cond_dict['abs_trans'] = abs_trans
+            # Relative CPF pose
+            rel_pose = SE3(T_cpf_tm1_cpf_t)
+            rel_rot6d = SO3(rel_pose.rotation().wxyz).as_rot6d()
+            rel_trans = rel_pose.translation()
+            cond_dict['rel_rot6d'] = rel_rot6d
+            cond_dict['rel_trans'] = rel_trans
+            # Global deltas
+            delta_rot6d = abs_rot6d[:, 1:, :] - abs_rot6d[:, :-1, :]
+            delta_trans = abs_trans[:, 1:, :] - abs_trans[:, :-1, :]
+            # Pad to match sequence length
+            delta_rot6d = torch.cat([delta_rot6d[:, :1, :], delta_rot6d], dim=1)
+            delta_trans = torch.cat([delta_trans[:, :1, :], delta_trans], dim=1)
+            cond_dict['delta_rot6d'] = delta_rot6d
+            cond_dict['delta_trans'] = delta_trans
+
         else:
-            assert False
+            raise ValueError(f"Unknown cond_param: {self.cond_param}")
 
-        # Condition on hand poses as well.
-        # We didn't use this for the paper.
+        # Include hand positions in conditioning if applicable
+        if self.include_hand_positions_cond and hand_positions_wrt_cpf is not None:
+            cond_dict['hand_positions'] = hand_positions_wrt_cpf  # Shape: (batch, time, 6)
+
+        return cond_dict
+
+    def cond_component_names(self) -> List[str]:
+        """List of conditional component names based on configuration."""
+        names = ['floor_height']  # Common to all cond_param options
+
+        if self.cond_param == 'ours':
+            names.extend(['rel_rot6d', 'rel_trans'])
+            if self.include_canonicalized_cpf_rotation_in_cond:
+                names.append('canonical_rot6d')
+        elif self.cond_param == 'canonicalized':
+            names.extend(['canonical_rot6d', 'canonical_trans'])
+        elif self.cond_param == 'absolute':
+            names.extend(['abs_rot6d', 'abs_trans'])
+        elif self.cond_param == 'absrel':
+            names.extend(['abs_rot6d', 'abs_trans', 'rel_rot6d', 'rel_trans'])
+        elif self.cond_param == 'absrel_global_deltas':
+            names.extend([
+                'abs_rot6d', 'abs_trans',
+                'rel_rot6d', 'rel_trans',
+                'delta_rot6d', 'delta_trans'
+            ])
+        else:
+            raise ValueError(f"Unknown cond_param: {self.cond_param}")
+
+        # Include hand positions if applicable
         if self.include_hand_positions_cond:
-            if hand_positions_wrt_cpf is None:
-                logger.warning(
-                    "Model is looking for hand conditioning but none was provided. Passing in zeros."
-                )
-                hand_positions_wrt_cpf = torch.zeros(
-                    (batch, time, 6), device=T_world_cpf.device
-                )
-            assert hand_positions_wrt_cpf.shape == (batch, time, 6)
-            cond = torch.cat([cond, hand_positions_wrt_cpf], dim=-1)
+            names.append('hand_positions')
 
-        cond = fourier_encode(cond, freqs=self.fourier_enc_freqs)
-        assert cond.shape == (batch, time, self.d_cond)
-        return cond
+        return names
+
+    def get_cond_component_dim(self, name: str) -> int:
+        """Return the dimension of each conditional component."""
+        if name == 'floor_height':
+            return 1
+        elif name in ['rel_rot6d', 'canonical_rot6d', 'abs_rot6d', 'delta_rot6d']:
+            return 6
+        elif name in ['rel_trans', 'canonical_trans', 'abs_trans', 'delta_trans']:
+            return 3
+        elif name == 'hand_positions':
+            return 6
+        else:
+            raise ValueError(f"Unknown conditional component: {name}")
+
+    def to_json(self) -> str:
+        """Serialize the config to a JSON string."""
+        return json.dumps(asdict(self))
 
 
 class EgoDenoiser(nn.Module):
@@ -323,11 +379,11 @@ class EgoDenoiser(nn.Module):
         # MLP encoders and decoders for each modality we want to denoise.
         modality_dims: dict[str, int] = {
             "betas": 16,
-            "body_rotmats": 21 * 9,
+            "body_rot6d": 21 * 6,
             "contacts": 21,
         }
         if config.include_hands:
-            modality_dims["hand_rotmats"] = 30 * 9
+            modality_dims["hand_rot6d"] = 30 * 6
 
         assert sum(modality_dims.values()) == self.get_d_state()
         self.encoders = nn.ModuleDict(
@@ -357,7 +413,7 @@ class EgoDenoiser(nn.Module):
         )
 
         # Helpers for converting between input dimensionality and latent dimensionality.
-        self.latent_from_cond = nn.Linear(config.d_cond, config.d_latent)
+        self.latent_from_cond = nn.Linear(len(config.cond_component_names()) * config.d_latent, config.d_latent)
 
         # Noise embedder.
         self.noise_emb = nn.Embedding(
@@ -414,6 +470,13 @@ class EgoDenoiser(nn.Module):
             ]
         )
 
+        # Embedding layers for the conditional tokens
+        self.cond_embeddings = nn.ModuleDict()
+        for name in self.config.cond_component_names():
+            self.cond_embeddings[name] = nn.Linear(
+                self.config.get_cond_component_dim(name), config.d_latent
+            )
+
     def get_d_state(self) -> int:
         return EgoDenoiseTraj.get_packed_dim(self.config.include_hands)
 
@@ -424,32 +487,33 @@ class EgoDenoiser(nn.Module):
         *,
         T_world_cpf: Float[Tensor, "batch time 7"],
         T_cpf_tm1_cpf_t: Float[Tensor, "batch time 7"],
-        project_output_rotmats: bool,
-        # Observed hand positions, relative to the CPF.
+        project_output_rot6d: bool,
         hand_positions_wrt_cpf: Float[Tensor, "batch time 6"] | None,
-        # Attention mask for using shorter sequences.
         mask: Bool[Tensor, "batch time"] | None,
-        # Mask for when to drop out / keep conditioning information.
         cond_dropout_keep_mask: Bool[Tensor, "batch"] | None = None,
     ) -> Float[Tensor, "batch time state_dim"]:
-        """Predict a denoised trajectory. Note that `t` refers to a noise
-        level, not a timestep."""
+        """
+        Predict a denoised trajectory. Note that `t` refers to a noise
+        level, not a timestep.
+        """
         config = self.config
+        x_t = EgoDenoiseTraj.unpack(
+            x_t_packed, include_hands=self.config.include_hands
+        )
+        (batch, time, num_body_joints, rot_dim) = x_t.body_rot6d.shape
+        assert num_body_joints == 21 and rot_dim == 6
 
-        x_t = EgoDenoiseTraj.unpack(x_t_packed, include_hands=self.config.include_hands)
-        (batch, time, num_body_joints, _, _) = x_t.body_rotmats.shape
-        assert num_body_joints == 21
-
-        # Encode the trajectory into a single vector per timestep.
+        # Encode the trajectory into a single vector per timestep
         x_t_encoded = (
             self.encoders["betas"](x_t.betas.reshape((batch, time, -1)))
-            + self.encoders["body_rotmats"](x_t.body_rotmats.reshape((batch, time, -1)))
+            + self.encoders["body_rot6d"](x_t.body_rot6d.reshape((batch, time, -1)))
             + self.encoders["contacts"](x_t.contacts)
         )
+
         if self.config.include_hands:
-            assert x_t.hand_rotmats is not None
-            x_t_encoded = x_t_encoded + self.encoders["hand_rotmats"](
-                x_t.hand_rotmats.reshape((batch, time, -1))
+            assert x_t.hand_rot6d is not None
+            x_t_encoded += self.encoders["hand_rot6d"](
+                x_t.hand_rot6d.reshape((batch, time, -1))
             )
         assert x_t_encoded.shape == (batch, time, config.d_latent)
 
@@ -464,6 +528,13 @@ class EgoDenoiser(nn.Module):
             T_world_cpf=T_world_cpf,
             hand_positions_wrt_cpf=hand_positions_wrt_cpf,
         )
+        # Embed each conditional component separately
+        cond_embeds = []
+        for name in self.config.cond_component_names():
+            component = cond[name]  # Shape: (batch, time, d)
+            embed = self.cond_embeddings[name](component)  # Shape: (batch, time, d_latent)
+            cond_embeds.append(embed)
+        cond = torch.cat(cond_embeds, dim=-1)
 
         # Randomly drop out conditioning information; this serves as a
         # regularizer that aims to improve sample diversity.
@@ -533,17 +604,11 @@ class EgoDenoiser(nn.Module):
 
         packed_output = torch.cat(
             [
-                # Project rotation matrices for body_rotmats via SVD,
                 (
-                    project_rotmats_via_svd(
-                        modality_decoder(decoder_out).reshape((-1, 3, 3))
-                    ).reshape(
-                        (batch, time, {"body_rotmats": 21, "hand_rotmats": 30}[key] * 9)
-                    )
-                    # if enabled,
-                    if project_output_rotmats
-                    and key in ("body_rotmats", "hand_rotmats")
-                    # otherwise, just decode normally.
+                    project_rot6d(
+                        modality_decoder(decoder_out).reshape(batch, time, -1, 6)
+                    ).reshape(batch, time, -1)
+                    if project_output_rot6d and key in ("body_rot6d", "hand_rot6d")
                     else modality_decoder(decoder_out)
                 )
                 for key, modality_decoder in self.decoders.items()

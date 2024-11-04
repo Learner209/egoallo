@@ -41,7 +41,7 @@ import numpy as np
 from egoallo.setup_logger import setup_logger
 from egoallo.fncsmpl import SmplhModel, SmplhShaped, SmplhShapedAndPosed, SmplMesh
 from egoallo import fncsmpl, transforms
-
+from egoallo.network import EgoDenoiseTraj
 logger = setup_logger(output=None, name=__name__)
 
 @jaxtyped(typechecker=typeguard.typechecked)
@@ -85,7 +85,6 @@ class EgoTrainingData(TensorDataclass):
 
     hand_quats: Float[Tensor, "*#batch timesteps 30 4"] | None
     """Local orientations for each hand joint."""
-
 
     @staticmethod
     def load_from_npz(
@@ -160,6 +159,24 @@ class EgoTrainingData(TensorDataclass):
         )
      
         return ego_data
+
+    def pack(self) -> EgoDenoiseTraj:
+        """Convert EgoTrainingData to EgoDenoiseTraj format."""
+        # Convert quaternions to 6D rotation representation
+        body_rot6d = tf.SO3(wxyz=self.body_quats).as_rot6d()
+        
+        # Convert hand quaternions if they exist
+        hand_rot6d = None
+        if self.hand_quats is not None:
+            hand_rot6d = tf.SO3(wxyz=self.hand_quats).as_rot6d()
+
+        # Create EgoDenoiseTraj instance
+        return EgoDenoiseTraj(
+            betas=self.betas,  # Expand betas to match timesteps
+            body_rot6d=body_rot6d,
+            contacts=self.contacts,
+            hand_rot6d=hand_rot6d
+        )
 
     @staticmethod
     def visualize_ego_training_data(
