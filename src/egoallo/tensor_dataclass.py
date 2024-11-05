@@ -57,21 +57,19 @@ class TensorDataclass:
             A new dataclass.
         """
 
-        MapT = TypeVar("MapT")
-        def _map_impl(
-            fn: Callable[[torch.Tensor], torch.Tensor],
-            val: MapT,
-        ) -> MapT:
+        def _map_impl(val: Any) -> Any:
             if isinstance(val, torch.Tensor):
                 return fn(val)
             elif isinstance(val, TensorDataclass):
-                return type(val)(**_map_impl(fn, vars(val)))
+                return val.map(fn)
             elif isinstance(val, (list, tuple)):
-                return type(val)(_map_impl(fn, v) for v in val)
+                return type(val)(_map_impl(v) for v in val)
             elif isinstance(val, dict):
-                assert type(val) is dict  # No subclass support.
-                return {k: _map_impl(fn, v) for k, v in val.items()}  # type: ignore
+                return {k: _map_impl(v) for k, v in val.items()}
             else:
                 return val
 
-        return _map_impl(fn, self)
+        return type(self)(**{
+            field.name: _map_impl(getattr(self, field.name))
+            for field in dataclasses.fields(self)
+        })

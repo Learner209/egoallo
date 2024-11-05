@@ -22,7 +22,7 @@ import torch.utils.data
 from tqdm import tqdm
 import typeguard
 from jaxtyping import Bool, Float, jaxtyped
-from typing import TypeVar, Optional
+from typing import TypeVar, Optional, Callable
 from torch import Tensor
 import trimesh
 
@@ -79,8 +79,31 @@ class EgoTrainingData(TensorDataclass):
     hand_quats: Float[Tensor, "*#batch timesteps 30 4"] | None
     """Local orientations for each hand joint."""
 
-    prev_window: Optional[EgoTrainingData] = None
+    prev_window: Optional["EgoTrainingData"] = None
     """Previous window of training data for conditioning."""
+
+    def __post_init__(self):
+        """Validate the dataclass after initialization."""
+        # Ensure all required tensor fields are present and have correct types
+        for field_name, field_type in self.__annotations__.items():
+            if field_name != "prev_window":  # Skip validation for prev_window
+                value = getattr(self, field_name)
+                if not isinstance(value, torch.Tensor):
+                    raise TypeError(f"Field {field_name} must be a Tensor, got {type(value)}")
+
+    def to(self, device: torch.device | str):
+        """Override to handle prev_window correctly."""
+        result = super().to(device)
+        if result.prev_window is not None:
+            result.prev_window = result.prev_window.to(device)
+        return result
+
+    def map(self, fn: Callable[[torch.Tensor], torch.Tensor]):
+        """Override to handle prev_window correctly."""
+        result = super().map(fn)
+        if result.prev_window is not None:
+            result.prev_window = result.prev_window.map(fn)
+        return result
 
     @property
     def joints_wrt_world(self) -> Tensor:
@@ -186,12 +209,18 @@ class EgoTrainingData(TensorDataclass):
         if self.hand_quats is not None:
             hand_rot6d = tf.SO3(wxyz=self.hand_quats).as_rot6d()
 
+        # Pack the prev_window if it exists
+        prev_window_packed = None
+        if self.prev_window is not None:
+            prev_window_packed = self.prev_window.pack()
+
         # Create EgoDenoiseTraj instance
         return EgoDenoiseTraj(
             betas=self.betas,  # Expand betas to match timesteps
             body_rot6d=body_rot6d,
             contacts=self.contacts,
-            hand_rot6d=hand_rot6d
+            hand_rot6d=hand_rot6d,
+            prev_window=prev_window_packed
         )
 
     @staticmethod
@@ -284,9 +313,35 @@ class EgoTrainingData(TensorDataclass):
 
 T = TypeVar("T")
 
-def collate_dataclass(batch: list[T]) -> T:
+def _collate_dataclass(batch: list[T]) -> T:
     """Collate function that works for dataclasses."""
     keys = vars(batch[0]).keys()
     return type(batch[-1])(
         **{k: torch.stack([getattr(b, k) for b in batch]) for k in keys}
     )
+
+def collate_dataclass(batch: list[T]) -> T:
+    """Collate function that works for dataclasses with optional prev_window."""
+    if not batch:
+        return None
+    
+    keys = vars(batch[0]).keys()
+    result = {}
+    
+    for k in keys:
+        # Get values for this key from all batch items
+        values = [getattr(b, k) for b in batch]
+        
+        # Handle prev_window specially
+        if k == "prev_window":
+            # If any prev_window is None, all should be None
+            if any(v is None for v in values):
+                result[k] = None
+            else:
+                # Recursively collate prev_windows
+                result[k] = collate_dataclass(values)
+        else:
+            # For tensor fields, stack them
+            result[k] = torch.stack(values)
+    
+    return type(batch[0])(**result)

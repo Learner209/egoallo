@@ -56,8 +56,9 @@ class EgoDenoiseTraj(TensorDataclass):
     hand_rot6d: Float[Tensor, "*batch timesteps 30 6"] | None
     """Local orientations for each hand joint in rot6d representation."""
 
-    prev_window: Optional["EgoDenoiseTraj"] = None
+    prev_window: Optional[EgoDenoiseTraj] = None
     """Previous window trajectory for conditioning."""
+
     @staticmethod
     def get_packed_dim(include_hands: bool) -> int:
         """Get dimension of packed representation."""

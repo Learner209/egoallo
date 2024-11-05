@@ -28,6 +28,7 @@ from egoallo.sampling import run_sampling_with_stitching, real_time_sampling_wit
 from egoallo.transforms import SE3, SO3
 from egoallo.vis_helpers import visualize_traj_and_hand_detections
 from egoallo.training_utils import pdb_safety_net, ipdb_safety_net
+from egoallo.motion_diffusion_pipeline import MotionDiffusionPipeline
 
 
 @dataclasses.dataclass
@@ -142,12 +143,17 @@ def main(args: Args) -> None:
         server = viser.ViserServer()
         server.gui.configure_theme(dark_mode=True)
 
-    denoiser_network = load_denoiser(args.checkpoint_dir).to(device)
+    pipeline = MotionDiffusionPipeline.from_pretrained(
+        args.checkpoint_dir,
+        use_safetensors=True,
+        torch_dtype=torch.float16 if device.type == "cuda" else torch.float32
+    ).to(device)
+
     body_model = fncsmpl.SmplhModel.load(args.smplh_npz_path).to(device)
 
     # traj = run_sampling_with_stitching(
     traj = real_time_sampling_with_stitching(
-        denoiser_network,
+        pipeline=pipeline,
         body_model=body_model,
         guidance_mode=args.guidance_mode,
         guidance_inner=args.guidance_inner,

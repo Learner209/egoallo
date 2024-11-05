@@ -37,7 +37,6 @@ class EgoAlloTrainConfig:
     dataset_files_path: Path = Path("./data/egoalgo_no_skating_dataset_files.txt")
     smplh_npz_path: Path = Path("./data/smplh/neutral/model.npz")
 
-    model: network.EgoDenoiserConfig = network.EgoDenoiserConfig()
     loss: training_loss.TrainingLossConfig = training_loss.TrainingLossConfig()
 
     # Dataset arguments.
@@ -53,11 +52,14 @@ class EgoAlloTrainConfig:
     train_splits: tuple[Literal["train", "val", "test", "just_humaneva"], ...] = (
         "train",
     )
-    condition_on_prev_window: bool = False
+    condition_on_prev_window: bool = True
     """Whether to condition on previous motion window."""
+    model: network.EgoDenoiserConfig = network.EgoDenoiserConfig(
+        condition_on_prev_window=condition_on_prev_window
+    )
 
     # Optimizer options.
-    learning_rate: float = 1e-4
+    learning_rate: float = 4e-5
     weight_decay: float = 1e-4
     warmup_steps: int = 1000
     max_grad_norm: float = 1.0
@@ -113,14 +115,7 @@ def train_motion_diffusion(
     )
     
     # Setup dataset and dataloader
-    train_dataset = EgoAmassHdf5DatasetDynamic(
-        config.dataset_hdf5_path,
-        config.dataset_files_path,
-        splits=config.train_splits,
-        subseq_len=config.subseq_len,
-        cache_files=True,
-        slice_strategy=config.dataset_slice_strategy,
-    )
+    train_dataset = EgoAmassHdf5DatasetDynamic(config)
     
     train_dataloader = torch.utils.data.DataLoader(
         train_dataset,
@@ -168,19 +163,20 @@ def train_motion_diffusion(
             
             with accelerator.accumulate(model):
                 # Model predicts x_0 directly instead of noise
-                # TODO: check if the mathmetical formulation is correct.
                 x0_pred = model.forward(
                     sample=noisy_motion,
                     timestep=timesteps,
                     train_batch=batch,
                 )
                 
-                # Use noise_scheduler's built-in method to get noise prediction
-                noise_pred = noise_scheduler.get_velocity(
-                    sample=x0_pred['sample'],
-                    noise=noisy_motion,
-                    timesteps=timesteps
-                )
+                # Get noise prediction from x0_pred using standard DDPM formulation
+                # noise_pred = (noisy_motion - sqrt(alpha_t) * x0_pred) / sqrt(1-alpha_t)
+                alphas_cumprod = noise_scheduler.alphas_cumprod[timesteps]
+                alphas_cumprod = alphas_cumprod.flatten()
+                while len(alphas_cumprod.shape) < len(noisy_motion.shape):
+                    alphas_cumprod = alphas_cumprod.unsqueeze(-1)
+                
+                noise_pred = (noisy_motion - (alphas_cumprod ** 0.5) * x0_pred['sample']) / ((1 - alphas_cumprod) ** 0.5)
                 
                 losses = loss_computer.compute_loss(
                     noise_pred=noise_pred,
@@ -201,7 +197,6 @@ def train_motion_diffusion(
                 
                 if use_ema:
                     ema.step(model.parameters())  # Use unwrapped model parameters
-            
             # Logging
             if accelerator.is_main_process:
                 if global_step % 10 == 0:

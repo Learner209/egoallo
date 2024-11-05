@@ -155,21 +155,24 @@ class MotionUNet(ModelMixin, nn.Module):
         batch: int,
         time: int,
         device: torch.device,
-        noise_emb: torch.Tensor,
+        noise_emb: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """Encode window if provided."""
             
+        if noise_emb is None:
+            noise_emb = torch.zeros((batch, self.config.d_noise_emb), device=device) # BS x D
+            
         # Encode window components
         encoded = (
-            self.encoders["betas"](window.betas.reshape(batch, time, -1))
-            + self.encoders["body_rot6d"](window.body_rot6d.reshape(batch, time, -1))
-            + self.encoders["contacts"](window.contacts)
-        )
+            self.encoders["betas"](window.betas.reshape(batch, time, -1)) # BS x T x D
+            + self.encoders["body_rot6d"](window.body_rot6d.reshape(batch, time, -1)) # BS x T x D
+            + self.encoders["contacts"](window.contacts) # BS x T x D
+        ) # type: ignore
         
         if self.config.include_hands and window.hand_rot6d is not None:
             encoded += self.encoders["hand_rot6d"](
                 window.hand_rot6d.reshape(batch, time, -1)
-            )
+            ) # BS x T x D
 
         # Add positional encoding
         if self.config.positional_encoding == "rope":
@@ -179,15 +182,15 @@ class MotionUNet(ModelMixin, nn.Module):
                 d_latent=self.config.d_latent,
                 length=time,
                 dtype=encoded.dtype,
-            )[None, ...].to(device)
+            )[None, ...].to(device) # 1 x T x D
         else:
             raise ValueError(f"Unknown positional encoding: {self.config.positional_encoding}")
             
-        encoded = encoded + pos_enc
+        encoded = encoded + pos_enc # BS x T x D
 
         # Process through transformer layers
         for layer in self.encoder_layers:
-            encoded = layer(encoded, None, noise_emb=noise_emb)
+            encoded = layer(encoded, None, noise_emb=noise_emb) # BS x T x D
             
        
         return encoded
@@ -213,7 +216,7 @@ class MotionUNet(ModelMixin, nn.Module):
         device = sample.device
         
         # Embed noise level
-        noise_emb = self.noise_emb(timestep)
+        noise_emb = self.noise_emb(timestep) # 1 x D
         
         # Encode current window
         decoder_out = self._encode_window(
@@ -222,14 +225,14 @@ class MotionUNet(ModelMixin, nn.Module):
             time=time,
             device=device,
             noise_emb=noise_emb
-        )
+        ) # BS x T x D
         
         # Process conditioning
         conditioning = config.make_cond(
             train_batch.T_cpf_tm1_cpf_t,
             T_world_cpf=train_batch.T_world_cpf,
             hand_positions_wrt_cpf=train_batch.joints_wrt_cpf[:, :, 19:21, :].reshape(batch, time, 6)
-        )
+        ) # BS x T x D
         
         # Process conditioning if provided
         if conditioning is not None:
@@ -242,7 +245,7 @@ class MotionUNet(ModelMixin, nn.Module):
             cond = torch.cat(cond_embeds, dim=-1)
             encoder_out = self.latent_from_cond(cond)
         else:
-            encoder_out = torch.zeros((batch, time, config.d_latent), device=device)
+            encoder_out = torch.zeros((batch, time, config.d_latent), device=device) # BS x T x D
             
         # Add positional encoding
         if config.positional_encoding == "rope":
@@ -266,16 +269,16 @@ class MotionUNet(ModelMixin, nn.Module):
                 time=time,
                 device=device,
                 noise_emb=None  # No noise embedding needed for clean motion
-            )
+            ) # BS x T x D
             # Project and add to encoder output
-            prev_encoded = self.prev_window_proj(prev_encoded)
-            encoder_out = encoder_out + prev_encoded
+            prev_encoded = self.prev_window_proj(prev_encoded) # BS x T x D
+            encoder_out = encoder_out + prev_encoded # BS x T x D
             
         # Add noise token if configured
         if self.noise_emb_token_proj is not None:
-            noise_emb_token = self.noise_emb_token_proj(noise_emb)
-            encoder_out = torch.cat([noise_emb_token[:, None, :], encoder_out], dim=1)
-            decoder_out = torch.cat([noise_emb_token[:, None, :], decoder_out], dim=1)
+            noise_emb_token = self.noise_emb_token_proj(noise_emb) # 1 x D
+            encoder_out = torch.cat([noise_emb_token[:, None, :], encoder_out], dim=1) # BS x T+1 x D
+            decoder_out = torch.cat([noise_emb_token[:, None, :], decoder_out], dim=1) # BS x T+1 x D
             num_tokens = time + 1
         else:
             num_tokens = time
@@ -284,22 +287,22 @@ class MotionUNet(ModelMixin, nn.Module):
         for layer in self.encoder_layers:
             encoder_out = layer(encoder_out, None, noise_emb=noise_emb)
         for layer in self.decoder_layers:
-            decoder_out = layer(decoder_out, None, noise_emb=noise_emb, cond=encoder_out)
+            decoder_out = layer(decoder_out, None, noise_emb=noise_emb, cond=encoder_out) # BS x T+1 x D
             
         # Remove noise token if added
         if self.noise_emb_token_proj is not None:
-            decoder_out = decoder_out[:, 1:, :]
+            decoder_out = decoder_out[:, 1:, :] # BS x T x D
             
         # Decode output
         outputs = []
         for key, decoder in self.decoders.items():
             out = decoder(decoder_out)
             if key in ("body_rot6d", "hand_rot6d"):
-                out = out.reshape(batch, time, -1, 6)
-                out = project_rot6d(out).reshape(batch, time, -1)
+                out = out.reshape(batch, time, -1, 6) # BS x T x J x 6
+                out = project_rot6d(out).reshape(batch, time, -1) # BS x T x J*6
             outputs.append(out)
             
-        packed_output = torch.cat(outputs, dim=-1)
+        packed_output = torch.cat(outputs, dim=-1) # BS x T x D
         
         if return_dict:
             return BaseOutput(sample=packed_output)

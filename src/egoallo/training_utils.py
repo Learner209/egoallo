@@ -26,7 +26,7 @@ def get_experiment_dir(experiment_name: str, version: int = 0) -> Path:
     """Creates a directory to put experiment files in, suffixed with a version
     number. Similar to PyTorch lightning."""
     experiment_dir = (
-        Path(__file__).absolute().parent
+        Path(__file__).absolute().parent.parent.parent
         / "experiments"
         / experiment_name
         / f"v{version}"

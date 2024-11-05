@@ -12,7 +12,6 @@ from jaxtyping import Bool, Float, Int
 from .data.amass import EgoTrainingData
 from .fncsmpl import forward_kinematics
 from .network import EgoDenoiseTraj
-from .sampling import CosineNoiseScheduleConstants
 from .transforms import SO3
 from .motion_diffusion_pipeline import MotionUNet
 from . import network
@@ -33,21 +32,21 @@ class MotionLosses(NamedTuple):
 class TrainingLossConfig:
     """Configuration for training losses."""
     # Noise prediction loss weight
-    noise_pred_weight: float = 1.0
+    noise_pred_weight: float = 0.0
     
     # Original loss weights
     cond_dropout_prob: float = 0.0
     beta_coeff_weights: tuple[float, ...] = tuple(1 / (i + 1) for i in range(16))
     loss_weights: dict[str, float] = dataclasses.field(
         default_factory=lambda: {
-            "betas": 0.1,
-            "body_rot6d": 1.0,
-            "contacts": 0.1,
-            "hand_rot6d": 0.01,
-            # Geometric loss weights
-            "fk": 0.1,
-            "foot_skating": 0.05,
-            "velocity": 0.05
+            "betas": 0.1,  # Keep nonzero
+            "body_rot6d": 1.0,  # Keep nonzero
+            "contacts": 0.1,  # Keep nonzero
+            "hand_rot6d": 0.01,  # Keep nonzero
+            # Set geometric losses to zero for debugging
+            "fk": 0.0,  # Set to zero
+            "foot_skating": 0.0,  # Set to zero
+            "velocity": 0.0  # Set to zero
         }
     )
     
@@ -229,13 +228,13 @@ class TrainingLossComputer:
         )
 
         return MotionLosses(
-            noise_pred_loss=noise_pred_loss,
-            betas_loss=betas_loss,
-            body_rot6d_loss=body_rot6d_loss,
-            contacts_loss=contacts_loss,
-            hand_rot6d_loss=hand_rot6d_loss,
-            fk_loss=fk_loss,
-            foot_skating_loss=foot_skating_loss,
-            velocity_loss=velocity_loss,
+            noise_pred_loss=noise_pred_loss * self.config.noise_pred_weight,
+            betas_loss=betas_loss * self.config.loss_weights["betas"],
+            body_rot6d_loss=body_rot6d_loss * self.config.loss_weights["body_rot6d"],
+            contacts_loss=contacts_loss * self.config.loss_weights["contacts"],
+            hand_rot6d_loss=hand_rot6d_loss * self.config.loss_weights["hand_rot6d"],
+            fk_loss=fk_loss * self.config.loss_weights["fk"],
+            foot_skating_loss=foot_skating_loss * self.config.loss_weights["foot_skating"],
+            velocity_loss=velocity_loss * self.config.loss_weights["velocity"],
             total_loss=total_loss
         )
