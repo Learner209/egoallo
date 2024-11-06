@@ -46,7 +46,7 @@ class Args:
     output_dir: Path = Path("./egoallo_example_trajectories/coffeemachine/")
     """Output directory for the results. It can be separated from traj_root."""
 
-    checkpoint_dir: Path = Path("./egoallo_checkpoint_april13/checkpoints_3000000/")
+    checkpoint_dir: Path = Path("./experiments/nov5_v1/v7/checkpoint-0")
     # checkpoint_dir: Path = Path("./experiments/april13/v0/checkpoints_40000")
     smplh_npz_path: Path = Path("./data/smplh/neutral/model.npz")
 
@@ -68,7 +68,7 @@ class Args:
     """Whether to apply guidance optimizer after diffusion sampling."""
     save_traj: bool = True
     """Whether to save the output trajectory, which will be placed under `traj_dir/egoallo_outputs/some_name.npz`."""
-    visualize_traj: bool = True
+    visualize_traj: bool = False
     """Whether to visualize the trajectory after sampling."""
 
 
@@ -144,7 +144,7 @@ def main(args: Args) -> None:
         server.gui.configure_theme(dark_mode=True)
 
     pipeline = MotionDiffusionPipeline.from_pretrained(
-        args.checkpoint_dir,
+        str(args.checkpoint_dir),
         use_safetensors=True,
         torch_dtype=torch.float16 if device.type == "cuda" else torch.float32
     ).to(device)

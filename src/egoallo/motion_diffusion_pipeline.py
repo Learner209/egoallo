@@ -387,6 +387,57 @@ class MotionDiffusionPipeline(DiffusionPipeline):
             intermediate_states=intermediates
         )
 
+    def save_custom_config(self, save_directory: str):
+        """Save the UNet config to the specified directory"""
+        os.makedirs(save_directory, exist_ok=True)
+        config_path = os.path.join(save_directory, "unet_config.json")
+        with open(config_path, "w") as f:
+            json.dump(self.unet.config.to_json(), f)
+
+    @classmethod
+    def load_custom_config(cls, save_directory: str) -> EgoDenoiserConfig:
+        """Load the UNet config from the specified directory"""
+        config_path = os.path.join(save_directory, "unet_config.json")
+        if not os.path.exists(config_path):
+            raise ValueError(f"Config file not found at {config_path}")
+        with open(config_path, "r") as f:
+            config_dict = json.load(f)
+        return EgoDenoiserConfig.from_json(config_dict)
+
+    def save_pretrained(self, save_directory: str, **kwargs):
+        """Save the pipeline's models and configuration"""
+        super().save_pretrained(save_directory, **kwargs)
+        self.save_custom_config(save_directory)
+
+    @classmethod
+    def from_pretrained(
+        cls,
+        pretrained_model_path: Union[str, Path],
+        **kwargs
+    ) -> "MotionDiffusionPipeline":
+        """Load a pretrained pipeline from a directory"""
+        # Load the custom config first
+        config = cls.load_custom_config(pretrained_model_path)
+        
+        # Create UNet with loaded config
+        unet = MotionUNet(config)
+        
+        # Create scheduler
+        scheduler = DDPMScheduler(
+            num_train_timesteps=1000,
+            beta_schedule="squaredcos_cap_v2"
+        )
+        
+        # Load the pretrained weights
+        pipeline = super().from_pretrained(
+            pretrained_model_path,
+            unet=unet,
+            scheduler=scheduler,
+            **kwargs
+        )
+        
+        return pipeline
+
     @classmethod
     def from_config(
         cls,
@@ -398,4 +449,4 @@ class MotionDiffusionPipeline(DiffusionPipeline):
             num_train_timesteps=1000,
             beta_schedule="squaredcos_cap_v2"
         )
-        return cls(unet=unet, scheduler=scheduler) 
+        return cls(unet=unet, scheduler=scheduler)

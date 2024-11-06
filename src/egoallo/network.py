@@ -202,6 +202,11 @@ class EgoDenoiserConfig:
     """Number of transformer layers for encoding previous window."""
 
     @cached_property
+    def d_state(self) -> int:
+        """Dimensionality of the state vector."""
+        return EgoDenoiseTraj.get_packed_dim(self.include_hands)
+        
+    @cached_property
     def d_cond(self) -> int:
         """Dimensionality of conditioning vector."""
         if self.cond_param == "ours":
@@ -384,6 +389,12 @@ class EgoDenoiserConfig:
     def to_json(self) -> str:
         """Serialize the config to a JSON string."""
         return json.dumps(asdict(self))
+
+    @classmethod
+    def from_json(cls, json_str: str) -> "EgoDenoiserConfig":
+        """Create a config from a JSON string."""
+        config_dict = json.loads(json_str)
+        return cls(**config_dict)
 
 
 class EgoDenoiser(nn.Module):

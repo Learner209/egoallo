@@ -52,7 +52,7 @@ def run_sampling_with_stitching(
 
     start_time = time.time()
     x_0_packed_pred = torch.zeros(
-        (num_samples, seq_len, pipeline.unet.config.get_d_state()),
+        (num_samples, seq_len, pipeline.unet.config.d_state),
         device=device
     )
     overlap_weights = torch.zeros((1, seq_len, 1), device=device)
