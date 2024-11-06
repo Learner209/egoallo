@@ -22,7 +22,6 @@ from egoallo.hand_detection_structs import (
 from egoallo.inference_utils import (
     InferenceInputTransforms,
     InferenceTrajectoryPaths,
-    load_denoiser,
 )
 from egoallo.sampling import run_sampling_with_stitching, real_time_sampling_with_stitching
 from egoallo.transforms import SE3, SO3
@@ -46,7 +45,7 @@ class Args:
     output_dir: Path = Path("./egoallo_example_trajectories/coffeemachine/")
     """Output directory for the results. It can be separated from traj_root."""
 
-    checkpoint_dir: Path = Path("./experiments/nov5_v1/v7/checkpoint-0")
+    checkpoint_dir: Path = Path("./experiments/nov6_v1/v0/checkpoint-0")
     # checkpoint_dir: Path = Path("./experiments/april13/v0/checkpoints_40000")
     smplh_npz_path: Path = Path("./data/smplh/neutral/model.npz")
 

@@ -96,7 +96,8 @@ def train_motion_diffusion(
     model = MotionUNet(config.model, smplh_npz_path=config.smplh_npz_path, device=device)
     noise_scheduler = DDPMScheduler(
         num_train_timesteps=1000,
-        beta_schedule="squaredcos_cap_v2"
+        beta_schedule="squaredcos_cap_v2",
+        prediction_type="sample"
     )
     loss_computer = training_loss.TrainingLossComputer(config.loss, device)
     

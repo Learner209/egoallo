@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import Optional
 import time
 
 import numpy as np
@@ -21,6 +22,7 @@ from .tensor_dataclass import TensorDataclass
 from .transforms import SE3
 from src.egoallo.setup_logger import setup_logger
 from .motion_diffusion_pipeline import MotionDiffusionPipeline
+from .data.dataclass import EgoTrainingData
 
 logger = setup_logger(output=None, name=__name__)
 
@@ -61,22 +63,26 @@ def run_sampling_with_stitching(
     for start_t in range(0, seq_len, window_size - overlap_size):
         end_t = min(start_t + window_size, seq_len)
         window_len = end_t - start_t
-
-        # Prepare conditioning for this window
-        conditioning = {
-            "T_cpf_tm1_cpf_t": T_cpf_tm1_cpf_t[None, start_t:end_t, :].repeat(
-                (num_samples, 1, 1)
-            ),
-            "T_world_cpf": Ts_world_cpf_shifted[None, start_t + 1:end_t + 1, :].repeat(
-                (num_samples, 1, 1)
-            ),
-        }
+        # Prepare training data for this window
+        train_batch = EgoTrainingData(
+            T_world_root=torch.zeros((num_samples, window_len, 7), device=device),  # Placeholder
+            contacts=torch.zeros((num_samples, window_len, 21), device=device),  # Placeholder 
+            betas=torch.zeros((num_samples, 1, 16), device=device),  # Placeholder
+            body_quats=torch.zeros((num_samples, window_len, 21, 4), device=device),  # Placeholder
+            T_cpf_tm1_cpf_t=T_cpf_tm1_cpf_t[None, start_t:end_t, :].repeat(num_samples, 1, 1),
+            T_world_cpf=Ts_world_cpf_shifted[None, start_t + 1:end_t + 1, :].repeat(num_samples, 1, 1),
+            height_from_floor=Ts_world_cpf_shifted[None, start_t + 1:end_t + 1, 6:7].repeat(num_samples, 1, 1),
+            joints_wrt_cpf=torch.zeros((num_samples, window_len, 21, 3), device=device),  # Placeholder
+            mask=torch.ones((num_samples, window_len), dtype=torch.bool, device=device),
+            hand_quats=None if not pipeline.unet.config.include_hands else torch.zeros((num_samples, window_len, 30, 4), device=device),
+            prev_window=None
+        )
 
         # Run pipeline for this window
         output = pipeline(
             batch_size=num_samples,
             num_inference_steps=1000,  # Or configure as needed
-            conditioning=conditioning,
+            train_batch=train_batch,
             return_intermediates=guidance_inner,
         )
 
@@ -118,7 +124,7 @@ def run_sampling_with_stitching(
     final_traj = network.EgoDenoiseTraj.unpack(
         x_0_packed_pred,
         include_hands=pipeline.unet.config.include_hands,
-        project_rot6d=True,
+        should_project_rot6d=True,
     )
 
     # Post-guidance if enabled
@@ -155,7 +161,7 @@ def real_time_sampling_with_stitching(
 
     T_cpf_tm1_cpf_t = (
         SE3(Ts_world_cpf[..., :-1, :]).inverse() @ SE3(Ts_world_cpf[..., 1:, :])
-    ).wxyz_xyz
+    ).wxyz_xyz.to(device)  # Ensure on correct device
 
     seq_len = Ts_world_cpf.shape[0] - 1
     window_size = 128
@@ -163,42 +169,50 @@ def real_time_sampling_with_stitching(
 
     start_time = time.time()
     x_0_packed_pred = torch.zeros(
-        (num_samples, seq_len, pipeline.unet.config.get_d_state()),
+        (num_samples, seq_len, pipeline.unet.config.d_state),
         device=device
     )
 
-    prev_window_motion = None
+    prev_window_motion: Optional[EgoTrainingData] = None
 
     # Process windows sequentially
     for start_t in tqdm(range(0, seq_len, window_size - overlap_size)):
         end_t = min(start_t + window_size, seq_len)
         window_len = end_t - start_t
 
-        # Prepare conditioning for this window
-        conditioning = {
-            "T_cpf_tm1_cpf_t": T_cpf_tm1_cpf_t[None, start_t:end_t, :].repeat(
+        # Prepare training batch for this window
+        train_batch = EgoTrainingData(
+            T_world_root=torch.zeros((num_samples, window_len, 7), device=device),  # Placeholder
+            contacts=torch.zeros((num_samples, window_len, 21), device=device),  # Placeholder
+            betas=torch.zeros((num_samples, 1, 16), device=device),  # Placeholder
+            body_quats=torch.zeros((num_samples, window_len, 21, 4), device=device),  # Placeholder
+            T_cpf_tm1_cpf_t=T_cpf_tm1_cpf_t[None, start_t:end_t, :].repeat(
                 (num_samples, 1, 1)
-            ),
-            "T_world_cpf": Ts_world_cpf_shifted[None, start_t + 1:end_t + 1, :].repeat(
+            ),  # Ensure on correct device
+            T_world_cpf=Ts_world_cpf_shifted[None, start_t + 1:end_t + 1, :].repeat(
                 (num_samples, 1, 1)
-            ),
-        }
-
-        if prev_window_motion is not None:
-            conditioning["prev_window"] = prev_window_motion.pack()
+            ),  # Ensure on correct device
+            height_from_floor=Ts_world_cpf_shifted[None, start_t + 1:end_t + 1, 6:7].repeat(
+                (num_samples, 1, 1)
+            ),  # Ensure on correct device
+            joints_wrt_cpf=torch.zeros((num_samples, window_len, 21, 3), device=device),  # Placeholder
+            mask=torch.ones((num_samples, window_len), dtype=torch.bool, device=device),
+            hand_quats=None,  # Optional field
+            prev_window=prev_window_motion if prev_window_motion is not None else None
+        ).to(device)
 
         # Run pipeline for this window
         output = pipeline(
             batch_size=num_samples,
             num_inference_steps=1000,  # Or configure as needed
-            conditioning=conditioning,
+            train_batch=train_batch,
             return_intermediates=False,
         )
 
         window_motion = output.motion
 
         # Store for next window's conditioning
-        prev_window_motion = window_motion
+        prev_window_motion = train_batch
 
         # Accumulate results with overlap handling
         if start_t > 0:
@@ -226,13 +240,13 @@ def real_time_sampling_with_stitching(
     final_traj = network.EgoDenoiseTraj.unpack(
         x_0_packed_pred,
         include_hands=pipeline.unet.config.include_hands,
-        project_rot6d=True,
+        should_project_rot6d=True,
     )
 
     # Post-guidance if enabled
     if guidance_mode != "off" and guidance_post:
         final_traj, _ = do_guidance_optimization(
-            Ts_world_cpf=Ts_world_cpf[1:, :],
+            Ts_world_cpf=Ts_world_cpf[1:, :].to(device),  # Ensure on correct device
             traj=final_traj,
             body_model=body_model,
             guidance_mode=guidance_mode,
@@ -240,5 +254,4 @@ def real_time_sampling_with_stitching(
             hamer_detections=hamer_detections,
             aria_detections=aria_detections,
         )
-
     return final_traj

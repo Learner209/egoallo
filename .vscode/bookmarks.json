@@ -14,12 +14,12 @@
 			"path": "aria_3_inference.py",
 			"bookmarks": [
 				{
-					"line": 76,
+					"line": 75,
 					"column": 0,
 					"label": "inference_ipdb"
 				},
 				{
-					"line": 153,
+					"line": 152,
 					"column": 0,
 					"label": "run_sampling_with_stitching"
 				}

@@ -14,28 +14,9 @@ from projectaria_tools.core.data_provider import create_vrs_data_provider
 from safetensors import safe_open
 from torch import Tensor
 
-from .network import EgoDenoiser, EgoDenoiserConfig
+from .network import EgoDenoiserConfig
 from .tensor_dataclass import TensorDataclass
 from .transforms import SE3
-
-
-def load_denoiser(checkpoint_dir: Path) -> EgoDenoiser:
-    """Load a denoiser model."""
-    checkpoint_dir = checkpoint_dir.absolute()
-    experiment_dir = checkpoint_dir.parent
-
-    config = yaml.load(
-        (experiment_dir / "model_config.yaml").read_text(), Loader=yaml.Loader
-    )
-    assert isinstance(config, EgoDenoiserConfig)
-
-    model = EgoDenoiser(config)
-    with safe_open(checkpoint_dir / "model.safetensors", framework="pt") as f:  # type: ignore
-        state_dict = {k: f.get_tensor(k) for k in f.keys()}
-    model.load_state_dict(state_dict)
-
-    return model
-
 
 @dataclass(frozen=True)
 class InferenceTrajectoryPaths:

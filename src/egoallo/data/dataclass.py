@@ -76,7 +76,7 @@ class EgoTrainingData(TensorDataclass):
     mask: Bool[Tensor, "*#batch timesteps"]
     """Mask to support variable-length sequence."""
 
-    hand_quats: Float[Tensor, "*#batch timesteps 30 4"] | None
+    hand_quats: Optional[Float[Tensor, "*#batch timesteps 30 4"]] = None
     """Local orientations for each hand joint."""
 
     prev_window: Optional["EgoTrainingData"] = None
@@ -86,10 +86,9 @@ class EgoTrainingData(TensorDataclass):
         """Validate the dataclass after initialization."""
         # Ensure all required tensor fields are present and have correct types
         for field_name, field_type in self.__annotations__.items():
-            if field_name != "prev_window":  # Skip validation for prev_window
-                value = getattr(self, field_name)
-                if not isinstance(value, torch.Tensor):
-                    raise TypeError(f"Field {field_name} must be a Tensor, got {type(value)}")
+            value = getattr(self, field_name)
+            if value is not None and not isinstance(value, (torch.Tensor, EgoTrainingData)):
+                raise TypeError(f"Field {field_name} must be a Tensor, None, or EgoTrainingData, got {type(value)}")
 
     def to(self, device: torch.device | str):
         """Override to handle prev_window correctly."""

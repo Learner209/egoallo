@@ -212,7 +212,7 @@ class MotionUNet(ModelMixin, nn.Module):
             
         # Unpack sample and get dimensions
         x_t = EgoDenoiseTraj.unpack(sample, include_hands=config.include_hands)
-        batch, time = x_t.betas.shape[:2]
+        batch, time = x_t.body_rot6d.shape[:2]
         device = sample.device
         
         # Embed noise level
@@ -318,6 +318,9 @@ class MotionUNet(ModelMixin, nn.Module):
 class MotionDiffusionPipeline(DiffusionPipeline):
     """Pipeline for generating human motion using diffusion models"""
     
+    unet: MotionUNet
+    scheduler: DDPMScheduler
+
     def __init__(
         self,
         unet: MotionUNet,
@@ -335,14 +338,15 @@ class MotionDiffusionPipeline(DiffusionPipeline):
         batch_size: int = 1,
         num_inference_steps: int = 1000,
         generator: Optional[torch.Generator] = None,
-        conditioning: Optional[Dict[str, torch.Tensor]] = None,
+        train_batch: Optional[EgoTrainingData] = None,
         return_intermediates: bool = False,
     ) -> MotionDiffusionPipelineOutput:
         # Set up scheduler
         self.scheduler.set_timesteps(num_inference_steps)
         
         # Initialize noise
-        shape = (batch_size, self.unet.config.get_d_state())
+        batch_size, time = train_batch.T_world_cpf.shape[:2]
+        shape = (batch_size, time, self.unet.config.d_state)
         noise = torch.randn(shape, generator=generator, device=self.device)
         
         # Initialize storage for intermediate states if requested
@@ -350,18 +354,20 @@ class MotionDiffusionPipeline(DiffusionPipeline):
         
         # Denoising loop
         sample = noise
-        for t in self.scheduler.timesteps:
+        timesteps = self.scheduler.timesteps.to(self.device)
+        for t in timesteps:
             # Get model prediction
-            model_output = self.unet(
+            model_output = self.unet.forward(
                 sample=sample,
                 timestep=t,
-                conditioning=conditioning
+                train_batch=train_batch,
+                return_dict=False
             )
             
             # Scheduler step
             sample = self.scheduler.step(
                 model_output=model_output,
-                timestep=t,
+                timestep=t.cpu(), # Scheduler expects CPU tensor
                 sample=sample,
                 generator=generator
             ).prev_sample
@@ -371,7 +377,7 @@ class MotionDiffusionPipeline(DiffusionPipeline):
                     EgoDenoiseTraj.unpack(
                         sample,
                         include_hands=self.unet.config.include_hands,
-                        project_rot6d=True
+                        should_project_rot6d=True
                     )
                 )
         
@@ -379,7 +385,7 @@ class MotionDiffusionPipeline(DiffusionPipeline):
         motion = EgoDenoiseTraj.unpack(
             sample,
             include_hands=self.unet.config.include_hands,
-            project_rot6d=True
+            should_project_rot6d=True
         )
         
         return MotionDiffusionPipelineOutput(
@@ -425,7 +431,8 @@ class MotionDiffusionPipeline(DiffusionPipeline):
         # Create scheduler
         scheduler = DDPMScheduler(
             num_train_timesteps=1000,
-            beta_schedule="squaredcos_cap_v2"
+            beta_schedule="squaredcos_cap_v2",
+            prediction_type="sample"
         )
         
         # Load the pretrained weights
@@ -437,16 +444,3 @@ class MotionDiffusionPipeline(DiffusionPipeline):
         )
         
         return pipeline
-
-    @classmethod
-    def from_config(
-        cls,
-        config: EgoDenoiserConfig,
-    ) -> "MotionDiffusionPipeline":
-        """Create a pipeline from a configuration"""
-        unet = MotionUNet(config)
-        scheduler = DDPMScheduler(
-            num_train_timesteps=1000,
-            beta_schedule="squaredcos_cap_v2"
-        )
-        return cls(unet=unet, scheduler=scheduler)
