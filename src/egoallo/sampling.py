@@ -81,7 +81,7 @@ def run_sampling_with_stitching(
         # Run pipeline for this window
         output = pipeline(
             batch_size=num_samples,
-            num_inference_steps=1000,  # Or configure as needed
+            num_inference_steps=50,  # Or configure as needed
             train_batch=train_batch,
             return_intermediates=guidance_inner,
         )

@@ -317,14 +317,14 @@ class MotionUNet(ModelMixin, nn.Module):
 
 class MotionDiffusionPipeline(DiffusionPipeline):
     """Pipeline for generating human motion using diffusion models"""
-    
+
     unet: MotionUNet
-    scheduler: DDPMScheduler
+    scheduler: DDIMScheduler  # Change the type hint to DDIMScheduler
 
     def __init__(
         self,
         unet: MotionUNet,
-        scheduler: DDPMScheduler,
+        scheduler: DDIMScheduler,  # Accept a DDIMScheduler
     ):
         super().__init__()
         self.register_modules(
@@ -336,24 +336,23 @@ class MotionDiffusionPipeline(DiffusionPipeline):
     def __call__(
         self,
         batch_size: int = 1,
-        num_inference_steps: int = 1000,
+        num_inference_steps: int = 50,  # Use fewer steps for DDIM
         generator: Optional[torch.Generator] = None,
         train_batch: Optional[EgoTrainingData] = None,
         return_intermediates: bool = False,
     ) -> MotionDiffusionPipelineOutput:
         # Set up scheduler
         self.scheduler.set_timesteps(num_inference_steps)
-        
+
         # Initialize noise
         batch_size, time = train_batch.T_world_cpf.shape[:2]
         shape = (batch_size, time, self.unet.config.d_state)
-        noise = torch.randn(shape, generator=generator, device=self.device)
-        
+        sample = torch.randn(shape, generator=generator, device=self.device)
+
         # Initialize storage for intermediate states if requested
         intermediates = [] if return_intermediates else None
-        
+
         # Denoising loop
-        sample = noise
         timesteps = self.scheduler.timesteps.to(self.device)
         for t in timesteps:
             # Get model prediction
@@ -363,15 +362,15 @@ class MotionDiffusionPipeline(DiffusionPipeline):
                 train_batch=train_batch,
                 return_dict=False
             )
-            
+
             # Scheduler step
             sample = self.scheduler.step(
                 model_output=model_output,
-                timestep=t.cpu(), # Scheduler expects CPU tensor
+                timestep=t,
                 sample=sample,
                 generator=generator
             ).prev_sample
-            
+
             if return_intermediates:
                 intermediates.append(
                     EgoDenoiseTraj.unpack(
@@ -380,14 +379,14 @@ class MotionDiffusionPipeline(DiffusionPipeline):
                         should_project_rot6d=True
                     )
                 )
-        
+
         # Convert final sample to motion
         motion = EgoDenoiseTraj.unpack(
             sample,
             include_hands=self.unet.config.include_hands,
             should_project_rot6d=True
         )
-        
+
         return MotionDiffusionPipelineOutput(
             motion=motion,
             intermediate_states=intermediates
@@ -421,20 +420,20 @@ class MotionDiffusionPipeline(DiffusionPipeline):
         pretrained_model_path: Union[str, Path],
         **kwargs
     ) -> "MotionDiffusionPipeline":
-        """Load a pretrained pipeline from a directory"""
         # Load the custom config first
         config = cls.load_custom_config(pretrained_model_path)
-        
+
         # Create UNet with loaded config
         unet = MotionUNet(config)
-        
-        # Create scheduler
-        scheduler = DDPMScheduler(
+
+        # Create DDIM scheduler
+        scheduler = DDIMScheduler(
             num_train_timesteps=1000,
             beta_schedule="squaredcos_cap_v2",
-            prediction_type="sample"
+            prediction_type="sample",
+            clip_sample=False,
         )
-        
+
         # Load the pretrained weights
         pipeline = super().from_pretrained(
             pretrained_model_path,
@@ -442,5 +441,5 @@ class MotionDiffusionPipeline(DiffusionPipeline):
             scheduler=scheduler,
             **kwargs
         )
-        
+
         return pipeline
