@@ -201,12 +201,12 @@ class EgoTrainingData(TensorDataclass):
     def pack(self) -> EgoDenoiseTraj:
         """Convert EgoTrainingData to EgoDenoiseTraj format."""
         # Convert quaternions to 6D rotation representation
-        body_rot6d = tf.SO3(wxyz=self.body_quats).as_rot6d()
+        body_rotmat = tf.SO3(wxyz=self.body_quats).as_matrix()
         
         # Convert hand quaternions if they exist
-        hand_rot6d = None
+        hand_rotmat = None
         if self.hand_quats is not None:
-            hand_rot6d = tf.SO3(wxyz=self.hand_quats).as_rot6d()
+            hand_rotmat = tf.SO3(wxyz=self.hand_quats).as_matrix()
 
         # Pack the prev_window if it exists
         prev_window_packed = None
@@ -216,9 +216,9 @@ class EgoTrainingData(TensorDataclass):
         # Create EgoDenoiseTraj instance
         return EgoDenoiseTraj(
             betas=self.betas,  # Expand betas to match timesteps
-            body_rot6d=body_rot6d,
+            body_rotmat=body_rotmat,
             contacts=self.contacts,
-            hand_rot6d=hand_rot6d,
+            hand_rotmat=hand_rotmat,
             prev_window=prev_window_packed
         )
 

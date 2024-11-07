@@ -12,7 +12,7 @@ from torch import nn
 from .network import EgoDenoiserConfig, EgoDenoiseTraj
 from .data.dataclass import EgoTrainingData
 from .transforms import SE3, SO3
-from .network import TransformerBlock, TransformerBlockConfig, make_positional_encoding, project_rot6d
+from .network import TransformerBlock, TransformerBlockConfig, make_positional_encoding, project_rotmats_via_svd
 from pathlib import Path
 from egoallo.fncsmpl import SmplhModel
 
@@ -59,11 +59,11 @@ class MotionUNet(ModelMixin, nn.Module):
         # MLP encoders and decoders for each modality
         modality_dims = {
             "betas": 16,
-            "body_rot6d": 21 * 6,
+            "body_rotmat": 21 * 9,  
             "contacts": 21,
         }
         if config.include_hands:
-            modality_dims["hand_rot6d"] = 30 * 6
+            modality_dims["hand_rotmat"] = 30 * 9 
 
         self.encoders = nn.ModuleDict({
             k: _make_encoder(dim, config)
@@ -126,7 +126,6 @@ class MotionUNet(ModelMixin, nn.Module):
             ]
         )
 
-
         # Other components from EgoDenoiser
         self.latent_from_cond = nn.Linear(
             len(config.cond_component_names()) * config.d_latent,
@@ -165,13 +164,13 @@ class MotionUNet(ModelMixin, nn.Module):
         # Encode window components
         encoded = (
             self.encoders["betas"](window.betas.reshape(batch, time, -1)) # BS x T x D
-            + self.encoders["body_rot6d"](window.body_rot6d.reshape(batch, time, -1)) # BS x T x D
+            + self.encoders["body_rotmat"](window.body_rotmat.reshape(batch, time, -1)) # BS x T x D
             + self.encoders["contacts"](window.contacts) # BS x T x D
         ) # type: ignore
         
-        if self.config.include_hands and window.hand_rot6d is not None:
-            encoded += self.encoders["hand_rot6d"](
-                window.hand_rot6d.reshape(batch, time, -1)
+        if self.config.include_hands and window.hand_rotmat is not None:
+            encoded += self.encoders["hand_rotmat"](
+                window.hand_rotmat.reshape(batch, time, -1)
             ) # BS x T x D
 
         # Add positional encoding
@@ -192,7 +191,6 @@ class MotionUNet(ModelMixin, nn.Module):
         for layer in self.encoder_layers:
             encoded = layer(encoded, None, noise_emb=noise_emb) # BS x T x D
             
-       
         return encoded
 
     def forward(
@@ -212,7 +210,7 @@ class MotionUNet(ModelMixin, nn.Module):
             
         # Unpack sample and get dimensions
         x_t = EgoDenoiseTraj.unpack(sample, include_hands=config.include_hands)
-        batch, time = x_t.body_rot6d.shape[:2]
+        batch, time = x_t.body_rotmat.shape[:2]  
         device = sample.device
         
         # Embed noise level
@@ -297,9 +295,11 @@ class MotionUNet(ModelMixin, nn.Module):
         outputs = []
         for key, decoder in self.decoders.items():
             out = decoder(decoder_out)
-            if key in ("body_rot6d", "hand_rot6d"):
-                out = out.reshape(batch, time, -1) # BS x T x J x 6
-                # out = project_rot6d(out).reshape(batch, time, -1) # BS x T x J*6
+            if key in ("body_rotmat", "hand_rotmat"): 
+                out = out.reshape(batch, time, -1, 3, 3)  # Reshape to include 3x3 matrices
+                # Project to valid rotation matrices using SVD
+                out = project_rotmats_via_svd(out)
+                out = out.reshape(batch, time, -1)  # Flatten for concatenation
             outputs.append(out)
             
         packed_output = torch.cat(outputs, dim=-1) # BS x T x D
@@ -308,12 +308,12 @@ class MotionUNet(ModelMixin, nn.Module):
             return BaseOutput(sample=packed_output)
         return packed_output
 
-
     def save_config(self, save_directory: str):
         config = self.config  # Assuming you have a config attribute
         os.makedirs(save_directory, exist_ok=True)
         with open(os.path.join(save_directory, "config.json"), "w") as f:
             json.dump(config.to_json(), f)
+
 
 class MotionDiffusionPipeline(DiffusionPipeline):
     """Pipeline for generating human motion using diffusion models"""
@@ -376,7 +376,7 @@ class MotionDiffusionPipeline(DiffusionPipeline):
                     EgoDenoiseTraj.unpack(
                         sample,
                         include_hands=self.unet.config.include_hands,
-                        should_project_rot6d=False
+                        should_project_rotmat=False
                     )
                 )
 
@@ -384,7 +384,7 @@ class MotionDiffusionPipeline(DiffusionPipeline):
         motion = EgoDenoiseTraj.unpack(
             sample,
             include_hands=self.unet.config.include_hands,
-            should_project_rot6d=False
+            should_project_rotmat=False
         )
 
         return MotionDiffusionPipelineOutput(

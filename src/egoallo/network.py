@@ -26,16 +26,6 @@ def project_rotmats_via_svd(
     del s
     return torch.einsum("...ij,...jk->...ik", u, vh)
 
-def project_rot6d(rot6d: Float[Tensor, "*batch joints 6"]) -> Float[Tensor, "*batch joints 6"]:
-    """Project rot6d representations to valid rotations."""
-    a = rot6d[..., :3]
-    b = rot6d[..., 3:]
-    r1 = torch.nn.functional.normalize(a, dim=-1)
-    b_proj = b - torch.sum(r1 * b, dim=-1, keepdim=True) * r1
-    r2 = torch.nn.functional.normalize(b_proj, dim=-1)
-    projected_rot6d = torch.cat([r1, r2], dim=-1)
-    return projected_rot6d
-
 
 
 class EgoDenoiseTraj(TensorDataclass):
@@ -47,14 +37,14 @@ class EgoDenoiseTraj(TensorDataclass):
     betas: Float[Tensor, "*batch timesteps 16"]
     """Body shape parameters."""
 
-    body_rot6d: Float[Tensor, "*batch timesteps 21 6"]
-    """Local orientations for each body joint in rot6d representation."""
+    body_rotmat: Float[Tensor, "*batch timesteps 21 3 3"]
+    """Local orientations for each body joint in rotation matrix representation."""
 
     contacts: Float[Tensor, "*batch timesteps 21"]
     """Contact boolean for each joint."""
 
-    hand_rot6d: Float[Tensor, "*batch timesteps 30 6"] | None
-    """Local orientations for each hand joint in rot6d representation."""
+    hand_rotmat: Float[Tensor, "*batch timesteps 30 3 3"] | None
+    """Local orientations for each hand joint in rotation matrix representation."""
 
     prev_window: Optional[EgoDenoiseTraj] = None
     """Previous window trajectory for conditioning."""
@@ -62,24 +52,24 @@ class EgoDenoiseTraj(TensorDataclass):
     @staticmethod
     def get_packed_dim(include_hands: bool) -> int:
         """Get dimension of packed representation."""
-        packed_dim = 16 + 21 * 6 + 21  # betas + body_rot6d + contacts
+        packed_dim = 16 + 21 * 9 + 21  # betas + body_rotmat + contacts
         if include_hands:
-            packed_dim += 30 * 6  # hand_rot6d
+            packed_dim += 30 * 9  # hand_rotmat
         return packed_dim
 
     def pack(self) -> Float[Tensor, "*batch timesteps d_state"]:
         """Pack trajectory into a single flattened vector."""
-        (*batch, time, num_joints, rot_dim) = self.body_rot6d.shape
-        assert num_joints == 21 and rot_dim == 6
+        (*batch, time, num_joints, h, w) = self.body_rotmat.shape
+        assert num_joints == 21 and h == 3 and w == 3
 
         to_cat = [
             self.betas.reshape((*batch, time, -1)),
-            self.body_rot6d.reshape((*batch, time, -1)),
+            self.body_rotmat.reshape((*batch, time, -1)),
             self.contacts,
         ]
 
-        if self.hand_rot6d is not None:
-            to_cat.append(self.hand_rot6d.reshape((*batch, time, -1)))
+        if self.hand_rotmat is not None:
+            to_cat.append(self.hand_rotmat.reshape((*batch, time, -1)))
 
         return torch.cat(to_cat, dim=-1)
 
@@ -88,7 +78,7 @@ class EgoDenoiseTraj(TensorDataclass):
         cls,
         x: Float[Tensor, "*batch timesteps d_state"],
         include_hands: bool,
-        should_project_rot6d: bool = False,
+        should_project_rotmat: bool = False,
         prev_window: Optional["EgoDenoiseTraj"] = None,
     ) -> "EgoDenoiseTraj":
         """Unpack trajectory from a single flattened vector."""
@@ -96,28 +86,28 @@ class EgoDenoiseTraj(TensorDataclass):
         assert d_state == cls.get_packed_dim(include_hands)
 
         if include_hands:
-            betas, body_rot6d_flat, contacts, hand_rot6d_flat = torch.split(
-                x, [16, 21 * 6, 21, 30 * 6], dim=-1
+            betas, body_rotmat_flat, contacts, hand_rotmat_flat = torch.split(
+                x, [16, 21 * 9, 21, 30 * 9], dim=-1
             )
-            body_rot6d = body_rot6d_flat.reshape((*batch, time, 21, 6))
-            hand_rot6d = hand_rot6d_flat.reshape((*batch, time, 30, 6))
+            body_rotmat = body_rotmat_flat.reshape((*batch, time, 21, 3, 3))
+            hand_rotmat = hand_rotmat_flat.reshape((*batch, time, 30, 3, 3))
         else:
-            betas, body_rot6d_flat, contacts = torch.split(
-                x, [16, 21 * 6, 21], dim=-1
+            betas, body_rotmat_flat, contacts = torch.split(
+                x, [16, 21 * 9, 21], dim=-1
             )
-            body_rot6d = body_rot6d_flat.reshape((*batch, time, 21, 6))
-            hand_rot6d = None
+            body_rotmat = body_rotmat_flat.reshape((*batch, time, 21, 3, 3))
+            hand_rotmat = None
 
-        if should_project_rot6d:
-            body_rot6d = project_rot6d(body_rot6d)
-            if hand_rot6d is not None:
-                hand_rot6d = project_rot6d(hand_rot6d)
+        if should_project_rotmat:
+            body_rotmat = project_rotmats_via_svd(body_rotmat)
+            if hand_rotmat is not None:
+                hand_rotmat = project_rotmats_via_svd(hand_rotmat)
 
         return cls(
             betas=betas,
-            body_rot6d=body_rot6d,
+            body_rotmat=body_rotmat,
             contacts=contacts,
-            hand_rot6d=hand_rot6d,
+            hand_rotmat=hand_rotmat,
             prev_window=prev_window,
         )
 
@@ -125,9 +115,9 @@ class EgoDenoiseTraj(TensorDataclass):
         """Create a new instance with a previous window for conditioning."""
         return EgoDenoiseTraj(
             betas=self.betas,
-            body_rot6d=self.body_rot6d,
+            body_rotmat=self.body_rotmat,
             contacts=self.contacts,
-            hand_rot6d=self.hand_rot6d,
+            hand_rotmat=self.hand_rotmat,
             prev_window=prev_window,
         )
 
@@ -135,17 +125,17 @@ class EgoDenoiseTraj(TensorDataclass):
         """Apply trajectory to SMPL body model."""
         device = self.betas.device
         dtype = self.betas.dtype
-        assert self.hand_rot6d is not None
+        assert self.hand_rotmat is not None
         shaped = body_model.with_shape(self.betas)
 
-        # Convert rot6d to rotation matrices
-        body_rotmats = SO3.from_rot6d(
-            self.body_rot6d.reshape(-1, 6)
-        ).as_matrix().reshape(self.body_rot6d.shape[:-1] + (3, 3))
+        # Convert rotmat to rotation matrices
+        body_rotmats = SO3.from_rotmat(
+            self.body_rotmat.reshape(-1, 3, 3)
+        ).as_matrix().reshape(self.body_rotmat.shape[:-1] + (3, 3))
 
-        hand_rotmats = SO3.from_rot6d(
-            self.hand_rot6d.reshape(-1, 6)
-        ).as_matrix().reshape(self.hand_rot6d.shape[:-1] + (3, 3))
+        hand_rotmats = SO3.from_rotmat(
+            self.hand_rotmat.reshape(-1, 3, 3)
+        ).as_matrix().reshape(self.hand_rotmat.shape[:-1] + (3, 3))
 
         posed = shaped.with_pose(
             T_world_root=SE3.identity(device=device, dtype=dtype).parameters(),
@@ -182,15 +172,7 @@ class EgoDenoiserConfig:
     cond_param: Literal[
         "ours", "canonicalized", "absolute", "absrel", "absrel_global_deltas"
     ] = "ours"
-    """Which conditioning parameterization to use.
-
-    "ours" is the default, we try to be clever and design something with nice
-        equivariance properties.
-    "canonicalized" contains a transformation that's canonicalized to aligned
-        to the first frame.
-    "absolute" is the naive case, where we just pass in transformations
-        directly.
-    """
+    """Conditioning parameterization to use."""
 
     include_hand_positions_cond: bool = False
     """Whether to include hand positions in the conditioning information."""
@@ -215,17 +197,17 @@ class EgoDenoiserConfig:
             d_cond += 3  # Relative CPF translation.
             d_cond += 1  # Floor height.
             if self.include_canonicalized_cpf_rotation_in_cond:
-                d_cond += 6  # Canonicalized CPF rotation in rot6d.
+                d_cond += 9  # Canonicalized CPF rotation in rotmat.
         elif self.cond_param == "canonicalized":
-            d_cond = 6 + 3  # Rotation (rot6d) and translation.
+            d_cond = 9 + 3  # Rotation (rotmat) and translation.
         elif self.cond_param == "absolute":
-            d_cond = 6 + 3  # Rotation (rot6d) and translation.
+            d_cond = 9 + 3  # Rotation (rotmat) and translation.
         elif self.cond_param == "absrel":
             # Both absolute and relative (rot6d + translation for each).
-            d_cond = (6 + 3) * 2
+            d_cond = (9 + 3) * 2
         elif self.cond_param == "absrel_global_deltas":
             # Absolute rotation and translation, plus relative rotation and translation.
-            d_cond = 6 + 3 + 6 + 3
+            d_cond = (9 + 3) * 2
         else:
             assert False
 
@@ -255,92 +237,81 @@ class EgoDenoiserConfig:
         dtype = T_cpf_tm1_cpf_t.dtype
         cond_dict = {}
 
-        # Compute floor height (common to all cond_param options)
-        height_from_floor = T_world_cpf[..., 6:7]  # Shape: (batch, time, 1)
-        cond_dict['floor_height'] = height_from_floor  # Shape: (batch, time, 1)
+        # Helper functions to extract pose components
+        def get_pose_components(transform: Tensor) -> tuple[Tensor, Tensor]:
+            pose = SE3(transform)
+            rotmat = pose.rotation().as_matrix()  # Shape: (batch, time, 3, 3)
+            trans = pose.translation()  # Shape: (batch, time, 3)
+            return rotmat.reshape(batch, time, 9), trans
+
+        # Common components
+        cond_dict['floor_height'] = T_world_cpf[..., 6:7]  # Shape: (batch, time, 1)
+
+        # Get absolute pose components
+        abs_rotmat, abs_trans = get_pose_components(T_world_cpf)
+        
+        # Get relative pose components 
+        rel_rotmat, rel_trans = get_pose_components(T_cpf_tm1_cpf_t)
 
         if self.cond_param == "ours":
-            # Relative CPF pose in rot6d and translation
-            rel_pose = SE3(T_cpf_tm1_cpf_t)
-            rel_rot6d = SO3(rel_pose.rotation().wxyz).as_rot6d()  # Shape: (batch, time, 6)
-            rel_trans = rel_pose.translation()                    # Shape: (batch, time, 3)
-            cond_dict['rel_rot6d'] = rel_rot6d
-            cond_dict['rel_trans'] = rel_trans
-
+            cond_dict['rel_rotmat'] = rel_rotmat  # Shape: (batch, time, 9)
+            cond_dict['rel_trans'] = rel_trans    # Shape: (batch, time, 3)
             if self.include_canonicalized_cpf_rotation_in_cond:
-                # Canonicalized CPF rotation in rot6d
-                R_world_cpf = SE3(T_world_cpf).rotation()
-                forward_cpf = torch.tensor([0.0, 0.0, 1.0], device=device, dtype=dtype)
-                forward_world = R_world_cpf @ forward_cpf
-                yaw_angles = -torch.atan2(forward_world[..., 1], forward_world[..., 0])
-                R_canonical_world = SO3.from_z_radians(yaw_angles)
-                R_canonical_cpf = R_canonical_world @ R_world_cpf
-                canonical_rot6d = R_canonical_cpf.as_rot6d()
-                cond_dict['canonical_rot6d'] = canonical_rot6d  # Shape: (batch, time, 6)
+                cond_dict['canonical_rotmat'] = abs_rotmat  # Shape: (batch, time, 9)
 
         elif self.cond_param == "canonicalized":
-            assert T_world_cpf_0 is not None, "T_world_cpf_0 is required for 'canonicalized' cond_param."
-            # Compute canonicalized transformations relative to the first frame
-            T_world_cpf_0_inv = SE3.inv(SE3(T_world_cpf_0))  # Shape: (batch, 7)
-            T_cpf_0_cpf_t = SE3.compose(T_world_cpf_0_inv[:, None, :], T_world_cpf)  # Shape: (batch, time, 7)
-            canonical_pose = SE3(T_cpf_0_cpf_t)
-            canonical_rot6d = SO3(canonical_pose.rotation().wxyz).as_rot6d()  # Shape: (batch, time, 6)
-            canonical_trans = canonical_pose.translation()                    # Shape: (batch, time, 3)
-            cond_dict['canonical_rot6d'] = canonical_rot6d
-            cond_dict['canonical_trans'] = canonical_trans
+            cond_dict['canonical_rotmat'] = abs_rotmat  # Shape: (batch, time, 9)
+            cond_dict['canonical_trans'] = abs_trans    # Shape: (batch, time, 3)
 
         elif self.cond_param == "absolute":
-            # Use absolute CPF pose in world coordinates
-            abs_pose = SE3(T_world_cpf)
-            abs_rot6d = SO3(abs_pose.rotation().wxyz).as_rot6d()  # Shape: (batch, time, 6)
-            abs_trans = abs_pose.translation()                    # Shape: (batch, time, 3)
-            cond_dict['abs_rot6d'] = abs_rot6d
-            cond_dict['abs_trans'] = abs_trans
+            cond_dict['abs_rotmat'] = abs_rotmat  # Shape: (batch, time, 9)
+            cond_dict['abs_trans'] = abs_trans    # Shape: (batch, time, 3)
 
         elif self.cond_param == "absrel":
-            # Combine absolute and relative transformations
-            # Absolute CPF pose
-            abs_pose = SE3(T_world_cpf)
-            abs_rot6d = SO3(abs_pose.rotation().wxyz).as_rot6d()  # Shape: (batch, time, 6)
-            abs_trans = abs_pose.translation()                    # Shape: (batch, time, 3)
-            cond_dict['abs_rot6d'] = abs_rot6d
-            cond_dict['abs_trans'] = abs_trans
-            # Relative CPF pose
-            rel_pose = SE3(T_cpf_tm1_cpf_t)
-            rel_rot6d = SO3(rel_pose.rotation().wxyz).as_rot6d()
-            rel_trans = rel_pose.translation()
-            cond_dict['rel_rot6d'] = rel_rot6d
-            cond_dict['rel_trans'] = rel_trans
+            cond_dict.update({
+                'abs_rotmat': abs_rotmat,  # Shape: (batch, time, 9)
+                'abs_trans': abs_trans,    # Shape: (batch, time, 3)
+                'rel_rotmat': rel_rotmat,  # Shape: (batch, time, 9)
+                'rel_trans': rel_trans     # Shape: (batch, time, 3)
+            })
 
         elif self.cond_param == "absrel_global_deltas":
-            # Similar to 'absrel' but includes global deltas
-            # Absolute CPF pose
-            abs_pose = SE3(T_world_cpf)
-            abs_rot6d = SO3(abs_pose.rotation().wxyz).as_rot6d()
-            abs_trans = abs_pose.translation()
-            cond_dict['abs_rot6d'] = abs_rot6d
-            cond_dict['abs_trans'] = abs_trans
-            # Relative CPF pose
-            rel_pose = SE3(T_cpf_tm1_cpf_t)
-            rel_rot6d = SO3(rel_pose.rotation().wxyz).as_rot6d()
-            rel_trans = rel_pose.translation()
-            cond_dict['rel_rot6d'] = rel_rot6d
-            cond_dict['rel_trans'] = rel_trans
-            # Global deltas
-            delta_rot6d = abs_rot6d[:, 1:, :] - abs_rot6d[:, :-1, :]
-            delta_trans = abs_trans[:, 1:, :] - abs_trans[:, :-1, :]
-            # Pad to match sequence length
-            delta_rot6d = torch.cat([delta_rot6d[:, :1, :], delta_rot6d], dim=1)
-            delta_trans = torch.cat([delta_trans[:, :1, :], delta_trans], dim=1)
-            cond_dict['delta_rot6d'] = delta_rot6d
-            cond_dict['delta_trans'] = delta_trans
-
+            # Add absolute and relative components
+            cond_dict.update({
+                'abs_rotmat': abs_rotmat,  # Shape: (batch, time, 9)
+                'abs_trans': abs_trans,    # Shape: (batch, time, 3)
+                'rel_rotmat': rel_rotmat,  # Shape: (batch, time, 9)
+                'rel_trans': rel_trans     # Shape: (batch, time, 3)
+            })
+            
+            # Compute global deltas
+            abs_rotmat_3x3 = abs_rotmat.reshape(batch, time, 3, 3)
+            delta_rotmat = torch.matmul(
+                abs_rotmat_3x3[:, 1:].transpose(-2, -1),
+                abs_rotmat_3x3[:, :-1]
+            )  # Shape: (batch, time-1, 3, 3)
+            delta_trans = abs_trans[:, 1:] - abs_trans[:, :-1]  # Shape: (batch, time-1, 3)
+            
+            # Pad first frame with zeros for consistent time dimension
+            delta_rotmat = torch.cat([
+                delta_rotmat[:, :1], 
+                delta_rotmat
+            ], dim=1).reshape(batch, time, 9)
+            delta_trans = torch.cat([
+                delta_trans[:, :1], 
+                delta_trans
+            ], dim=1)
+            
+            cond_dict.update({
+                'delta_rotmat': delta_rotmat,  # Shape: (batch, time, 9)
+                'delta_trans': delta_trans     # Shape: (batch, time, 3)
+            })
         else:
             raise ValueError(f"Unknown cond_param: {self.cond_param}")
 
         # Include hand positions in conditioning if applicable
         if self.include_hand_positions_cond and hand_positions_wrt_cpf is not None:
-            cond_dict['hand_positions'] = hand_positions_wrt_cpf  # Shape: (batch, time, 6)
+            cond_dict['hand_positions'] = hand_positions_wrt_cpf
 
         return cond_dict
 
@@ -349,25 +320,22 @@ class EgoDenoiserConfig:
         names = ['floor_height']  # Common to all cond_param options
 
         if self.cond_param == 'ours':
-            names.extend(['rel_rot6d', 'rel_trans'])
+            names.extend(['rel_rotmat', 'rel_trans'])
             if self.include_canonicalized_cpf_rotation_in_cond:
-                names.append('canonical_rot6d')
+                names.append('canonical_rotmat')
         elif self.cond_param == 'canonicalized':
-            names.extend(['canonical_rot6d', 'canonical_trans'])
+            names.extend(['canonical_rotmat', 'canonical_trans'])
         elif self.cond_param == 'absolute':
-            names.extend(['abs_rot6d', 'abs_trans'])
+            names.extend(['abs_rotmat', 'abs_trans'])
         elif self.cond_param == 'absrel':
-            names.extend(['abs_rot6d', 'abs_trans', 'rel_rot6d', 'rel_trans'])
+            names.extend(['abs_rotmat', 'abs_trans', 'rel_rotmat', 'rel_trans'])
         elif self.cond_param == 'absrel_global_deltas':
             names.extend([
-                'abs_rot6d', 'abs_trans',
-                'rel_rot6d', 'rel_trans',
-                'delta_rot6d', 'delta_trans'
+                'abs_rotmat', 'abs_trans',
+                'rel_rotmat', 'rel_trans',
+                'delta_rotmat', 'delta_trans'
             ])
-        else:
-            raise ValueError(f"Unknown cond_param: {self.cond_param}")
 
-        # Include hand positions if applicable
         if self.include_hand_positions_cond:
             names.append('hand_positions')
 
@@ -377,8 +345,8 @@ class EgoDenoiserConfig:
         """Return the dimension of each conditional component."""
         if name == 'floor_height':
             return 1
-        elif name in ['rel_rot6d', 'canonical_rot6d', 'abs_rot6d', 'delta_rot6d']:
-            return 6
+        elif name in ['rel_rotmat', 'canonical_rotmat', 'abs_rotmat', 'delta_rotmat']:
+            return 9  # 3x3 rotation matrix
         elif name in ['rel_trans', 'canonical_trans', 'abs_trans', 'delta_trans']:
             return 3
         elif name == 'hand_positions':

@@ -204,16 +204,16 @@ def train_motion_diffusion(
                 group_losses = {}
                 for group_name, joint_indices in joint_groups.items():
                     # Convert joint losses to tensors before stacking
-                    joint_loss_tensors = [torch.tensor(joint_losses[f'body_rot6d_j{i-1}'], device=device) for i in joint_indices]
+                    joint_loss_tensors = [torch.tensor(joint_losses[f'body_rotmat_j{i-1}'], device=device) for i in joint_indices]
                     group_loss = torch.mean(torch.stack(joint_loss_tensors))
                     group_losses[group_name] = group_loss
 
                 if global_step % 10 == 0:
                     log_dict = {
                         "train/betas_loss": losses.betas_loss.item(),
-                        "train/body_rot6d_loss": losses.body_rot6d_loss.item(),
+                        "train/body_rotmat_loss": losses.body_rotmat_loss.item(),
                         "train/contacts_loss": losses.contacts_loss.item(),
-                        "train/hand_rot6d_loss": losses.hand_rot6d_loss.item(),
+                        "train/hand_rotmat_loss": losses.hand_rotmat_loss.item(),
                         "train/fk_loss": losses.fk_loss.item(),
                         "train/foot_skating_loss": losses.foot_skating_loss.item(),
                         "train/velocity_loss": losses.velocity_loss.item(),
@@ -225,7 +225,7 @@ def train_motion_diffusion(
                     
                     # Add joint group losses
                     for group_name, group_loss in group_losses.items():
-                        log_dict[f"train/body_rot6d_loss/{group_name}"] = group_loss
+                        log_dict[f"train/body_rotmat_loss/{group_name}"] = group_loss
                         
                     wandb.log(log_dict)
 
@@ -248,13 +248,13 @@ def train_motion_diffusion(
                         f"Losses:\n"
                         f"  Total:          {losses.total_loss.item():.6e}\n"
                         f"  Betas:          {losses.betas_loss.item():.6e}\n" 
-                        f"  Body Rot6d:     {losses.body_rot6d_loss.item():.6e}\n"
+                        f"  Body Rotmat:     {losses.body_rotmat_loss.item():.6e}\n"
                         f"  Contacts:       {losses.contacts_loss.item():.6e}\n"
-                        f"  Hand Rot6d:     {losses.hand_rot6d_loss.item():.6e}\n"
+                        f"  Hand Rotmat:     {losses.hand_rotmat_loss.item():.6e}\n"
                         f"  FK:             {losses.fk_loss.item():.6e}\n"
                         f"  Foot Skating:   {losses.foot_skating_loss.item():.6e}\n"
                         f"  Velocity:       {losses.velocity_loss.item():.6e}\n"
-                        f"  Body Rot6d by Joint Group:\n{group_losses_str}"
+                        f"  Body Rotmat by Joint Group:\n{group_losses_str}"
                     )
                 
                 if global_step % 5000 == 0:

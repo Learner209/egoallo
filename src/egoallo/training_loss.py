@@ -20,9 +20,9 @@ from . import network
 class MotionLosses(NamedTuple):
     """Container for all loss components."""
     betas_loss: Tensor      # Loss on SMPL shape parameters
-    body_rot6d_loss: Tensor # Loss on body joint rotations
+    body_rotmat_loss: Tensor # Loss on body joint rotations
     contacts_loss: Tensor   # Loss on contact states
-    hand_rot6d_loss: Tensor # Loss on hand joint rotations (if enabled)
+    hand_rotmat_loss: Tensor # Loss on hand joint rotations
     fk_loss: Tensor        # Forward kinematics loss
     foot_skating_loss: Tensor  # Foot skating prevention loss
     velocity_loss: Tensor   # Joint velocity smoothness loss
@@ -41,10 +41,10 @@ class TrainingLossConfig:
     # Individual loss component weights with uniform weighting
     loss_weights: dict[str, float] = dataclasses.field(
         default_factory=lambda: {
-            "body_rot6d": 1.0,    # Primary rotation loss
+            "body_rotmat": 1.0,    
             "betas": 0.0,         # Body shape parameters 
             "contacts": 0.0,      # Contact states
-            "hand_rot6d": 1.0,    # Hand rotation loss
+            "hand_rotmat": 0.0,    
             "fk": 0.0,           # Forward kinematics (disabled)
             "foot_skating": 0.0,  # Foot skating prevention (disabled)
             "velocity": 0.0       # Velocity consistency (disabled)
@@ -97,43 +97,33 @@ class MotionLossComputer:
 
     def compute_rotation_loss(
         self,
-        pred_rot6d: torch.Tensor, # (B, T, J, 6)
-        target_rot6d: torch.Tensor, # (B, T, J, 6)
-        mask: torch.Tensor, # (B, T)
+        pred_rotmat: torch.Tensor,  # (B, T, J, 3, 3)
+        target_rotmat: torch.Tensor,  # (B, T, J, 3, 3)
+        mask: torch.Tensor,  # (B, T)
         return_per_joint: bool = False
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
-        """Improved rotation loss with geodesic distance.
+        """Compute rotation loss using geodesic distance between rotation matrices.
         
         Args:
-            pred_rot6d: Predicted 6D rotations
-            target_rot6d: Target 6D rotations
+            pred_rotmat: Predicted rotation matrices
+            target_rotmat: Target rotation matrices
             mask: Sequence mask
             return_per_joint: Whether to return per-joint losses
-            
-        Returns:
-            If return_per_joint is False:
-                Total rotation loss (scalar)
-            If return_per_joint is True:
-                Tuple of (total_loss, per_joint_losses)
         """
-        # Convert 6D rotation to matrices
-        pred_rot = SO3.from_rot6d(pred_rot6d).as_matrix()
-        target_rot = SO3.from_rot6d(target_rot6d).as_matrix()
-        
-        # Compute geodesic loss
-        R_diff = torch.matmul(pred_rot.transpose(-2, -1), target_rot) # (B, T, J, 3, 3)
-        trace = torch.diagonal(R_diff, dim1=-2, dim2=-1).sum(-1) # (B, T, J)
-        angle = torch.acos(torch.clamp((trace - 1) / 2, -1 + 1e-7, 1 - 1e-7)) # (B, T, J)
+        # Compute geodesic loss directly from rotation matrices
+        R_diff = torch.matmul(pred_rotmat.transpose(-2, -1), target_rotmat)
+        trace = torch.diagonal(R_diff, dim1=-2, dim2=-1).sum(-1)  # (B, T, J)
+        angle = torch.acos(torch.clamp((trace - 1) / 2, -1 + 1e-7, 1 - 1e-7))
         
         # Apply mask
-        loss_per_joint = (angle ** 2) * mask[:, :, None] # (B, T, J)
+        masked_loss = angle * mask[..., None]
         
-        # Average over batch and time dimensions for each joint
-        per_joint_losses = loss_per_joint.mean(dim=(0, 1))  # (J,)
+        if return_per_joint:
+            per_joint_losses = masked_loss.mean(dim=(0, 1))
+            total_loss = per_joint_losses.mean()
+            return total_loss, per_joint_losses
         
-        # Return either just total loss or both
-        total_loss = per_joint_losses.mean()
-        return (total_loss, per_joint_losses) if return_per_joint else total_loss
+        return masked_loss.mean()
 
     def compute_loss(
         self,
@@ -211,9 +201,9 @@ class MotionLossComputer:
             batch.mask
         )
         
-        body_rot6d_loss, per_joint_losses = self.compute_rotation_loss(
-            x_0_pred.body_rot6d.reshape(batch_size, seq_len, -1, 6),
-            clean_motion.body_rot6d.reshape(batch_size, seq_len, -1, 6),
+        body_rotmat_loss, per_joint_losses = self.compute_rotation_loss(
+            x_0_pred.body_rotmat.reshape(batch_size, seq_len, -1, 3, 3),
+            clean_motion.body_rotmat.reshape(batch_size, seq_len, -1, 3, 3),
             batch.mask,
             return_per_joint=True
         )
@@ -228,7 +218,7 @@ class MotionLossComputer:
         shaped_model = unwrapped_model.smpl_model.with_shape(clean_motion.betas)
         predicted_joint_positions = forward_kinematics(
             T_world_root=batch.T_world_cpf,
-            Rs_parent_joint=SO3.from_rot6d(torch.cat([x_0_pred.body_rot6d, x_0_pred.hand_rot6d], dim=-2).reshape(batch_size, seq_len, -1, 6)).wxyz,
+            Rs_parent_joint=SO3.from_matrix(torch.cat([x_0_pred.body_rotmat, x_0_pred.hand_rotmat], dim=-3).reshape(batch_size, seq_len, -1, 3, 3)).wxyz,
             t_parent_joint=shaped_model.t_parent_joint,
             parent_indices=unwrapped_model.smpl_model.parent_indices
 )
@@ -277,12 +267,12 @@ class MotionLossComputer:
         )
 
         # 7. Hand Rotation Loss (if enabled)
-        hand_rot6d_loss = torch.tensor(0.0, device=device)
+        hand_rotmat_loss = torch.tensor(0.0, device=device)
         if unwrapped_model.config.include_hands:
-            assert x_0_pred.hand_rot6d is not None
-            assert clean_motion.hand_rot6d is not None
-            pred_hand_flat = x_0_pred.hand_rot6d.reshape((batch_size, seq_len, -1))
-            gt_hand_flat = clean_motion.hand_rot6d.reshape((batch_size, seq_len, -1))
+            assert x_0_pred.hand_rotmat is not None
+            assert clean_motion.hand_rotmat is not None
+            pred_hand_flat = x_0_pred.hand_rotmat.reshape((batch_size, seq_len, -1))
+            gt_hand_flat = clean_motion.hand_rotmat.reshape((batch_size, seq_len, -1))
             
             # Only compute loss for sequences with hand motion
             hand_motion = (
@@ -296,9 +286,9 @@ class MotionLossComputer:
                 > 1e-5
             )
             hand_bt_mask = torch.logical_and(hand_motion[:, None], batch.mask)
-            hand_rot6d_loss = weight_and_mask_loss(
+            hand_rotmat_loss = weight_and_mask_loss(
                 (pred_hand_flat - gt_hand_flat).reshape(
-                    batch_size, seq_len, 30 * 6
+                    batch_size, seq_len, 30 * 3 * 3
                 ) ** 2,
                 t,
                 bt_mask=hand_bt_mask,
@@ -311,9 +301,9 @@ class MotionLossComputer:
         # 8. Combine all losses with weights
         total_loss = (
             self.config.loss_weights["betas"] * betas_loss +
-            self.config.loss_weights["body_rot6d"] * body_rot6d_loss +
+            self.config.loss_weights["body_rotmat"] * body_rotmat_loss +
             self.config.loss_weights["contacts"] * contacts_loss +
-            self.config.loss_weights["hand_rot6d"] * hand_rot6d_loss +
+            self.config.loss_weights["hand_rotmat"] * hand_rotmat_loss +
             self.config.loss_weights["fk"] * fk_loss +
             self.config.loss_weights["foot_skating"] * foot_skating_loss +
             self.config.loss_weights["velocity"] * velocity_loss
@@ -321,9 +311,9 @@ class MotionLossComputer:
 
         losses = MotionLosses(
             betas_loss=betas_loss * self.config.loss_weights["betas"],
-            body_rot6d_loss=body_rot6d_loss * self.config.loss_weights["body_rot6d"],
+            body_rotmat_loss=body_rotmat_loss * self.config.loss_weights["body_rotmat"],
             contacts_loss=contacts_loss * self.config.loss_weights["contacts"],
-            hand_rot6d_loss=hand_rot6d_loss * self.config.loss_weights["hand_rot6d"],
+            hand_rotmat_loss=hand_rotmat_loss * self.config.loss_weights["hand_rotmat"],
             fk_loss=fk_loss * self.config.loss_weights["fk"],
             foot_skating_loss=foot_skating_loss * self.config.loss_weights["foot_skating"],
             velocity_loss=velocity_loss * self.config.loss_weights["velocity"],
@@ -332,7 +322,7 @@ class MotionLossComputer:
 
         if return_joint_losses:
             joint_losses_dict = {
-                f"body_rot6d_j{i}": loss.item() 
+                f"body_rotmat_j{i}": loss.item() 
                 for i, loss in enumerate(per_joint_losses)
             }
             return losses, joint_losses_dict

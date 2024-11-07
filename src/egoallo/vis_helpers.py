@@ -182,12 +182,12 @@ def visualize_traj_and_hand_detections(
         sample_count = betas.shape[0]
         assert betas.shape == (sample_count, timesteps, 16)
         # Convert 6D rotation to rotation matrix then to quaternion
-        body_quats = SO3.from_rot6d(traj.body_rot6d).wxyz
+        body_quats = SO3.from_matrix(traj.body_rotmat).wxyz
         assert body_quats.shape == (sample_count, timesteps, 21, 4)
         device = body_quats.device
 
-        if traj.hand_rot6d is not None:
-            hand_quats = SO3.from_rot6d(traj.hand_rot6d).wxyz
+        if traj.hand_rotmat is not None:
+            hand_quats = SO3.from_matrix(traj.hand_rotmat).wxyz
             left_hand_quats = hand_quats[..., :15, :]
             right_hand_quats = hand_quats[..., 15:30, :]
         else:
