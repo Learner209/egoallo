@@ -45,7 +45,7 @@ class Args:
     output_dir: Path = Path("./egoallo_example_trajectories/coffeemachine/")
     """Output directory for the results. It can be separated from traj_root."""
 
-    checkpoint_dir: Path = Path("./experiments/nov6_v1/v0/checkpoint-0")
+    checkpoint_dir: Path = Path("./experiments/nov6_v2/v5/checkpoint-95000")
     # checkpoint_dir: Path = Path("./experiments/april13/v0/checkpoints_40000")
     smplh_npz_path: Path = Path("./data/smplh/neutral/model.npz")
 
@@ -63,17 +63,20 @@ class Args:
     """Whether to apply guidance optimizer between denoising steps. This is
     important if we're doing anything with hands. It can be turned off to speed
     up debugging/experiments, or if we only care about foot skating losses."""
-    guidance_post: bool = True
+    guidance_post: bool = False
     """Whether to apply guidance optimizer after diffusion sampling."""
     save_traj: bool = True
     """Whether to save the output trajectory, which will be placed under `traj_dir/egoallo_outputs/some_name.npz`."""
     visualize_traj: bool = False
     """Whether to visualize the trajectory after sampling."""
+    use_ipdb: bool = False
+    """Whether to use ipdb instead of pdb."""
 
 
 def main(args: Args) -> None:
 
-    # import ipdb; ipdb.set_trace()
+    if args.use_ipdb:
+        import ipdb; ipdb.set_trace()
 
     device = torch.device("cuda")
 
@@ -150,8 +153,8 @@ def main(args: Args) -> None:
 
     body_model = fncsmpl.SmplhModel.load(args.smplh_npz_path).to(device)
 
-    # traj = run_sampling_with_stitching(
-    traj = real_time_sampling_with_stitching(
+    traj = run_sampling_with_stitching(
+    # traj = real_time_sampling_with_stitching(
         pipeline=pipeline,
         body_model=body_model,
         guidance_mode=args.guidance_mode,

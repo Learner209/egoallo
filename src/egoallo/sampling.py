@@ -46,7 +46,7 @@ def run_sampling_with_stitching(
 
     T_cpf_tm1_cpf_t = (
         SE3(Ts_world_cpf[..., :-1, :]).inverse() @ SE3(Ts_world_cpf[..., 1:, :])
-    ).wxyz_xyz
+    ).wxyz_xyz.to(device)  # Ensure on correct device
 
     seq_len = Ts_world_cpf.shape[0] - 1
     window_size = 128
@@ -60,7 +60,7 @@ def run_sampling_with_stitching(
     overlap_weights = torch.zeros((1, seq_len, 1), device=device)
 
     # Process windows
-    for start_t in range(0, seq_len, window_size - overlap_size):
+    for start_t in tqdm(range(0, seq_len, window_size - overlap_size)):
         end_t = min(start_t + window_size, seq_len)
         window_len = end_t - start_t
         # Prepare training data for this window
@@ -87,7 +87,7 @@ def run_sampling_with_stitching(
         )
 
         # Handle guidance if enabled
-        if guidance_mode != "off" and guidance_inner:
+        if guidance_mode != "off" and guidance_inner and output.intermediate_states is not None:
             for intermediate in output.intermediate_states:
                 intermediate, _ = do_guidance_optimization(
                     Ts_world_cpf=Ts_world_cpf[start_t + 1:end_t + 1, :],
@@ -204,7 +204,7 @@ def real_time_sampling_with_stitching(
         # Run pipeline for this window
         output = pipeline(
             batch_size=num_samples,
-            num_inference_steps=1000,  # Or configure as needed
+            num_inference_steps=50,  # Or configure as needed
             train_batch=train_batch,
             return_intermediates=False,
         )

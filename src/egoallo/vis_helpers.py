@@ -7,7 +7,7 @@ import numpy.typing as npt
 import torch
 import trimesh
 import viser
-import viser.transforms as vtf
+import egoallo.transforms as tf
 from jaxtyping import Float
 from plyfile import PlyData
 from torch import Tensor
@@ -55,7 +55,7 @@ def load_splat_file(splat_path: Path, center: bool = False) -> SplatArgs:
     )
     scales = splat_uint8[:, 12:24].copy().view(np.float32)
     wxyzs = splat_uint8[:, 28:32] / 255.0 * 2.0 - 1.0
-    Rs = vtf.SO3(wxyzs).as_matrix()
+    Rs = tf.SO3(wxyzs).as_matrix()
     covariances = np.einsum(
         "nij,njk,nlk->nil", Rs, np.eye(3)[None, :, :] * scales[:, None, :] ** 2, Rs
     )
@@ -89,7 +89,7 @@ def load_ply_file(ply_file_path: Path, center: bool = False) -> SplatArgs:
     colors = 0.5 + SH_C0 * np.stack([v["f_dc_0"], v["f_dc_1"], v["f_dc_2"]], axis=1)
     opacities = 1.0 / (1.0 + np.exp(-v["opacity"][:, None]))
 
-    Rs = vtf.SO3(wxyzs).as_matrix()
+    Rs = tf.SO3(wxyzs).as_matrix()
     covariances = np.einsum(
         "nij,njk,nlk->nil", Rs, np.eye(3)[None, :, :] * scales[:, None, :] ** 2, Rs
     )
@@ -181,12 +181,13 @@ def visualize_traj_and_hand_detections(
         timesteps = betas.shape[1]
         sample_count = betas.shape[0]
         assert betas.shape == (sample_count, timesteps, 16)
-        body_quats = SO3.from_matrix(traj.body_rotmats).wxyz
+        # Convert 6D rotation to rotation matrix then to quaternion
+        body_quats = SO3.from_rot6d(traj.body_rot6d).wxyz
         assert body_quats.shape == (sample_count, timesteps, 21, 4)
         device = body_quats.device
 
-        if traj.hand_rotmats is not None:
-            hand_quats = SO3.from_matrix(traj.hand_rotmats).wxyz
+        if traj.hand_rot6d is not None:
+            hand_quats = SO3.from_rot6d(traj.hand_rot6d).wxyz
             left_hand_quats = hand_quats[..., :15, :]
             right_hand_quats = hand_quats[..., 15:30, :]
         else:
@@ -347,7 +348,7 @@ def visualize_traj_and_hand_detections(
                 f"/persons/{i}",
                 vertices=shaped.verts_zero[i, 0, :, :].numpy(force=True),
                 faces=body_model.faces.numpy(force=True),
-                bone_wxyzs=vtf.SO3.identity(
+                bone_wxyzs=tf.SO3.identity(
                     batch_axes=(body_model.get_num_joints() + 1,)
                 ).wxyz,
                 bone_positions=np.concatenate(
@@ -501,9 +502,9 @@ def visualize_traj_and_hand_detections(
         if gui_attach.value:
             for client in server.get_clients().values():
                 client.camera.wxyz = (
-                    vtf.SO3(cpf_handle.wxyz) @ vtf.SO3.from_z_radians(np.pi)
+                    tf.SO3(cpf_handle.wxyz) @ tf.SO3.from_z_radians(np.pi)
                 ).wxyz
-                client.camera.position = cpf_handle.position - vtf.SO3(
+                client.camera.position = cpf_handle.position - tf.SO3(
                     cpf_handle.wxyz
                 ) @ np.array([0.0, 0.0, gui_attach_dist.value])
 

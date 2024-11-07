@@ -99,7 +99,7 @@ def train_motion_diffusion(
         beta_schedule="squaredcos_cap_v2",
         prediction_type="sample"
     )
-    loss_computer = training_loss.TrainingLossComputer(config.loss, device)
+    loss_computer = training_loss.MotionLossComputer(config.loss, device)
     
     if use_ema:
         ema = EMAModel(
@@ -179,13 +179,14 @@ def train_motion_diffusion(
                 
                 noise_pred = (noisy_motion - (alphas_cumprod ** 0.5) * x0_pred['sample']) / ((1 - alphas_cumprod) ** 0.5)
                 
-                losses = loss_computer.compute_loss(
+                losses, joint_losses = loss_computer.compute_loss(
                     noise_pred=noise_pred,
                     gt_noise=noise,
                     x0_pred=x0_pred['sample'],
                     batch=batch,
                     unwrapped_model=accelerator.unwrap_model(model),
-                    t=timesteps
+                    t=timesteps,
+                    return_joint_losses=True
                 )
                 
                 accelerator.backward(losses.total_loss)
@@ -200,8 +201,26 @@ def train_motion_diffusion(
                     ema.step(model.parameters())  # Use unwrapped model parameters
             # Logging
             if accelerator.is_main_process:
+                # Define joint groups based on SMPLH body joints
+                joint_groups = {
+                    'spine': [3, 6, 9],  # spine1, spine2, spine3
+                    'neck_head': [12, 15],  # neck, head
+                    'left_arm': [13, 16, 18, 20],  # left_collar, left_shoulder, left_elbow, left_wrist
+                    'right_arm': [14, 17, 19, 21],  # right_collar, right_shoulder, right_elbow, right_wrist
+                    'left_leg': [1, 4, 7, 10],  # left_hip, left_knee, left_ankle, left_foot
+                    'right_leg': [2, 5, 8, 11],  # right_hip, right_knee, right_ankle, right_foot
+                }
+                
+                # Compute average loss per joint group
+                group_losses = {}
+                for group_name, joint_indices in joint_groups.items():
+                    # Convert joint losses to tensors before stacking
+                    joint_loss_tensors = [torch.tensor(joint_losses[f'body_rot6d_j{i-1}'], device=device) for i in joint_indices]
+                    group_loss = torch.mean(torch.stack(joint_loss_tensors))
+                    group_losses[group_name] = group_loss
+
                 if global_step % 10 == 0:
-                    wandb.log({
+                    log_dict = {
                         "train/noise_pred_loss": losses.noise_pred_loss.item(),
                         "train/betas_loss": losses.betas_loss.item(),
                         "train/body_rot6d_loss": losses.body_rot6d_loss.item(),
@@ -214,15 +233,30 @@ def train_motion_diffusion(
                         "epoch": epoch,
                         "global_step": global_step,
                         "iterations_per_sec": loop_metrics.iterations_per_sec
-                    })
+                    }
+                    
+                    # Add joint group losses
+                    for group_name, group_loss in group_losses.items():
+                        log_dict[f"train/body_rot6d_loss/{group_name}"] = group_loss
+                        
+                    wandb.log(log_dict)
 
-
-                
                 if global_step % 60 == 0:
                     mem_free, mem_total = torch.cuda.mem_get_info()
+                    
+                    # Format joint group losses string
+                    group_losses_str = "\n".join([
+                        f"    {group_name:12} {loss:.6e}" 
+                        for group_name, loss in group_losses.items()
+                    ])
+                    
+                    # Get current learning rate
+                    current_lr = optimizer.param_groups[0]['lr']
+                    
                     logger.info(
                         f"Step: {global_step} ({loop_metrics.iterations_per_sec:.2f} it/sec)\n"
                         f"Memory: {(mem_total-mem_free)/1024**3:.2f}/{mem_total/1024**3:.2f}GB\n"
+                        f"Learning Rate: {current_lr:.2e}\n"
                         f"Losses:\n"
                         f"  Total:          {losses.total_loss.item():.6e}\n"
                         f"  Noise Pred:     {losses.noise_pred_loss.item():.6e}\n"
@@ -232,7 +266,8 @@ def train_motion_diffusion(
                         f"  Hand Rot6d:     {losses.hand_rot6d_loss.item():.6e}\n"
                         f"  FK:             {losses.fk_loss.item():.6e}\n"
                         f"  Foot Skating:   {losses.foot_skating_loss.item():.6e}\n"
-                        f"  Velocity:       {losses.velocity_loss.item():.6e}"
+                        f"  Velocity:       {losses.velocity_loss.item():.6e}\n"
+                        f"  Body Rot6d by Joint Group:\n{group_losses_str}"
                     )
                 
                 if global_step % 5000 == 0:

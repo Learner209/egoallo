@@ -8,6 +8,7 @@ from typing import (
     Union,
     final,
     overload,
+    Optional,
 )
 from overrides import overrides
 
@@ -78,12 +79,20 @@ class MatrixLieGroup(abc.ABC):
     @classmethod
     @abc.abstractmethod
     def identity(
-        cls: Type[GroupType], device: Union[torch.device, str], dtype: torch.dtype
+        cls: Type[GroupType],
+        batch_shape: Union[Tuple[int, ...], torch.Size] = (),
+        device: Optional[Union[torch.device, str]] = None,
+        dtype: Optional[torch.dtype] = None,
     ) -> GroupType:
         """Returns identity element.
 
+        Args:
+            batch_shape: Optional shape for batched identities
+            device: Optional torch device. Defaults to CPU if not specified
+            dtype: Optional dtype. Defaults to float32 if not specified
+
         Returns:
-            Identity element.
+            Identity element with specified batch shape, device and dtype
         """
 
     @classmethod

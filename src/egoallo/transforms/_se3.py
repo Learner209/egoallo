@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Union, cast
+from typing import Union, cast, Optional, Tuple
 from overrides import overrides
 
 import numpy as np
@@ -77,12 +77,35 @@ class SE3(_base.SEBase[SO3]):
 
     @classmethod
     @overrides
-    def identity(cls, device: Union[torch.device, str], dtype: torch.dtype) -> SE3:
-        return SE3(
-            wxyz_xyz=torch.tensor(
-                [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], device=device, dtype=dtype
-            )
+    def identity(
+        cls,
+        batch_axes: Union[Tuple[int, ...], torch.Size] = (),
+        device: Optional[Union[torch.device, str]] = None,
+        dtype: Optional[torch.dtype] = None,
+    ) -> SE3:
+        """Returns identity transformation.
+        
+        Args:
+            batch_shape: Optional shape for batched identities
+            device: Optional torch device. Defaults to CPU if not specified
+            dtype: Optional dtype. Defaults to float32 if not specified
+            
+        Returns:
+            SE3: Identity transformation matrix
+        """
+        if dtype is None:
+            dtype = torch.float32
+            
+        identity_transform = torch.tensor(
+            [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], dtype=dtype
         )
+        if device is not None:
+            identity_transform = identity_transform.to(device)
+            
+        if batch_axes:
+            identity_transform = identity_transform.expand(*batch_axes, -1)
+            
+        return SE3(wxyz_xyz=identity_transform)
 
     @classmethod
     @overrides

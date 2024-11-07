@@ -1,6 +1,6 @@
 """Training loss configuration and computation."""
 import dataclasses
-from typing import Literal, NamedTuple
+from typing import Literal, NamedTuple, Union, Tuple, Dict
 
 import torch
 from torch import Tensor
@@ -39,10 +39,10 @@ class TrainingLossConfig:
     beta_coeff_weights: tuple[float, ...] = tuple(1 / (i + 1) for i in range(16))
     loss_weights: dict[str, float] = dataclasses.field(
         default_factory=lambda: {
-            "betas": 0.1,  # Keep nonzero
+            "betas": 0.0, # 0.1,  # Keep nonzero
             "body_rot6d": 1.0,  # Keep nonzero
-            "contacts": 0.1,  # Keep nonzero
-            "hand_rot6d": 0.01,  # Keep nonzero
+            "contacts": 0.0, # 0.1,  # Keep nonzero
+            "hand_rot6d": 0.0, # 0.01,  # Keep nonzero
             # Set geometric losses to zero for debugging
             "fk": 0.0,  # Set to zero
             "foot_skating": 0.0,  # Set to zero
@@ -54,13 +54,67 @@ class TrainingLossConfig:
     weight_loss_by_t: Literal["emulate_eps_pred"] = "emulate_eps_pred"
     """Weights to apply to the loss at each noise level."""
 
-class TrainingLossComputer:
-    """Helper class for computing the training loss."""
-
-    def __init__(self, config: TrainingLossConfig, device: torch.device) -> None:
+class MotionLossComputer:
+    """Improved loss computer with better stability and convergence."""
+    
+    def __init__(self, config: TrainingLossConfig, device: torch.device):
         self.config = config
-        # Emulate loss weight for epsilon prediction
-        assert self.config.weight_loss_by_t == "emulate_eps_pred"
+        self.device = device
+        
+        # Initialize loss weights with validation
+        self._validate_and_normalize_weights()
+        
+    def _validate_and_normalize_weights(self):
+        """Validate and normalize loss weights to prevent dominance."""
+        total = sum(self.config.loss_weights.values())
+        if total == 0:
+            raise ValueError("At least one loss weight must be non-zero")
+        
+        # Normalize weights if needed
+        if total > 1:
+            self.config.loss_weights = {
+                k: v/total for k, v in self.config.loss_weights.items()
+            }
+
+    def compute_rotation_loss(
+        self,
+        pred_rot6d: torch.Tensor, # (B, T, J, 6)
+        target_rot6d: torch.Tensor, # (B, T, J, 6)
+        mask: torch.Tensor, # (B, T)
+        return_per_joint: bool = False
+    ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+        """Improved rotation loss with geodesic distance.
+        
+        Args:
+            pred_rot6d: Predicted 6D rotations
+            target_rot6d: Target 6D rotations
+            mask: Sequence mask
+            return_per_joint: Whether to return per-joint losses
+            
+        Returns:
+            If return_per_joint is False:
+                Total rotation loss (scalar)
+            If return_per_joint is True:
+                Tuple of (total_loss, per_joint_losses)
+        """
+        # Convert 6D rotation to matrices
+        pred_rot = SO3.from_rot6d(pred_rot6d).as_matrix()
+        target_rot = SO3.from_rot6d(target_rot6d).as_matrix()
+        
+        # Compute geodesic loss
+        R_diff = torch.matmul(pred_rot.transpose(-2, -1), target_rot) # (B, T, J, 3, 3)
+        trace = torch.diagonal(R_diff, dim1=-2, dim2=-1).sum(-1) # (B, T, J)
+        angle = torch.acos(torch.clamp((trace - 1) / 2, -1 + 1e-7, 1 - 1e-7)) # (B, T, J)
+        
+        # Apply mask
+        loss_per_joint = (angle ** 2) * mask[:, :, None] # (B, T, J)
+        
+        # Average over batch and time dimensions for each joint
+        per_joint_losses = loss_per_joint.mean(dim=(0, 1))  # (J,)
+        
+        # Return either just total loss or both
+        total_loss = per_joint_losses.mean()
+        return (total_loss, per_joint_losses) if return_per_joint else total_loss
 
     def compute_loss(
         self,
@@ -70,7 +124,8 @@ class TrainingLossComputer:
         gt_noise: torch.FloatTensor,
         batch: EgoTrainingData,
         unwrapped_model: MotionUNet,
-    ) -> MotionLosses:
+        return_joint_losses: bool = False
+    ) -> Union[MotionLosses, Tuple[MotionLosses, Dict[str, torch.Tensor]]]:
         """Compute all training losses.
         
         Args:
@@ -80,9 +135,13 @@ class TrainingLossComputer:
             gt_noise: Ground truth noise that was added
             batch: Training batch data
             unwrapped_model: Unwrapped model for accessing config
+            return_joint_losses: Whether to return per-joint rotation losses
             
         Returns:
-            MotionLosses containing all loss components
+            If return_joint_losses is False:
+                MotionLosses containing aggregated losses
+            If return_joint_losses is True:
+                Tuple of (MotionLosses, per_joint_losses_dict)
         """
         device = gt_noise.device
         batch_size, seq_len = batch.betas.shape[:2]
@@ -122,14 +181,14 @@ class TrainingLossComputer:
 
         # 3. Compute original losses between prediction and ground truth
         betas_loss = weight_and_mask_loss(
-            (x_0_pred.betas - clean_motion.betas) ** 2 * 
-            torch.tensor(self.config.beta_coeff_weights, device=device)
+            (x_0_pred.betas - clean_motion.betas) ** 2
         )
         
-        body_rot6d_loss = weight_and_mask_loss(
-            (x_0_pred.body_rot6d - clean_motion.body_rot6d).reshape(
-                (batch_size, seq_len, 21 * 6)
-            ) ** 2
+        body_rot6d_loss, per_joint_losses = self.compute_rotation_loss(
+            x_0_pred.body_rot6d.reshape(batch_size, seq_len, -1, 6),
+            clean_motion.body_rot6d.reshape(batch_size, seq_len, -1, 6),
+            batch.mask,
+            return_per_joint=True
         )
         
         contacts_loss = weight_and_mask_loss(
@@ -227,7 +286,7 @@ class TrainingLossComputer:
             self.config.loss_weights["velocity"] * velocity_loss
         )
 
-        return MotionLosses(
+        losses = MotionLosses(
             noise_pred_loss=noise_pred_loss * self.config.noise_pred_weight,
             betas_loss=betas_loss * self.config.loss_weights["betas"],
             body_rot6d_loss=body_rot6d_loss * self.config.loss_weights["body_rot6d"],
@@ -238,3 +297,11 @@ class TrainingLossComputer:
             velocity_loss=velocity_loss * self.config.loss_weights["velocity"],
             total_loss=total_loss
         )
+
+        if return_joint_losses:
+            joint_losses_dict = {
+                f"body_rot6d_j{i}": loss.item() 
+                for i, loss in enumerate(per_joint_losses)
+            }
+            return losses, joint_losses_dict
+        return losses

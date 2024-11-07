@@ -6,7 +6,7 @@ import json
 import torch
 from diffusers import DiffusionPipeline, UNet2DModel, ModelMixin
 from diffusers.utils import BaseOutput
-from diffusers.schedulers import DDPMScheduler
+from diffusers.schedulers import DDPMScheduler, DDIMScheduler
 from torch import nn
 
 from .network import EgoDenoiserConfig, EgoDenoiseTraj

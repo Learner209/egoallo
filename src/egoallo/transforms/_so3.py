@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Union
+from typing import Union, Optional, Tuple
 from overrides import overrides
 
 import numpy as np
@@ -170,8 +170,33 @@ class SO3(_base.SOBase):
 
     @classmethod
     @overrides
-    def identity(cls, device: Union[torch.device, str], dtype: torch.dtype) -> SO3:
-        return SO3(wxyz=torch.tensor([1.0, 0.0, 0.0, 0.0], device=device, dtype=dtype))
+    def identity(
+        cls,
+        batch_axes: Union[Tuple[int, ...], torch.Size] = (),
+        device: Optional[Union[torch.device, str]] = None,
+        dtype: Optional[torch.dtype] = None,
+    ) -> SO3:
+        """Returns identity rotation.
+        
+        Args:
+            batch_shape: Optional shape for batched identities
+            device: Optional torch device. Defaults to CPU if not specified
+            dtype: Optional dtype. Defaults to float32 if not specified
+            
+        Returns:
+            SO3: Identity rotation matrix
+        """
+        if dtype is None:
+            dtype = torch.float32
+            
+        identity_quat = torch.tensor([1.0, 0.0, 0.0, 0.0], dtype=dtype)
+        if device is not None:
+            identity_quat = identity_quat.to(device)
+            
+        if batch_axes:
+            identity_quat = identity_quat.expand(*batch_axes, -1)
+            
+        return SO3(wxyz=identity_quat)
 
     @classmethod
     @overrides
