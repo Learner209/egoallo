@@ -298,8 +298,8 @@ class MotionUNet(ModelMixin, nn.Module):
         for key, decoder in self.decoders.items():
             out = decoder(decoder_out)
             if key in ("body_rot6d", "hand_rot6d"):
-                out = out.reshape(batch, time, -1, 6) # BS x T x J x 6
-                out = project_rot6d(out).reshape(batch, time, -1) # BS x T x J*6
+                out = out.reshape(batch, time, -1) # BS x T x J x 6
+                # out = project_rot6d(out).reshape(batch, time, -1) # BS x T x J*6
             outputs.append(out)
             
         packed_output = torch.cat(outputs, dim=-1) # BS x T x D
@@ -376,7 +376,7 @@ class MotionDiffusionPipeline(DiffusionPipeline):
                     EgoDenoiseTraj.unpack(
                         sample,
                         include_hands=self.unet.config.include_hands,
-                        should_project_rot6d=True
+                        should_project_rot6d=False
                     )
                 )
 
@@ -384,7 +384,7 @@ class MotionDiffusionPipeline(DiffusionPipeline):
         motion = EgoDenoiseTraj.unpack(
             sample,
             include_hands=self.unet.config.include_hands,
-            should_project_rot6d=True
+            should_project_rot6d=False
         )
 
         return MotionDiffusionPipelineOutput(
