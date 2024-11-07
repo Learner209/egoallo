@@ -17,6 +17,7 @@ lightning_logs/
 outputs/
 experiments/
 blendify_assets/
+wandb/
 
 datasets/
 myenv/
