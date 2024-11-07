@@ -124,7 +124,7 @@ def run_sampling_with_stitching(
     final_traj = network.EgoDenoiseTraj.unpack(
         x_0_packed_pred,
         include_hands=pipeline.unet.config.include_hands,
-        should_project_rot6d=True,
+        should_project_rot6d=False,
     )
 
     # Post-guidance if enabled
@@ -240,7 +240,7 @@ def real_time_sampling_with_stitching(
     final_traj = network.EgoDenoiseTraj.unpack(
         x_0_packed_pred,
         include_hands=pipeline.unet.config.include_hands,
-        should_project_rot6d=True,
+        should_project_rot6d=False,
     )
 
     # Post-guidance if enabled

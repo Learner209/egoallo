@@ -59,7 +59,7 @@ class EgoAlloTrainConfig:
     )
 
     # Optimizer options.
-    learning_rate: float = 1e-4
+    learning_rate: float = 4e-5
     weight_decay: float = 1e-4
     warmup_steps: int = 1000
     max_grad_norm: float = 1.0
