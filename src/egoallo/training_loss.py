@@ -1,12 +1,13 @@
 """Training loss configuration and computation."""
 import dataclasses
-from typing import Literal, NamedTuple, Union, Tuple, Dict
+from typing import Literal, NamedTuple, Union, Tuple, Dict, Optional
 
 import torch
 from torch import Tensor
 import torch.utils.data
 from torch._dynamo import OptimizedModule
 from torch.nn.parallel import DistributedDataParallel
+from diffusers import DDPMScheduler
 from jaxtyping import Bool, Float, Int
 
 from .data.amass import EgoTrainingData
@@ -18,7 +19,6 @@ from . import network
 
 class MotionLosses(NamedTuple):
     """Container for all loss components."""
-    noise_pred_loss: Tensor  # MSE between predicted and target noise
     betas_loss: Tensor      # Loss on SMPL shape parameters
     body_rot6d_loss: Tensor # Loss on body joint rotations
     contacts_loss: Tensor   # Loss on contact states
@@ -31,22 +31,23 @@ class MotionLosses(NamedTuple):
 @dataclasses.dataclass(frozen=True)
 class TrainingLossConfig:
     """Configuration for training losses."""
-    # Noise prediction loss weight
-    noise_pred_weight: float = 0.0
     
-    # Original loss weights
+    # Dropout probability for conditional inputs
     cond_dropout_prob: float = 0.0
-    beta_coeff_weights: tuple[float, ...] = tuple(1 / (i + 1) for i in range(16))
+    
+    # Use uniform weights (1.0) for all beta coefficients
+    beta_coeff_weights: tuple[float, ...] = tuple(1.0 for _ in range(16))
+    
+    # Individual loss component weights with uniform weighting
     loss_weights: dict[str, float] = dataclasses.field(
         default_factory=lambda: {
-            "betas": 0.0, # 0.1,  # Keep nonzero
-            "body_rot6d": 1.0,  # Keep nonzero
-            "contacts": 0.0, # 0.1,  # Keep nonzero
-            "hand_rot6d": 0.0, # 0.01,  # Keep nonzero
-            # Set geometric losses to zero for debugging
-            "fk": 0.0,  # Set to zero
-            "foot_skating": 0.0,  # Set to zero
-            "velocity": 0.0  # Set to zero
+            "body_rot6d": 1.0,    # Primary rotation loss
+            "betas": 0.0,         # Body shape parameters 
+            "contacts": 0.0,      # Contact states
+            "hand_rot6d": 1.0,    # Hand rotation loss
+            "fk": 0.0,           # Forward kinematics (disabled)
+            "foot_skating": 0.0,  # Foot skating prevention (disabled)
+            "velocity": 0.0       # Velocity consistency (disabled)
         }
     )
     
@@ -57,12 +58,16 @@ class TrainingLossConfig:
 class MotionLossComputer:
     """Improved loss computer with better stability and convergence."""
     
-    def __init__(self, config: TrainingLossConfig, device: torch.device):
+    def __init__(self, config: TrainingLossConfig, device: torch.device, scheduler: DDPMScheduler):
         self.config = config
         self.device = device
+        self.scheduler = scheduler
         
         # Initialize loss weights with validation
-        self._validate_and_normalize_weights()
+        # self._validate_and_normalize_weights()
+        
+        # Compute timestep weights based on scheduler parameters
+        self._compute_timestep_weights()
         
     def _validate_and_normalize_weights(self):
         """Validate and normalize loss weights to prevent dominance."""
@@ -75,6 +80,20 @@ class MotionLossComputer:
             self.config.loss_weights = {
                 k: v/total for k, v in self.config.loss_weights.items()
             }
+
+    def _compute_timestep_weights(self):
+        """Compute per-timestep weights using scheduler parameters."""
+        # Get relevant parameters from scheduler
+        betas = self.scheduler.betas
+        alphas = 1.0 - betas
+        alphas_cumprod = self.scheduler.alphas_cumprod
+        
+        # SNR calculations
+        snr = alphas_cumprod / (1 - alphas_cumprod)
+        # Use min-SNR weighting scheme as described in the improved DDPM paper
+        weights = torch.minimum(snr, torch.ones_like(snr))
+        
+        self.weight_t = weights.to(self.device)
 
     def compute_rotation_loss(
         self,
@@ -120,34 +139,26 @@ class MotionLossComputer:
         self,
         t: Tensor,
         x0_pred: torch.FloatTensor,
-        noise_pred: torch.FloatTensor,
-        gt_noise: torch.FloatTensor,
         batch: EgoTrainingData,
         unwrapped_model: MotionUNet,
         return_joint_losses: bool = False
-    ) -> Union[MotionLosses, Tuple[MotionLosses, Dict[str, torch.Tensor]]]:
-        """Compute all training losses.
+    ):
+        """
+        Compute training losses for motion prediction.
         
         Args:
-            t: Timesteps for each batch element
-            x0_pred: Model's predicted denoised motion
-            noise_pred: Model's predicted noise
-            gt_noise: Ground truth noise that was added
-            batch: Training batch data
-            unwrapped_model: Unwrapped model for accessing config
-            return_joint_losses: Whether to return per-joint rotation losses
+            t: Timesteps tensor
+            x0_pred: Predicted denoised motion
+            batch: Training data batch
+            unwrapped_model: Unwrapped model for accessing parameters
+            return_joint_losses: Whether to return individual joint losses
             
         Returns:
-            If return_joint_losses is False:
-                MotionLosses containing aggregated losses
-            If return_joint_losses is True:
-                Tuple of (MotionLosses, per_joint_losses_dict)
+            losses: Combined losses
+            joint_losses: Individual joint losses if requested
         """
-        device = gt_noise.device
+        device = x0_pred.device
         batch_size, seq_len = batch.betas.shape[:2]
-
-        # 1. Noise prediction loss
-        noise_pred_loss = torch.nn.functional.mse_loss(noise_pred, gt_noise)
 
         # 2. Unpack predicted and ground truth motions
         x_0_pred = network.EgoDenoiseTraj.unpack(x0_pred, include_hands=unwrapped_model.config.include_hands)
@@ -155,24 +166,38 @@ class MotionLossComputer:
 
         def weight_and_mask_loss(
             loss_per_step: Float[Tensor, "b t d"],
-            bt_mask: Bool[Tensor, "b t"] = batch.mask,
-            bt_mask_sum: Int[Tensor, ""] = torch.sum(batch.mask),
+            t: Int[Tensor, "b"],  # Add timestep parameter
+            bt_mask: Optional[Bool[Tensor, "b t"]] = None,
+            bt_mask_sum: Optional[Int[Tensor, ""]] = None,
         ) -> Float[Tensor, ""]:
             """Helper to compute masked and weighted loss.
             
             Args:
                 loss_per_step: Per-step loss values
+                t: Timesteps for each batch element
                 bt_mask: Binary mask for batch/time dimensions
                 bt_mask_sum: Sum of mask for normalization
             
             Returns:
                 Weighted and masked scalar loss
             """
-            _, _, d = loss_per_step.shape
+            if bt_mask is None:
+                bt_mask = torch.ones_like(loss_per_step[..., 0], dtype=torch.bool)
+            if bt_mask_sum is None:
+                bt_mask_sum = torch.sum(bt_mask)
+                
+            batch_size, seq_len, d = loss_per_step.shape
+            
+            # Get weights for current timesteps
+            timestep_weights = self.weight_t[t]  # [b]
+            
+            # Apply timestep weights to loss
+            weighted_loss = loss_per_step * timestep_weights.view(batch_size, 1, 1)
+            
             return (
                 torch.sum(
                     torch.sum(
-                        torch.mean(loss_per_step, dim=-1) * bt_mask,
+                        torch.mean(weighted_loss, dim=-1) * bt_mask,
                         dim=-1,
                     )
                 )
@@ -181,7 +206,9 @@ class MotionLossComputer:
 
         # 3. Compute original losses between prediction and ground truth
         betas_loss = weight_and_mask_loss(
-            (x_0_pred.betas - clean_motion.betas) ** 2
+            (x_0_pred.betas - clean_motion.betas) ** 2,
+            t,
+            batch.mask
         )
         
         body_rot6d_loss, per_joint_losses = self.compute_rotation_loss(
@@ -192,7 +219,9 @@ class MotionLossComputer:
         )
         
         contacts_loss = weight_and_mask_loss(
-            (x_0_pred.contacts - clean_motion.contacts) ** 2
+            (x_0_pred.contacts - clean_motion.contacts) ** 2,
+            t,
+            batch.mask
         )
 
         # 4. Forward Kinematics Loss
@@ -205,7 +234,9 @@ class MotionLossComputer:
 )
 
         fk_loss = weight_and_mask_loss(
-            (predicted_joint_positions[..., :batch.joints_wrt_world.shape[-2], 4:7] - batch.joints_wrt_world).reshape(batch_size, seq_len, -1) ** 2 # joints_wrt_world: (B, T, 21*3)
+            (predicted_joint_positions[..., :batch.joints_wrt_world.shape[-2], 4:7] - batch.joints_wrt_world).reshape(batch_size, seq_len, -1) ** 2, # joints_wrt_world: (B, T, 21*3)
+            t,
+            batch.mask
         )
 
         # 5. Foot Skating Loss
@@ -220,6 +251,7 @@ class MotionLossComputer:
         foot_skating_losses = torch.stack([
             weight_and_mask_loss(
                 foot_velocities[..., i, :].pow(2), # (B,T-1,3) for each joint
+                t,
                 bt_mask=foot_skating_mask[..., i], # (B,T-1) for each joint
                 bt_mask_sum=torch.maximum(
                     torch.sum(foot_skating_mask[..., i]) * 3, # Multiply by 3 for x,y,z
@@ -239,6 +271,7 @@ class MotionLossComputer:
 
         velocity_loss = weight_and_mask_loss(
             (joint_velocities[..., :batch.joints_wrt_world.shape[-2], :] - gt_velocities).reshape(batch_size, seq_len-1, -1) ** 2,
+            t,
             bt_mask=batch.mask[:, 1:],
             bt_mask_sum=torch.sum(batch.mask[:, 1:])
         )
@@ -267,6 +300,7 @@ class MotionLossComputer:
                 (pred_hand_flat - gt_hand_flat).reshape(
                     batch_size, seq_len, 30 * 6
                 ) ** 2,
+                t,
                 bt_mask=hand_bt_mask,
                 bt_mask_sum=torch.maximum(
                     torch.sum(hand_bt_mask), 
@@ -276,7 +310,6 @@ class MotionLossComputer:
 
         # 8. Combine all losses with weights
         total_loss = (
-            self.config.noise_pred_weight * noise_pred_loss +
             self.config.loss_weights["betas"] * betas_loss +
             self.config.loss_weights["body_rot6d"] * body_rot6d_loss +
             self.config.loss_weights["contacts"] * contacts_loss +
@@ -287,7 +320,6 @@ class MotionLossComputer:
         )
 
         losses = MotionLosses(
-            noise_pred_loss=noise_pred_loss * self.config.noise_pred_weight,
             betas_loss=betas_loss * self.config.loss_weights["betas"],
             body_rot6d_loss=body_rot6d_loss * self.config.loss_weights["body_rot6d"],
             contacts_loss=contacts_loss * self.config.loss_weights["contacts"],

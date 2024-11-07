@@ -59,7 +59,7 @@ class EgoAlloTrainConfig:
     )
 
     # Optimizer options.
-    learning_rate: float = 4e-5
+    learning_rate: float = 1e-4
     weight_decay: float = 1e-4
     warmup_steps: int = 1000
     max_grad_norm: float = 1.0
@@ -99,7 +99,7 @@ def train_motion_diffusion(
         beta_schedule="squaredcos_cap_v2",
         prediction_type="sample"
     )
-    loss_computer = training_loss.MotionLossComputer(config.loss, device)
+    loss_computer = training_loss.MotionLossComputer(config.loss, device, noise_scheduler)
     
     if use_ema:
         ema = EMAModel(
@@ -163,26 +163,15 @@ def train_motion_diffusion(
             )
             
             with accelerator.accumulate(model):
-                # Model predicts x_0 directly instead of noise
+                # Model predicts x_0 directly
                 x0_pred = model.forward(
                     sample=noisy_motion,
                     timestep=timesteps,
                     train_batch=batch,
                 )
                 
-                # Get noise prediction from x0_pred using standard DDPM formulation
-                # noise_pred = (noisy_motion - sqrt(alpha_t) * x0_pred) / sqrt(1-alpha_t)
-                alphas_cumprod = noise_scheduler.alphas_cumprod[timesteps]
-                alphas_cumprod = alphas_cumprod.flatten()
-                while len(alphas_cumprod.shape) < len(noisy_motion.shape):
-                    alphas_cumprod = alphas_cumprod.unsqueeze(-1)
-                
-                noise_pred = (noisy_motion - (alphas_cumprod ** 0.5) * x0_pred['sample']) / ((1 - alphas_cumprod) ** 0.5)
-                
                 losses, joint_losses = loss_computer.compute_loss(
-                    noise_pred=noise_pred,
-                    gt_noise=noise,
-                    x0_pred=x0_pred['sample'],
+                    x0_pred=x0_pred['sample'], 
                     batch=batch,
                     unwrapped_model=accelerator.unwrap_model(model),
                     t=timesteps,
@@ -195,7 +184,7 @@ def train_motion_diffusion(
                     accelerator.clip_grad_norm_(model.parameters(), config.max_grad_norm)
                 
                 optimizer.step()
-                optimizer.zero_grad()
+                optimizer.zero_grad(set_to_none=True)  # Using set_to_none=True for better performance
                 
                 if use_ema:
                     ema.step(model.parameters())  # Use unwrapped model parameters
@@ -221,7 +210,6 @@ def train_motion_diffusion(
 
                 if global_step % 10 == 0:
                     log_dict = {
-                        "train/noise_pred_loss": losses.noise_pred_loss.item(),
                         "train/betas_loss": losses.betas_loss.item(),
                         "train/body_rot6d_loss": losses.body_rot6d_loss.item(),
                         "train/contacts_loss": losses.contacts_loss.item(),
@@ -259,7 +247,6 @@ def train_motion_diffusion(
                         f"Learning Rate: {current_lr:.2e}\n"
                         f"Losses:\n"
                         f"  Total:          {losses.total_loss.item():.6e}\n"
-                        f"  Noise Pred:     {losses.noise_pred_loss.item():.6e}\n"
                         f"  Betas:          {losses.betas_loss.item():.6e}\n" 
                         f"  Body Rot6d:     {losses.body_rot6d_loss.item():.6e}\n"
                         f"  Contacts:       {losses.contacts_loss.item():.6e}\n"
