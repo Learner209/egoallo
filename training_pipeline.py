@@ -76,8 +76,9 @@ def train_motion_diffusion(
     accelerator = Accelerator(
         project_config=ProjectConfiguration(project_dir=str(experiment_dir)),
         dataloader_config=DataLoaderConfiguration(split_batches=True),
+        cpu=False  # Force CPU usage
     )
-    device = accelerator.device
+    device = accelerator.device  # Get device from accelerator
     if use_ipdb:
         import ipdb; ipdb.set_trace()
 

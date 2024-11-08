@@ -29,7 +29,7 @@
 			"path": "training_pipeline.py",
 			"bookmarks": [
 				{
-					"line": 80,
+					"line": 81,
 					"column": 32,
 					"label": "train_motion_diffusion_ipdb"
 				}
