@@ -161,7 +161,7 @@ class MotionLossComputer:
         batch_size, seq_len = batch.betas.shape[:2]
 
         # 2. Unpack predicted and ground truth motions
-        x_0_pred = network.EgoDenoiseTraj.unpack(x0_pred, include_hands=unwrapped_model.config.include_hands)
+        x_0_pred = network.EgoDenoiseTraj.unpack(x0_pred, include_hands=unwrapped_model.config.include_hand_motion)
         clean_motion = batch.pack()
 
         def weight_and_mask_loss(
@@ -278,7 +278,7 @@ class MotionLossComputer:
 
         # 7. Hand Rotation Loss (if enabled)
         hand_rot6d_loss = torch.tensor(0.0, device=device)
-        if unwrapped_model.config.include_hands:
+        if unwrapped_model.config.include_hand_motion:
             assert x_0_pred.hand_rot6d is not None
             assert clean_motion.hand_rot6d is not None
             pred_hand_flat = x_0_pred.hand_rot6d.reshape((batch_size, seq_len, -1))

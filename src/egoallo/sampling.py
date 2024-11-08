@@ -74,7 +74,7 @@ def run_sampling_with_stitching(
             height_from_floor=Ts_world_cpf_shifted[None, start_t + 1:end_t + 1, 6:7].repeat(num_samples, 1, 1),
             joints_wrt_cpf=torch.zeros((num_samples, window_len, 21, 3), device=device),  # Placeholder
             mask=torch.ones((num_samples, window_len), dtype=torch.bool, device=device),
-            hand_quats=None if not pipeline.unet.config.include_hands else torch.zeros((num_samples, window_len, 30, 4), device=device),
+            hand_quats=None, # In the inference case, we don't have hand quats
             prev_window=None
         )
 
@@ -123,7 +123,7 @@ def run_sampling_with_stitching(
     # Final trajectory
     final_traj = network.EgoDenoiseTraj.unpack(
         x_0_packed_pred,
-        include_hands=pipeline.unet.config.include_hands,
+        include_hands=pipeline.unet.config.include_hand_motion,
         should_project_rot6d=False,
     )
 
@@ -239,7 +239,7 @@ def real_time_sampling_with_stitching(
     # Final trajectory
     final_traj = network.EgoDenoiseTraj.unpack(
         x_0_packed_pred,
-        include_hands=pipeline.unet.config.include_hands,
+        include_hands=pipeline.unet.config.include_hand_motion,
         should_project_rot6d=False,
     )
 
