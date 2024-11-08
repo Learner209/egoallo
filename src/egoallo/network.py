@@ -166,8 +166,11 @@ class EgoDenoiserConfig:
     )
 
     include_canonicalized_cpf_rotation_in_cond: bool = True
-    include_hands: bool = True
-    """Whether to include hand joints (+15 per hand) in the denoised state."""
+    include_hand_motion: bool = True
+    """Whether to include hand joint rotations (+15 per hand) in the denoised state."""
+
+    condition_on_hand_positions: bool = False
+    """Whether to include hand positions in the conditioning information for better guidance."""
 
     cond_param: Literal[
         "ours", "canonicalized", "absolute", "absrel", "absrel_global_deltas"
@@ -186,7 +189,7 @@ class EgoDenoiserConfig:
     @cached_property
     def d_state(self) -> int:
         """Dimensionality of the state vector."""
-        return EgoDenoiseTraj.get_packed_dim(self.include_hands)
+        return EgoDenoiseTraj.get_packed_dim(self.include_hand_motion)
         
     @cached_property
     def d_cond(self) -> int:

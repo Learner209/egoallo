@@ -151,7 +151,7 @@ class MotionLossComputer:
         batch_size, seq_len = batch.betas.shape[:2]
 
         # 2. Unpack predicted and ground truth motions
-        x_0_pred = network.EgoDenoiseTraj.unpack(x0_pred, include_hands=unwrapped_model.config.include_hands)
+        x_0_pred = network.EgoDenoiseTraj.unpack(x0_pred, include_hands=unwrapped_model.config.include_hand_motion)
         clean_motion = batch.pack()
 
         def weight_and_mask_loss(
