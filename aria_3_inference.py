@@ -45,7 +45,7 @@ class Args:
     output_dir: Path = Path("./egoallo_example_trajectories/coffeemachine/")
     """Output directory for the results. It can be separated from traj_root."""
 
-    checkpoint_dir: Path = Path("./experiments/nov7_v2/v0/checkpoint-85000")
+    checkpoint_dir: Path = Path("experiments/nov8_v1/v1/checkpoint-10000")
     # checkpoint_dir: Path = Path("./experiments/april13/v0/checkpoints_40000")
     smplh_npz_path: Path = Path("./data/smplh/neutral/model.npz")
 
