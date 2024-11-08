@@ -268,7 +268,7 @@ class MotionLossComputer:
 
         # 7. Hand Rotation Loss (if enabled)
         hand_rotmat_loss = torch.tensor(0.0, device=device)
-        if unwrapped_model.config.include_hands:
+        if unwrapped_model.config.include_hand_motion:
             assert x_0_pred.hand_rotmat is not None
             assert clean_motion.hand_rotmat is not None
             pred_hand_flat = x_0_pred.hand_rotmat.reshape((batch_size, seq_len, -1))

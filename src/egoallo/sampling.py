@@ -123,7 +123,7 @@ def run_sampling_with_stitching(
     # Final trajectory
     final_traj = network.EgoDenoiseTraj.unpack(
         x_0_packed_pred,
-        include_hands=pipeline.unet.config.include_hands,
+        include_hands=pipeline.unet.config.include_hand_motion,
         should_project_rotmat=False,
     )
 
@@ -239,7 +239,7 @@ def real_time_sampling_with_stitching(
     # Final trajectory
     final_traj = network.EgoDenoiseTraj.unpack(
         x_0_packed_pred,
-        include_hands=pipeline.unet.config.include_hands,
+        include_hands=pipeline.unet.config.include_hand_motion,
         should_project_rotmat=False,
     )
 
