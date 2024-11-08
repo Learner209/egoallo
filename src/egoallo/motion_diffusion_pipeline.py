@@ -62,7 +62,7 @@ class MotionUNet(ModelMixin, nn.Module):
             "body_rotmat": 21 * 9,  
             "contacts": 21,
         }
-        if config.include_hands:
+        if config.include_hand_motion:
             modality_dims["hand_rotmat"] = 30 * 9 
 
         self.encoders = nn.ModuleDict({
