@@ -286,6 +286,9 @@ class MotionUNet(ModelMixin, nn.Module):
             out = decoder(decoder_out)
             if key in ("body_rot6d", "hand_rot6d"):
                 out = out.reshape(batch, time, -1)
+                # Project to valid rot6d representation
+                out = project_rot6d(out.view(*out.shape[:-1], -1, 6))
+                out = out.reshape(batch, time, -1)
             outputs.append(out)
             
         packed_output = torch.cat(outputs, dim=-1)
