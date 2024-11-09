@@ -88,7 +88,7 @@ class EgoDenoiseTraj(TensorDataclass):
         cls,
         x: Float[Tensor, "*batch timesteps d_state"],
         include_hands: bool,
-        should_project_rot6d: bool = False,
+        should_project_rot6d: bool = True,
         prev_window: Optional["EgoDenoiseTraj"] = None,
     ) -> "EgoDenoiseTraj":
         """Unpack trajectory from a single flattened vector."""
@@ -547,11 +547,6 @@ class TransformerBlock(nn.Module):
             k = self.rotary_emb.rotate_queries_or_keys(k, seq_dim=-2)
         x = torch.nn.functional.scaled_dot_product_attention(
             q, k, v, dropout_p=config.dropout_p, attn_mask=attn_mask
-        )
-        x = self.dropout(x)
-        x = rearrange(x, "b nh t dh -> b t (nh dh)", nh=config.n_heads)
-        x = torch.nn.functional.scaled_dot_product_attention(
-            q, k, v, dropout_p=config.dropout_p
         )
         x = self.dropout(x)
         x = rearrange(x, "b nh t dh -> b t (nh dh)", nh=config.n_heads)

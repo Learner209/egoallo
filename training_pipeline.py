@@ -31,12 +31,13 @@ logger = setup_logger(output=None, name=__name__)
 import dataclasses
 from typing import Literal
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=False)
 class EgoAlloTrainConfig:
     experiment_name: str = "april13"
     dataset_hdf5_path: Path = Path("./data/egoalgo_no_skating_dataset.hdf5")
     dataset_files_path: Path = Path("./data/egoalgo_no_skating_dataset_files.txt")
     smplh_npz_path: Path = Path("./data/smplh/neutral/model.npz")
+    use_ipdb: bool = False
 
     loss: training_loss.TrainingLossConfig = training_loss.TrainingLossConfig()
 
@@ -148,7 +149,7 @@ def train_motion_diffusion(
             
             loop_metrics = next(loop_metrics_gen)
             
-            clean_motion: Float[Tensor, "*batch seq_len d_state"] = batch.pack()
+            clean_motion: EgoDenoiseTraj = batch.pack()
 
             # Project target rotations to valid rot6d
             # TODO: This is a hack to get around the fact that let the rot6d repr in dataset be valid.
@@ -186,7 +187,7 @@ def train_motion_diffusion(
                 )
                 
                 losses, joint_losses = loss_computer.compute_loss(
-                    x0_pred=x0_pred['sample'], 
+                    x0_pred=x0_pred.sample, 
                     batch=batch,
                     unwrapped_model=accelerator.unwrap_model(model),
                     t=timesteps,

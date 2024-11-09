@@ -12,7 +12,7 @@ from torch import nn
 from .network import EgoDenoiserConfig, EgoDenoiseTraj
 from .data.dataclass import EgoTrainingData
 from .transforms import SE3, SO3
-from .network import TransformerBlock, TransformerBlockConfig, make_positional_encoding, project_rot6d
+from .network import TransformerBlock, TransformerBlockConfig, make_positional_encoding, project_rot6d, fourier_encode
 from pathlib import Path
 from egoallo.fncsmpl import SmplhModel
 
@@ -126,10 +126,13 @@ class MotionUNet(ModelMixin, nn.Module):
             ]
         )
 
+        # Calculate input dimension after Fourier encoding
+        cond_dim_per_component = config.d_latent + 2 * config.fourier_enc_freqs * config.d_latent
+        total_cond_dim = len(config.cond_component_names()) * cond_dim_per_component
 
         # Other components from EgoDenoiser
         self.latent_from_cond = nn.Linear(
-            len(config.cond_component_names()) * config.d_latent,
+            total_cond_dim,
             config.d_latent
         )
         
@@ -165,11 +168,13 @@ class MotionUNet(ModelMixin, nn.Module):
                 if name in conditioning:
                     component = conditioning[name]
                     embed = self.cond_embeddings[name](component)
+                    # Apply Fourier encoding to each component's embedding
+                    embed = fourier_encode(embed, freqs=self.config.fourier_enc_freqs)
                     cond_embeds.append(embed)
             cond = torch.cat(cond_embeds, dim=-1)
             encoder_out = self.latent_from_cond(cond)
         else:
-            assert_never(conditioning)
+            raise ValueError("Conditioning information is required but was None.")
 
         # Add positional encoding
         if self.config.positional_encoding == "rope":
@@ -365,7 +370,6 @@ class MotionDiffusionPipeline(DiffusionPipeline):
                     EgoDenoiseTraj.unpack(
                         sample,
                         include_hands=self.unet.config.include_hand_motion,
-                        should_project_rot6d=False
                     )
                 )
 
@@ -373,7 +377,6 @@ class MotionDiffusionPipeline(DiffusionPipeline):
         motion = EgoDenoiseTraj.unpack(
             sample,
             include_hands=self.unet.config.include_hand_motion,
-            should_project_rot6d=False
         )
 
         return MotionDiffusionPipelineOutput(
