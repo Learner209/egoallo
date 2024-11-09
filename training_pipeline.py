@@ -40,6 +40,7 @@ class EgoAlloTrainConfig:
     use_ipdb: bool = False
 
     loss: training_loss.TrainingLossConfig = training_loss.TrainingLossConfig()
+    device: Literal["cpu", "cuda"] = "cuda"
 
     # Dataset arguments.
     batch_size: int = 256
@@ -78,7 +79,7 @@ def train_motion_diffusion(
     accelerator = Accelerator(
         project_config=ProjectConfiguration(project_dir=str(experiment_dir)),
         dataloader_config=DataLoaderConfiguration(split_batches=True),
-        cpu=False  # Force CPU usage
+        cpu=config.device == "cpu"  # Force CPU usage
     )
     device = accelerator.device  # Get device from accelerator
     if use_ipdb:

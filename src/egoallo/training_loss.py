@@ -84,16 +84,17 @@ class MotionLossComputer:
     def _compute_timestep_weights(self):
         """Compute per-timestep weights using scheduler parameters."""
         # Get relevant parameters from scheduler
-        betas = self.scheduler.betas
-        alphas = 1.0 - betas
-        alphas_cumprod = self.scheduler.alphas_cumprod
+        alphas_cumprod = self.scheduler.alphas_cumprod  # Equivalent to alpha_bar_t
         
-        # SNR calculations
-        snr = alphas_cumprod / (1 - alphas_cumprod)
-        # Use min-SNR weighting scheme as described in the improved DDPM paper
-        weights = torch.minimum(snr, torch.ones_like(snr))
+        # Compute weights using the original formula
+        weight_t = alphas_cumprod / (1 - alphas_cumprod)
         
-        self.weight_t = weights.to(self.device)
+        # Normalize and pad weights
+        padding = 0.01  # Same as in the original code
+        weight_t = weight_t / weight_t[1] * (1.0 - padding) + padding  # Scale weights
+        
+        self.weight_t = weight_t.to(self.device)
+
 
     def compute_rotation_loss(
         self,
