@@ -24,6 +24,7 @@ assets
 wandb/
 
 data/
+!src/egoallo/data
 egoallo_checkpoint_*
 egoallo_example_*
 
