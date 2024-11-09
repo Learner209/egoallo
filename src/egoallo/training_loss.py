@@ -44,7 +44,7 @@ class TrainingLossConfig:
             "body_rot6d": 1.0,    # Primary rotation loss
             "betas": 0.0,         # Body shape parameters 
             "contacts": 0.0,      # Contact states
-            "hand_rot6d": 1.0,    # Hand rotation loss
+            "hand_rot6d": 0.0,    # Hand rotation loss
             "fk": 0.0,           # Forward kinematics (disabled)
             "foot_skating": 0.0,  # Foot skating prevention (disabled)
             "velocity": 0.0       # Velocity consistency (disabled)
