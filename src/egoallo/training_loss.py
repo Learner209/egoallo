@@ -55,6 +55,50 @@ class TrainingLossComputer:
         # Pad for numerical stability, and scale between [padding, 1.0].
         padding = 0.01
         self.weight_t = weight_t / weight_t[1] * (1.0 - padding) + padding
+    def compute_rotation_loss(
+        self,
+        pred_rot6d: torch.Tensor,  # (B, T, J, 6)
+        target_rot6d: torch.Tensor,  # (B, T, J, 6)
+        t: torch.Tensor,  # (B,)
+        mask: torch.Tensor,  # (B, T)
+        return_per_joint: bool = False
+    ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+        """Compute weighted geodesic rotation loss between predicted and target 6D rotations.
+        
+        Args:
+            pred_rot6d: Predicted 6D rotations with shape (batch, time, joints, 6)
+            target_rot6d: Target 6D rotations with shape (batch, time, joints, 6) 
+            t: Timesteps for diffusion weighting with shape (batch,)
+            mask: Binary mask indicating valid frames with shape (batch, time)
+            return_per_joint: Whether to return per-joint losses
+            
+        Returns:
+            Total weighted geodesic rotation loss if return_per_joint=False
+            Tuple of (total loss, per-joint losses) if return_per_joint=True
+        """
+        # Convert 6D rotation representation to SO3 objects
+        pred_rot_so3 = SO3.from_rot6d(pred_rot6d)  # (B, T, J)
+        target_rot_so3 = SO3.from_rot6d(target_rot6d)  # (B, T, J)
+        
+        # Compute geodesic distance between rotations
+        rot_loss = pred_rot_so3.log() - target_rot_so3.log()  # (B, T, J, 3)
+        rot_loss = torch.norm(rot_loss, dim=-1)  # (B, T, J)
+        
+        # Apply timestep-dependent weighting using weight_and_mask_loss
+        weighted_loss = self.weight_and_mask_loss(
+            rot_loss,
+            t,
+            mask,
+            reduction='none'  # Keep per-joint dimension
+        )  # (B, J)
+        
+        if return_per_joint:
+            # Return both total loss and per-joint losses
+            total_loss = weighted_loss.mean()
+            return total_loss, weighted_loss
+        
+        # Return only total loss
+        return weighted_loss.mean()
 
     def compute_denoising_loss(
         self,
