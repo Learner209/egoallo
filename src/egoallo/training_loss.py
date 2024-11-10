@@ -56,6 +56,35 @@ class TrainingLossComputer:
         padding = 0.01
         self.weight_t = weight_t / weight_t[1] * (1.0 - padding) + padding
 
+    def compute_rotation_loss(
+        self,
+        pred_rotmats: Float[Tensor, "*batch dims 3 3"],
+        target_rotmats: Float[Tensor, "*batch dims 3 3"],
+    ) -> Float[Tensor, "*batch dims"]:
+        """Compute geodesic loss between rotation matrices.
+        
+        Args:
+            pred_rotmats: Predicted rotation matrices
+            target_rotmats: Target rotation matrices
+            
+        Returns:
+            Geodesic distance for each rotation matrix
+        """
+        # Compute R1.T @ R2
+        R_diff = torch.matmul(
+            pred_rotmats.transpose(-2, -1),
+            target_rotmats
+        )
+        
+        # Compute trace
+        trace = torch.diagonal(R_diff, dim1=-2, dim2=-1).sum(-1)
+        
+        # Clamp trace to valid range to avoid numerical issues
+        trace = torch.clamp(trace, min=-3.0, max=3.0)
+        
+        # Compute geodesic distance: arccos((trace - 1)/2)
+        return torch.acos((trace - 1.0) / 2.0)
+
     def compute_denoising_loss(
         self,
         model: network.EgoDenoiser | DistributedDataParallel | OptimizedModule,
@@ -174,19 +203,28 @@ class TrainingLossComputer:
                 / bt_mask_sum
             )
 
+        # Compute per-joint geodesic losses
+        body_rotmats_loss = self.compute_rotation_loss(
+            x_0_pred.body_rotmats,  # (b, t, 21, 3, 3)
+            x_0.body_rotmats,       # (b, t, 21, 3, 3)
+        )  # (b, t, 21)
+        
+        # Log per-joint losses
+        for joint_idx in range(21):
+            joint_loss = weight_and_mask_loss(
+                body_rotmats_loss[..., joint_idx:joint_idx+1],
+            )
+            log_outputs[f"body_rotmats_loss/joint_{joint_idx}"] = joint_loss
+        
+        # Overall body rotation loss
+        loss_terms["body_rotmats"] = weight_and_mask_loss(body_rotmats_loss)
+
         loss_terms: dict[str, Tensor | float] = {
             "betas": weight_and_mask_loss(
                 # (b, t, 16)
                 (x_0_pred.betas - x_0.betas) ** 2
                 # (16,)
                 * x_0.betas.new_tensor(self.config.beta_coeff_weights),
-            ),
-            "body_rotmats": weight_and_mask_loss(
-                # (b, t, 21 * 3 * 3)
-                (x_0_pred.body_rotmats - x_0.body_rotmats).reshape(
-                    (batch, time, 21 * 3 * 3)
-                )
-                ** 2,
             ),
             "contacts": weight_and_mask_loss((x_0_pred.contacts - x_0.contacts) ** 2),
         }
