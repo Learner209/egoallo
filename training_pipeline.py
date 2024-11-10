@@ -1,38 +1,31 @@
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Literal, Optional, Dict, Any
+import logging
+from datetime import datetime
+
+import torch
+from torch.utils.data import DataLoader
+import wandb
+import yaml
 from accelerate import Accelerator, DataLoaderConfiguration
 from accelerate.utils import ProjectConfiguration
 from diffusers import DDPMScheduler
-from diffusers.optimization import get_scheduler
 from diffusers.training_utils import EMAModel
-import torch
-import wandb
-import yaml
-import tyro
-from pathlib import Path
 
 from egoallo.motion_diffusion_pipeline import MotionDiffusionPipeline, MotionUNet
-from egoallo.network import EgoDenoiserConfig
 from egoallo.data.amass_dataset_dynamic import EgoAmassHdf5DatasetDynamic
-from egoallo.data.amass import EgoAmassHdf5Dataset
-from egoallo.data.dataclass import collate_dataclass
+from egoallo.data.dataclass import collate_dataclass, EgoTrainingData
+from egoallo.network import EgoDenoiseTraj
 from egoallo.training_utils import (
     get_experiment_dir,
-    ipdb_safety_net,
     flattened_hparam_dict_from_dataclass,
-    loop_metric_generator
+    loop_metric_generator,
 )
-from egoallo.setup_logger import setup_logger
-from egoallo import training_loss, training_utils, network
-from egoallo.data.dataclass import EgoTrainingData
-from egoallo.network import EgoDenoiseTraj
-from egoallo.fncsmpl import SmplhModel
-from egoallo.network import project_rot6d
+from egoallo import training_loss, network
 
-logger = setup_logger(output=None, name=__name__)
-
-import dataclasses
-from typing import Literal
-
-@dataclasses.dataclass(frozen=False)
+# Original config class remains the same
+@dataclass(frozen=False)
 class EgoAlloTrainConfig:
     experiment_name: str = "april13"
     dataset_hdf5_path: Path = Path("./data/egoalgo_no_skating_dataset.hdf5")
@@ -68,227 +61,246 @@ class EgoAlloTrainConfig:
     warmup_steps: int = 1000
     max_grad_norm: float = 1.0
     
+class MotionDiffusionTrainer:
+    """Handles the training of the Motion Diffusion model."""
+    
+    def __init__(
+        self,
+        config: EgoAlloTrainConfig,
+        num_epochs: int,
+        gradient_accumulation_steps: int = 1,
+        use_ema: bool = True,
+    ):
+        self.config = config
+        self.num_epochs = num_epochs
+        self.gradient_accumulation_steps = gradient_accumulation_steps
+        self.use_ema = use_ema
+        self.experiment_dir = get_experiment_dir(config.experiment_name)
+        
+        # Initialize accelerator
+        self.accelerator = self._setup_accelerator()
+        self.device = self.accelerator.device
+        
+        # Initialize components
+        self.model = self._setup_model()
+        self.noise_scheduler = self._setup_scheduler()
+        self.loss_computer = self._setup_loss_computer()
+        self.optimizer = self._setup_optimizer()
+        self.ema = self._setup_ema() if use_ema else None
+        self.dataloader = self._setup_dataloader()
+        
+        # Prepare for distributed training
+        self.model, self.dataloader, self.optimizer = self.accelerator.prepare(
+            self.model, self.dataloader, self.optimizer
+        )
+        
+        self.global_step = 0
+        self.loop_metrics_gen = loop_metric_generator()
+        
+        # Initialize wandb if main process
+        if self.accelerator.is_main_process:
+            self._initialize_wandb()
+            self._save_config()
+
+    def _setup_accelerator(self) -> Accelerator:
+        """Initialize and configure the Accelerator."""
+        return Accelerator(
+            project_config=ProjectConfiguration(project_dir=str(self.experiment_dir)),
+            dataloader_config=DataLoaderConfiguration(split_batches=True),
+            cpu=self.config.device == "cpu"
+        )
+
+    def _setup_model(self) -> MotionUNet:
+        """Initialize the UNet model."""
+        return MotionUNet(
+            self.config.model,
+            smplh_npz_path=self.config.smplh_npz_path,
+            device=self.device
+        )
+
+    def _setup_scheduler(self) -> DDPMScheduler:
+        """Initialize the noise scheduler."""
+        return DDPMScheduler(
+            num_train_timesteps=1000,
+            beta_schedule="squaredcos_cap_v2",
+            prediction_type="sample"
+        )
+
+    def _setup_loss_computer(self) -> training_loss.MotionLossComputer:
+        """Initialize the loss computer."""
+        return training_loss.MotionLossComputer(
+            self.config.loss,
+            self.device,
+            self.noise_scheduler
+        )
+
+    def _setup_optimizer(self) -> torch.optim.AdamW:
+        """Initialize the optimizer."""
+        return torch.optim.AdamW(
+            self.model.parameters(),
+            lr=self.config.learning_rate,
+            weight_decay=self.config.weight_decay
+        )
+
+    def _setup_ema(self) -> Optional[EMAModel]:
+        """Initialize EMA if enabled."""
+        if not self.use_ema:
+            return None
+        ema = EMAModel(
+            self.model.parameters(),
+            decay=0.9999,
+            use_ema_warmup=True
+        )
+        ema.to(self.device)
+        return ema
+
+    def _setup_dataloader(self) -> DataLoader:
+        """Initialize the data loader."""
+        dataset = EgoAmassHdf5DatasetDynamic(self.config)
+        return DataLoader(
+            dataset,
+            batch_size=self.config.batch_size,
+            shuffle=True,
+            num_workers=self.config.num_workers,
+            persistent_workers=self.config.num_workers > 0,
+            pin_memory=True,
+            collate_fn=collate_dataclass,
+            drop_last=True
+        )
+
+    def _initialize_wandb(self) -> None:
+        """Initialize Weights & Biases logging."""
+        wandb.init(
+            project="motion_diffusion",
+            name=self.config.experiment_name,
+            config=flattened_hparam_dict_from_dataclass(self.config)
+        )
+
+    def _save_config(self) -> None:
+        """Save model configuration."""
+        self.experiment_dir.mkdir(exist_ok=True, parents=True)
+        (self.experiment_dir / "model_config.yaml").write_text(
+            yaml.dump(self.config.model)
+        )
+
+    def _compute_joint_group_losses(self, joint_losses: Dict[str, float]) -> Dict[str, torch.Tensor]:
+        """Compute average losses per joint group."""
+        joint_groups = {
+            'spine': [3, 6, 9],
+            'neck_head': [12, 15],
+            'left_arm': [13, 16, 18, 20],
+            'right_arm': [14, 17, 19, 21],
+            'left_leg': [1, 4, 7, 10],
+            'right_leg': [2, 5, 8, 11],
+        }
+        
+        return {
+            group_name: torch.mean(torch.stack([
+                torch.tensor(joint_losses[f'body_rot6d_j{i-1}'], device=self.device)
+                for i in joint_indices
+            ]))
+            for group_name, joint_indices in joint_groups.items()
+        }
+
+    def _log_training_progress(
+        self,
+        losses: Any,
+        group_losses: Dict[str, torch.Tensor]
+    ) -> None:
+        """Log training progress to wandb and console."""
+        if self.global_step % 10 == 0:
+            self._log_to_wandb(losses, group_losses)
+            
+        if self.global_step % 60 == 0:
+            self._log_to_console(losses, group_losses)
+
+    def train(self) -> None:
+        """Execute the training loop."""
+        for epoch in range(self.num_epochs):
+            self.model.train()
+            for batch in self.dataloader:
+                self._train_step(batch, epoch)
+
+    def _train_step(self, batch: EgoTrainingData, epoch: int) -> None:
+        """Execute a single training step."""
+        loop_metrics = next(self.loop_metrics_gen)
+        
+        # Prepare input data
+        clean_motion = batch.pack().pack()
+        noise = torch.randn_like(clean_motion)
+        timesteps = torch.randint(
+            0,
+            self.noise_scheduler.config.num_train_timesteps,
+            (clean_motion.shape[0],),
+            device=self.device,
+            dtype=torch.long
+        )
+        
+        # Add noise
+        noisy_motion = self.noise_scheduler.add_noise(clean_motion, noise, timesteps)
+        
+        # Forward pass and loss computation
+        with self.accelerator.accumulate(self.model):
+            x0_pred = self.model.forward(
+                sample=noisy_motion,
+                timestep=timesteps,
+                train_batch=batch,
+            )
+            
+            losses, joint_losses = self.loss_computer.compute_loss(
+                x0_pred=x0_pred.sample,
+                batch=batch,
+                unwrapped_model=self.accelerator.unwrap_model(self.model),
+                t=timesteps,
+                return_joint_losses=True
+            )
+            
+            # Backward pass
+            self.accelerator.backward(losses.total_loss)
+            
+            if self.accelerator.sync_gradients:
+                self.accelerator.clip_grad_norm_(
+                    self.model.parameters(),
+                    self.config.max_grad_norm
+                )
+            
+            self.optimizer.step()
+            self.optimizer.zero_grad(set_to_none=True)
+            
+            if self.use_ema:
+                self.ema.step(self.model.parameters())
+        
+        # Logging
+        if self.accelerator.is_main_process:
+            group_losses = self._compute_joint_group_losses(joint_losses)
+            self._log_training_progress(losses, group_losses)
+            
+            # Save checkpoint
+            if self.global_step % 5000 == 0:
+                self._save_checkpoint()
+        
+        self.global_step += 1
+
 def train_motion_diffusion(
     config: EgoAlloTrainConfig,
     num_epochs: int,
     gradient_accumulation_steps: int = 1,
     use_ema: bool = True,
     use_ipdb: bool = False,
-):
-    # Set up experiment directory + HF accelerate
-    experiment_dir = get_experiment_dir(config.experiment_name)
-    accelerator = Accelerator(
-        project_config=ProjectConfiguration(project_dir=str(experiment_dir)),
-        dataloader_config=DataLoaderConfiguration(split_batches=True),
-        cpu=config.device == "cpu"  # Force CPU usage
-    )
-    device = accelerator.device  # Get device from accelerator
+) -> None:
+    """Main training function."""
     if use_ipdb:
         import ipdb; ipdb.set_trace()
-
-    # Initialize wandb
-    if accelerator.is_main_process:
-        wandb.init(
-            project="motion_diffusion",
-            name=config.experiment_name,
-            config=flattened_hparam_dict_from_dataclass(config)
-        )
-        ipdb_safety_net()
-        experiment_dir.mkdir(exist_ok=True, parents=True)
-        (experiment_dir / "model_config.yaml").write_text(yaml.dump(config.model))
-
-    # Initialize model and optimizer
-    model = MotionUNet(config.model, smplh_npz_path=config.smplh_npz_path, device=device)
-    noise_scheduler = DDPMScheduler(
-        num_train_timesteps=1000,
-        beta_schedule="squaredcos_cap_v2",
-        prediction_type="sample"
+    
+    trainer = MotionDiffusionTrainer(
+        config,
+        num_epochs,
+        gradient_accumulation_steps,
+        use_ema
     )
-    loss_computer = training_loss.MotionLossComputer(config.loss, device, noise_scheduler)
-    
-    if use_ema:
-        ema = EMAModel(
-            model.parameters(),
-            decay=0.9999,
-            use_ema_warmup=True
-        )
-        ema.to(device)
-    
-    optimizer = torch.optim.AdamW(
-        model.parameters(),
-        lr=config.learning_rate,
-        weight_decay=config.weight_decay
-    )
-    
-    # Setup dataset and dataloader
-    train_dataset = EgoAmassHdf5DatasetDynamic(config)
-    
-    train_dataloader = torch.utils.data.DataLoader(
-        train_dataset,
-        batch_size=config.batch_size,
-        shuffle=True,
-        num_workers=config.num_workers,
-        persistent_workers=config.num_workers > 0,
-        pin_memory=True,
-        collate_fn=collate_dataclass,
-        drop_last=True
-    )
-
-    # Prepare for distributed training
-    model, train_dataloader, optimizer = accelerator.prepare(
-        model, train_dataloader, optimizer
-    )
-    model: MotionUNet
-
-    # Training loop
-    global_step = 0
-    loop_metrics_gen = loop_metric_generator()
-    
-    for epoch in range(num_epochs):
-        model.train()
-        for batch in train_dataloader:
-            batch: EgoTrainingData
-            
-            loop_metrics = next(loop_metrics_gen)
-            
-            clean_motion: EgoDenoiseTraj = batch.pack()
-
-            clean_motion = clean_motion.pack()
-            noise = torch.randn_like(clean_motion)
-
-            timesteps = torch.randint(
-                0, noise_scheduler.config.num_train_timesteps, 
-                (clean_motion.shape[0],),
-                device=device,
-                dtype=torch.long
-            )
-            
-            # Add noise to get noisy sample
-            noisy_motion = noise_scheduler.add_noise(
-                clean_motion, 
-                noise, 
-                timesteps
-            )
-            
-            with accelerator.accumulate(model):
-                # Model predicts x_0 directly
-                x0_pred = model.forward(
-                    sample=noisy_motion,
-                    timestep=timesteps,
-                    train_batch=batch,
-                )
-                
-                losses, joint_losses = loss_computer.compute_loss(
-                    x0_pred=x0_pred.sample, 
-                    batch=batch,
-                    unwrapped_model=accelerator.unwrap_model(model),
-                    t=timesteps,
-                    return_joint_losses=True
-                )
-                
-                accelerator.backward(losses.total_loss)
-                
-                if accelerator.sync_gradients:
-                    accelerator.clip_grad_norm_(model.parameters(), config.max_grad_norm)
-                
-                optimizer.step()
-                optimizer.zero_grad(set_to_none=True)  # Using set_to_none=True for better performance
-                
-                if use_ema:
-                    ema.step(model.parameters())  # Use unwrapped model parameters
-            # Logging
-            if accelerator.is_main_process:
-                # Define joint groups based on SMPLH body joints
-                joint_groups = {
-                    'spine': [3, 6, 9],  # spine1, spine2, spine3
-                    'neck_head': [12, 15],  # neck, head
-                    'left_arm': [13, 16, 18, 20],  # left_collar, left_shoulder, left_elbow, left_wrist
-                    'right_arm': [14, 17, 19, 21],  # right_collar, right_shoulder, right_elbow, right_wrist
-                    'left_leg': [1, 4, 7, 10],  # left_hip, left_knee, left_ankle, left_foot
-                    'right_leg': [2, 5, 8, 11],  # right_hip, right_knee, right_ankle, right_foot
-                }
-                
-                # Compute average loss per joint group
-                group_losses = {}
-                for group_name, joint_indices in joint_groups.items():
-                    # Convert joint losses to tensors before stacking
-                    joint_loss_tensors = [torch.tensor(joint_losses[f'body_rot6d_j{i-1}'], device=device) for i in joint_indices]
-                    group_loss = torch.mean(torch.stack(joint_loss_tensors))
-                    group_losses[group_name] = group_loss
-
-                if global_step % 10 == 0:
-                    log_dict = {
-                        "train/betas_loss": losses.betas_loss.item(),
-                        "train/body_rot6d_loss": losses.body_rot6d_loss.item(),
-                        "train/contacts_loss": losses.contacts_loss.item(),
-                        "train/hand_rot6d_loss": losses.hand_rot6d_loss.item(),
-                        "train/fk_loss": losses.fk_loss.item(),
-                        "train/foot_skating_loss": losses.foot_skating_loss.item(),
-                        "train/velocity_loss": losses.velocity_loss.item(),
-                        "train/total_loss": losses.total_loss.item(),
-                        "epoch": epoch,
-                        "global_step": global_step,
-                        "iterations_per_sec": loop_metrics.iterations_per_sec
-                    }
-                    
-                    # Add joint group losses
-                    for group_name, group_loss in group_losses.items():
-                        log_dict[f"train/body_rot6d_loss/{group_name}"] = group_loss
-                        
-                    wandb.log(log_dict)
-
-                if global_step % 60 == 0:
-                    mem_free, mem_total = torch.cuda.mem_get_info()
-                    
-                    # Format joint group losses string
-                    group_losses_str = "\n".join([
-                        f"    {group_name:12} {loss:.6e}" 
-                        for group_name, loss in group_losses.items()
-                    ])
-                    
-                    # Get current learning rate
-                    current_lr = optimizer.param_groups[0]['lr']
-                    
-                    logger.info(
-                        f"Step: {global_step} ({loop_metrics.iterations_per_sec:.2f} it/sec)\n"
-                        f"Memory: {(mem_total-mem_free)/1024**3:.2f}/{mem_total/1024**3:.2f}GB\n"
-                        f"Learning Rate: {current_lr:.2e}\n"
-                        f"Losses:\n"
-                        f"  Total:          {losses.total_loss.item():.6e}\n"
-                        f"  Betas:          {losses.betas_loss.item():.6e}\n" 
-                        f"  Body Rot6d:     {losses.body_rot6d_loss.item():.6e}\n"
-                        f"  Contacts:       {losses.contacts_loss.item():.6e}\n"
-                        f"  Hand Rot6d:     {losses.hand_rot6d_loss.item():.6e}\n"
-                        f"  FK:             {losses.fk_loss.item():.6e}\n"
-                        f"  Foot Skating:   {losses.foot_skating_loss.item():.6e}\n"
-                        f"  Velocity:       {losses.velocity_loss.item():.6e}\n"
-                        f"  Body Rot6d by Joint Group:\n{group_losses_str}"
-                    )
-                
-                if global_step % 5000 == 0:
-                    # Save the EMA model if using EMA; else save the current model
-                    if use_ema:
-                        # Store the current model parameters
-                        ema.store(model.parameters())
-                        # Copy EMA parameters to the model
-                        ema.copy_to(model.parameters())
-                        # Save the model
-                        pipeline = MotionDiffusionPipeline(
-                            unet=accelerator.unwrap_model(model),
-                            scheduler=noise_scheduler
-                        )
-                        pipeline.save_pretrained(experiment_dir / f"checkpoint-{global_step}")
-                        # Restore the original parameters
-                        ema.restore(model.parameters())
-                    else:
-                        pipeline = MotionDiffusionPipeline(
-                            unet=accelerator.unwrap_model(model),
-                            scheduler=noise_scheduler
-                        )
-                        pipeline.save_pretrained(experiment_dir / f"checkpoint-{global_step}")
-                
-            global_step += 1
+    trainer.train()
 
 if __name__ == "__main__":
+    import tyro
     tyro.cli(train_motion_diffusion)
 

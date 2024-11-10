@@ -17,6 +17,8 @@ lightning_logs/
 outputs/
 experiments/
 blendify_assets
+objaverse/
+download_objaverse_xl
 
 datasets/
 myenv/

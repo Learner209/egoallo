@@ -24,16 +24,6 @@
 					"label": "run_sampling_with_stitching"
 				}
 			]
-		},
-		{
-			"path": "training_pipeline.py",
-			"bookmarks": [
-				{
-					"line": 84,
-					"column": 32,
-					"label": "train_motion_diffusion_ipdb"
-				}
-			]
 		}
 	]
 }

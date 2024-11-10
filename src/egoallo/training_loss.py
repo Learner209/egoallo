@@ -122,7 +122,7 @@ class MotionLossComputer:
         mask: torch.Tensor,  # (B, T)
         return_per_joint: bool = False
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
-        """Compute weighted rotation loss between predicted and target 6D rotations.
+        """Compute weighted geodesic rotation loss between predicted and target 6D rotations.
         
         Args:
             pred_rot6d: Predicted 6D rotations with shape (batch, time, joints, 6)
@@ -132,14 +132,16 @@ class MotionLossComputer:
             return_per_joint: Whether to return per-joint losses
             
         Returns:
-            Total weighted rotation loss if return_per_joint=False
+            Total weighted geodesic rotation loss if return_per_joint=False
             Tuple of (total loss, per-joint losses) if return_per_joint=True
         """
-        # Compute squared error per timestep, joint and rotation dimension
-        rot_loss = (pred_rot6d - target_rot6d) ** 2  # (B, T, J, 6)
+        # Convert 6D rotation representation to SO3 objects
+        pred_rot_so3 = SO3.from_rot6d(pred_rot6d)  # (B, T, J)
+        target_rot_so3 = SO3.from_rot6d(target_rot6d)  # (B, T, J)
         
-        # Sum across rotation dimensions
-        rot_loss = rot_loss.sum(dim=-1)  # (B, T, J)
+        # Compute geodesic distance between rotations
+        rot_loss = pred_rot_so3.log() - target_rot_so3.log()  # (B, T, J, 3)
+        rot_loss = torch.norm(rot_loss, dim=-1)  # (B, T, J)
         
         # Apply timestep-dependent weighting using weight_and_mask_loss
         weighted_loss = self.weight_and_mask_loss(
