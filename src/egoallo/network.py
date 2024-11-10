@@ -88,7 +88,7 @@ class EgoDenoiseTraj(TensorDataclass):
         cls,
         x: Float[Tensor, "*batch timesteps d_state"],
         include_hands: bool,
-        should_project_rot6d: bool = True,
+        should_project_rot6d: bool = False,
         prev_window: Optional["EgoDenoiseTraj"] = None,
     ) -> "EgoDenoiseTraj":
         """Unpack trajectory from a single flattened vector."""

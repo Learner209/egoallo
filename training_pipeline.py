@@ -153,16 +153,6 @@ def train_motion_diffusion(
             
             clean_motion: EgoDenoiseTraj = batch.pack()
 
-            # Project target rotations to valid rot6d
-            # TODO: This is a hack to get around the fact that let the rot6d repr in dataset be valid.
-            if hasattr(clean_motion, 'body_rot6d'):
-                clean_motion.body_rot6d = project_rot6d(clean_motion.body_rot6d.view(*clean_motion.body_rot6d.shape[:-1], -1, 6))
-                clean_motion.body_rot6d = clean_motion.body_rot6d.reshape(*clean_motion.body_rot6d.shape[:-2], -1)
-            
-            if hasattr(clean_motion, 'hand_rot6d'):
-                clean_motion.hand_rot6d = project_rot6d(clean_motion.hand_rot6d.view(*clean_motion.hand_rot6d.shape[:-1], -1, 6))
-                clean_motion.hand_rot6d = clean_motion.hand_rot6d.reshape(*clean_motion.hand_rot6d.shape[:-2], -1)
-
             clean_motion = clean_motion.pack()
             noise = torch.randn_like(clean_motion)
 

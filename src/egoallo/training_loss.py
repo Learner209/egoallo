@@ -66,9 +66,6 @@ class MotionLossComputer:
         # Initialize loss weights with validation
         # self._validate_and_normalize_weights()
         
-        # Compute timestep weights based on scheduler parameters
-        self._compute_timestep_weights()
-        
     def _validate_and_normalize_weights(self):
         """Validate and normalize loss weights to prevent dominance."""
         total = sum(self.config.loss_weights.values())
@@ -81,60 +78,84 @@ class MotionLossComputer:
                 k: v/total for k, v in self.config.loss_weights.items()
             }
 
-    def _compute_timestep_weights(self):
-        """Compute per-timestep weights using scheduler parameters."""
-        # Get relevant parameters from scheduler
-        alphas_cumprod = self.scheduler.alphas_cumprod  # Equivalent to alpha_bar_t
-        
-        # Compute weights using the original formula
-        weight_t = alphas_cumprod / (1 - alphas_cumprod)
-        
-        # Normalize and pad weights
-        padding = 0.01  # Same as in the original code
-        weight_t = weight_t / weight_t[1] * (1.0 - padding) + padding  # Scale weights
-        
-        self.weight_t = weight_t.to(self.device)
+    def compute_snr_weights(self, t: Int[Tensor, "b"]) -> Float[Tensor, "b"]:
+        """Compute SNR-based weights for timesteps."""
+        alpha_t = self.scheduler.alphas_cumprod[t]
+        snr = alpha_t / (1 - alpha_t)
+        weights = snr / (snr + 1.0 + 1e-8)
+        return weights
 
+    def weight_and_mask_loss(
+        self,
+        loss_per_step: Float[Tensor, "b t *d"],
+        t: Int[Tensor, "b"],
+        bt_mask: Optional[Bool[Tensor, "b t"]] = None,
+        bt_mask_sum: Optional[Int[Tensor, ""]] = None,
+        reduction: str = 'mean'
+    ) -> Float[Tensor, "..."]:
+        """Apply timestep-dependent weighting and masking to loss values."""
+        weights = self.compute_snr_weights(t)
+        
+        for _ in range(loss_per_step.dim() - 1):
+            weights = weights.unsqueeze(-1)
+        
+        weighted_loss = weights * loss_per_step
+        
+        if bt_mask is not None:
+            mask = bt_mask.unsqueeze(-1)
+            weighted_loss = weighted_loss * mask
+            
+            if reduction == 'mean':
+                mask_sum = bt_mask_sum if bt_mask_sum is not None else bt_mask.sum()
+                return weighted_loss.sum() / mask_sum
+                
+        if reduction == 'mean':
+            return weighted_loss.mean()
+            
+        return weighted_loss.sum(dim=1)
 
     def compute_rotation_loss(
         self,
-        pred_rot6d: torch.Tensor, # (B, T, J, 6)
-        target_rot6d: torch.Tensor, # (B, T, J, 6)
-        mask: torch.Tensor, # (B, T)
+        pred_rot6d: torch.Tensor,  # (B, T, J, 6)
+        target_rot6d: torch.Tensor,  # (B, T, J, 6)
+        t: torch.Tensor,  # (B,)
+        mask: torch.Tensor,  # (B, T)
         return_per_joint: bool = False
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
-        """Improved rotation loss with geodesic distance.
+        """Compute weighted rotation loss between predicted and target 6D rotations.
         
         Args:
-            pred_rot6d: Predicted 6D rotations
-            target_rot6d: Target 6D rotations
-            mask: Sequence mask
+            pred_rot6d: Predicted 6D rotations with shape (batch, time, joints, 6)
+            target_rot6d: Target 6D rotations with shape (batch, time, joints, 6) 
+            t: Timesteps for diffusion weighting with shape (batch,)
+            mask: Binary mask indicating valid frames with shape (batch, time)
             return_per_joint: Whether to return per-joint losses
             
         Returns:
-            If return_per_joint is False:
-                Total rotation loss (scalar)
-            If return_per_joint is True:
-                Tuple of (total_loss, per_joint_losses)
+            Total weighted rotation loss if return_per_joint=False
+            Tuple of (total loss, per-joint losses) if return_per_joint=True
         """
-        # Convert 6D rotation to matrices
-        pred_rot = SO3.from_rot6d(pred_rot6d).as_matrix()
-        target_rot = SO3.from_rot6d(target_rot6d).as_matrix()
+        # Compute squared error per timestep, joint and rotation dimension
+        rot_loss = (pred_rot6d - target_rot6d) ** 2  # (B, T, J, 6)
         
-        # Compute geodesic loss
-        R_diff = torch.matmul(pred_rot.transpose(-2, -1), target_rot) # (B, T, J, 3, 3)
-        trace = torch.diagonal(R_diff, dim1=-2, dim2=-1).sum(-1) # (B, T, J)
-        angle = torch.acos(torch.clamp((trace - 1) / 2, -1 + 1e-7, 1 - 1e-7)) # (B, T, J)
+        # Sum across rotation dimensions
+        rot_loss = rot_loss.sum(dim=-1)  # (B, T, J)
         
-        # Apply mask
-        loss_per_joint = (angle ** 2) * mask[:, :, None] # (B, T, J)
+        # Apply timestep-dependent weighting using weight_and_mask_loss
+        weighted_loss = self.weight_and_mask_loss(
+            rot_loss,
+            t,
+            mask,
+            reduction='none'  # Keep per-joint dimension
+        )  # (B, J)
         
-        # Average over batch and time dimensions for each joint
-        per_joint_losses = loss_per_joint.mean(dim=(0, 1))  # (J,)
+        if return_per_joint:
+            # Return both total loss and per-joint losses
+            total_loss = weighted_loss.mean()
+            return total_loss, weighted_loss
         
-        # Return either just total loss or both
-        total_loss = per_joint_losses.mean()
-        return (total_loss, per_joint_losses) if return_per_joint else total_loss
+        # Return only total loss
+        return weighted_loss.mean()
 
     def compute_loss(
         self,
@@ -165,48 +186,8 @@ class MotionLossComputer:
         x_0_pred = network.EgoDenoiseTraj.unpack(x0_pred, include_hands=unwrapped_model.config.include_hand_motion)
         clean_motion = batch.pack()
 
-        def weight_and_mask_loss(
-            loss_per_step: Float[Tensor, "b t d"],
-            t: Int[Tensor, "b"],  # Add timestep parameter
-            bt_mask: Optional[Bool[Tensor, "b t"]] = None,
-            bt_mask_sum: Optional[Int[Tensor, ""]] = None,
-        ) -> Float[Tensor, ""]:
-            """Helper to compute masked and weighted loss.
-            
-            Args:
-                loss_per_step: Per-step loss values
-                t: Timesteps for each batch element
-                bt_mask: Binary mask for batch/time dimensions
-                bt_mask_sum: Sum of mask for normalization
-            
-            Returns:
-                Weighted and masked scalar loss
-            """
-            if bt_mask is None:
-                bt_mask = torch.ones_like(loss_per_step[..., 0], dtype=torch.bool)
-            if bt_mask_sum is None:
-                bt_mask_sum = torch.sum(bt_mask)
-                
-            batch_size, seq_len, d = loss_per_step.shape
-            
-            # Get weights for current timesteps
-            timestep_weights = self.weight_t[t]  # [b]
-            
-            # Apply timestep weights to loss
-            weighted_loss = loss_per_step * timestep_weights.view(batch_size, 1, 1)
-            
-            return (
-                torch.sum(
-                    torch.sum(
-                        torch.mean(weighted_loss, dim=-1) * bt_mask,
-                        dim=-1,
-                    )
-                )
-                / bt_mask_sum
-            )
-
         # 3. Compute original losses between prediction and ground truth
-        betas_loss = weight_and_mask_loss(
+        betas_loss = self.weight_and_mask_loss(
             (x_0_pred.betas - clean_motion.betas) ** 2,
             t,
             batch.mask
@@ -215,11 +196,12 @@ class MotionLossComputer:
         body_rot6d_loss, per_joint_losses = self.compute_rotation_loss(
             x_0_pred.body_rot6d.reshape(batch_size, seq_len, -1, 6),
             clean_motion.body_rot6d.reshape(batch_size, seq_len, -1, 6),
+            t,
             batch.mask,
             return_per_joint=True
         )
         
-        contacts_loss = weight_and_mask_loss(
+        contacts_loss = self.weight_and_mask_loss(
             (x_0_pred.contacts - clean_motion.contacts) ** 2,
             t,
             batch.mask
@@ -234,7 +216,7 @@ class MotionLossComputer:
             parent_indices=unwrapped_model.smpl_model.parent_indices
 )
 
-        fk_loss = weight_and_mask_loss(
+        fk_loss = self.weight_and_mask_loss(
             (predicted_joint_positions[..., :batch.joints_wrt_world.shape[-2], 4:7] - batch.joints_wrt_world).reshape(batch_size, seq_len, -1) ** 2, # joints_wrt_world: (B, T, 21*3)
             t,
             batch.mask
@@ -250,7 +232,7 @@ class MotionLossComputer:
 
         # Compute loss for each foot joint separately (B,T-1,4,3) -> (B,T-1,4)
         foot_skating_losses = torch.stack([
-            weight_and_mask_loss(
+            self.weight_and_mask_loss(
                 foot_velocities[..., i, :].pow(2), # (B,T-1,3) for each joint
                 t,
                 bt_mask=foot_skating_mask[..., i], # (B,T-1) for each joint
@@ -270,9 +252,11 @@ class MotionLossComputer:
         )
         gt_velocities = batch.joints_wrt_world[:, 1:] - batch.joints_wrt_world[:, :-1]
 
-        velocity_loss = weight_and_mask_loss(
+        # Fix: Use t[:, None].repeat(1, seq_len-1) to match the velocity sequence length
+        velocity_t = t  # The timesteps tensor needs to match the velocity sequence length
+        velocity_loss = self.weight_and_mask_loss(
             (joint_velocities[..., :batch.joints_wrt_world.shape[-2], :] - gt_velocities).reshape(batch_size, seq_len-1, -1) ** 2,
-            t,
+            t,  # Original timesteps tensor
             bt_mask=batch.mask[:, 1:],
             bt_mask_sum=torch.sum(batch.mask[:, 1:])
         )
@@ -297,7 +281,7 @@ class MotionLossComputer:
                 > 1e-5
             )
             hand_bt_mask = torch.logical_and(hand_motion[:, None], batch.mask)
-            hand_rot6d_loss = weight_and_mask_loss(
+            hand_rot6d_loss = self.weight_and_mask_loss(
                 (pred_hand_flat - gt_hand_flat).reshape(
                     batch_size, seq_len, 30 * 6
                 ) ** 2,
@@ -333,8 +317,8 @@ class MotionLossComputer:
 
         if return_joint_losses:
             joint_losses_dict = {
-                f"body_rot6d_j{i}": loss.item() 
-                for i, loss in enumerate(per_joint_losses)
+                f"body_rot6d_j{i}": loss.mean().item()  # Take mean across batch dimension
+                for i, loss in enumerate(per_joint_losses.t())  # Transpose to iterate over joints
             }
             return losses, joint_losses_dict
         return losses
