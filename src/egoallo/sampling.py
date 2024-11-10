@@ -170,7 +170,7 @@ def run_sampling_with_stitching(
             x_0_packed_pred = network.EgoDenoiseTraj.unpack(
                 x_0_packed_pred,
                 include_hands=denoiser_network.config.include_hands,
-                project_rotmats=True,
+                should_project_rot6d=True,
             ).pack()
 
         if torch.any(torch.isnan(x_0_packed_pred)):

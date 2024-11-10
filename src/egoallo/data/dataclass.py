@@ -22,7 +22,7 @@ import torch.utils.data
 from tqdm import tqdm
 import typeguard
 from jaxtyping import Bool, Float, jaxtyped
-from typing import TypeVar
+from typing import TypeVar, Optional, Callable
 from torch import Tensor
 import trimesh
 
@@ -41,7 +41,7 @@ import numpy as np
 from egoallo.setup_logger import setup_logger
 from egoallo.fncsmpl import SmplhModel, SmplhShaped, SmplhShapedAndPosed, SmplMesh
 from egoallo import fncsmpl, transforms
-
+from egoallo.network import EgoDenoiseTraj
 logger = setup_logger(output=None, name=__name__)
 
 @jaxtyped(typechecker=typeguard.typechecked)
@@ -56,13 +56,6 @@ class EgoTrainingData(TensorDataclass):
 
     betas: Float[Tensor, "*#batch 1 16"]
     """Body shape parameters."""
-
-    # Excluded because not needed.
-    # joints_wrt_world: Float[Tensor, "*#batch timesteps 21 3"]
-    # """Joint positions relative to the world frame."""
-    @property
-    def joints_wrt_world(self) -> Tensor:
-        return tf.SE3(self.T_world_cpf[..., None, :]) @ self.joints_wrt_cpf
 
     body_quats: Float[Tensor, "*#batch timesteps 21 4"]
     """Local orientations for each body joint."""
@@ -83,9 +76,53 @@ class EgoTrainingData(TensorDataclass):
     mask: Bool[Tensor, "*#batch timesteps"]
     """Mask to support variable-length sequence."""
 
-    hand_quats: Float[Tensor, "*#batch timesteps 30 4"] | None
+    hand_quats: Optional[Float[Tensor, "*#batch timesteps 30 4"]] = None
     """Local orientations for each hand joint."""
 
+    prev_window: Optional["EgoTrainingData"] = None
+    """Previous window of training data for conditioning."""
+
+    def __post_init__(self):
+        """Validate the dataclass after initialization."""
+        # Ensure all required tensor fields are present and have correct types
+        for field_name, field_type in self.__annotations__.items():
+            value = getattr(self, field_name)
+            if value is not None and not isinstance(value, (torch.Tensor, EgoTrainingData)):
+                raise TypeError(f"Field {field_name} must be a Tensor, None, or EgoTrainingData, got {type(value)}")
+
+    def to(self, device: torch.device | str):
+        """Override to handle prev_window correctly."""
+        result = super().to(device)
+        if result.prev_window is not None:
+            result.prev_window = result.prev_window.to(device)
+        return result
+
+    def map(self, fn: Callable[[torch.Tensor], torch.Tensor]):
+        """Override to handle prev_window correctly."""
+        result = super().map(fn)
+        if result.prev_window is not None:
+            result.prev_window = result.prev_window.map(fn)
+        return result
+
+    @property
+    def joints_wrt_world(self) -> Tensor:
+        return tf.SE3(self.T_world_cpf[..., None, :]) @ self.joints_wrt_cpf
+
+    def with_prev_window(self, prev_window: Optional[EgoTrainingData]) -> EgoTrainingData:
+        """Create a new EgoTrainingData instance with the given prev_window."""
+        return EgoTrainingData(
+            T_world_root=self.T_world_root,
+            contacts=self.contacts,
+            betas=self.betas,
+            body_quats=self.body_quats,
+            T_cpf_tm1_cpf_t=self.T_cpf_tm1_cpf_t,
+            T_world_cpf=self.T_world_cpf,
+            height_from_floor=self.height_from_floor,
+            joints_wrt_cpf=self.joints_wrt_cpf,
+            mask=self.mask,
+            hand_quats=self.hand_quats,
+            prev_window=prev_window
+        )
 
     @staticmethod
     def load_from_npz(
@@ -160,6 +197,30 @@ class EgoTrainingData(TensorDataclass):
         )
      
         return ego_data
+
+    def pack(self) -> EgoDenoiseTraj:
+        """Convert EgoTrainingData to EgoDenoiseTraj format."""
+        # Convert quaternions to 6D rotation representation
+        body_rot6d = tf.SO3(wxyz=self.body_quats).as_rot6d()
+        
+        # Convert hand quaternions if they exist
+        hand_rot6d = None
+        if self.hand_quats is not None:
+            hand_rot6d = tf.SO3(wxyz=self.hand_quats).as_rot6d()
+
+        # Pack the prev_window if it exists
+        prev_window_packed = None
+        if self.prev_window is not None:
+            prev_window_packed = self.prev_window.pack()
+
+        # Create EgoDenoiseTraj instance
+        return EgoDenoiseTraj(
+            betas=self.betas,  # Expand betas to match timesteps
+            body_rot6d=body_rot6d,
+            contacts=self.contacts,
+            hand_rot6d=hand_rot6d,
+            prev_window=prev_window_packed
+        )
 
     @staticmethod
     def visualize_ego_training_data(
@@ -251,9 +312,35 @@ class EgoTrainingData(TensorDataclass):
 
 T = TypeVar("T")
 
-def collate_dataclass(batch: list[T]) -> T:
+def _collate_dataclass(batch: list[T]) -> T:
     """Collate function that works for dataclasses."""
     keys = vars(batch[0]).keys()
     return type(batch[-1])(
         **{k: torch.stack([getattr(b, k) for b in batch]) for k in keys}
     )
+
+def collate_dataclass(batch: list[T]) -> T:
+    """Collate function that works for dataclasses with optional prev_window."""
+    if not batch:
+        return None
+    
+    keys = vars(batch[0]).keys()
+    result = {}
+    
+    for k in keys:
+        # Get values for this key from all batch items
+        values = [getattr(b, k) for b in batch]
+        
+        # Handle prev_window specially
+        if k == "prev_window":
+            # If any prev_window is None, all should be None
+            if any(v is None for v in values):
+                result[k] = None
+            else:
+                # Recursively collate prev_windows
+                result[k] = collate_dataclass(values)
+        else:
+            # For tensor fields, stack them
+            result[k] = torch.stack(values)
+    
+    return type(batch[0])(**result)

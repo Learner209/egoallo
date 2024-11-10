@@ -22,6 +22,19 @@ from typing import (
 
 import torch
 
+def get_experiment_dir(experiment_name: str, version: int = 0) -> Path:
+    """Creates a directory to put experiment files in, suffixed with a version
+    number. Similar to PyTorch lightning."""
+    experiment_dir = (
+        Path(__file__).absolute().parent
+        / "experiments"
+        / experiment_name
+        / f"v{version}"
+    )
+    if experiment_dir.exists():
+        return get_experiment_dir(experiment_name, version + 1)
+    else:
+        return experiment_dir
 
 def flattened_hparam_dict_from_dataclass(
     dataclass: Any, prefix: str | None = None
