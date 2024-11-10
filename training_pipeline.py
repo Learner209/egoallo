@@ -12,6 +12,7 @@ from pathlib import Path
 from egoallo.motion_diffusion_pipeline import MotionDiffusionPipeline, MotionUNet
 from egoallo.network import EgoDenoiserConfig
 from egoallo.data.amass_dataset_dynamic import EgoAmassHdf5DatasetDynamic
+from egoallo.data.amass import EgoAmassHdf5Dataset
 from egoallo.data.dataclass import collate_dataclass
 from egoallo.training_utils import (
     get_experiment_dir,
