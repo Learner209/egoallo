@@ -5,13 +5,13 @@ import shutil
 from pathlib import Path
 from typing import Literal
 
-import tensorboardX
 import torch.optim.lr_scheduler
 import torch.utils.data
 import tyro
 import yaml
 from accelerate import Accelerator, DataLoaderConfiguration
 from accelerate.utils import ProjectConfiguration
+import wandb
 
 from egoallo import network, training_loss, training_utils
 from egoallo.data.amass import EgoAmassHdf5Dataset
@@ -22,14 +22,18 @@ from egoallo.setup_logger import setup_logger
 logger = setup_logger(output=None, name=__name__)
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass
 class EgoAlloTrainConfig:
     experiment_name: str = "april13"
     dataset_hdf5_path: Path = Path("./data/egoalgo_no_skating_dataset.hdf5")
     dataset_files_path: Path = Path("./data/egoalgo_no_skating_dataset_files.txt")
 
-    model: network.EgoDenoiserConfig = network.EgoDenoiserConfig()
-    loss: training_loss.TrainingLossConfig = training_loss.TrainingLossConfig()
+    model: network.EgoDenoiserConfig = dataclasses.field(
+        default_factory=network.EgoDenoiserConfig
+    )
+    loss: training_loss.TrainingLossConfig = dataclasses.field(
+        default_factory=training_loss.TrainingLossConfig
+    )
 
     # Dataset arguments.
     batch_size: int = 256
@@ -80,16 +84,20 @@ def run_training(
         project_config=ProjectConfiguration(project_dir=str(experiment_dir)),
         dataloader_config=DataLoaderConfiguration(split_batches=True),
     )
-    writer = (
-        tensorboardX.SummaryWriter(logdir=str(experiment_dir), flush_secs=10)
-        if accelerator.is_main_process
-        else None
-    )
+
+    # Initialize wandb if main process
+    if accelerator.is_main_process:
+        wandb.init(
+            project="motion_diffusion",
+            name=config.experiment_name,
+            config=training_utils.flattened_hparam_dict_from_dataclass(config)
+        )
+
     device = accelerator.device
 
     # Initialize experiment.
     if accelerator.is_main_process:
-        training_utils.pdb_safety_net()
+        training_utils.ipdb_safety_net()
 
         # Save various things that might be useful.
         experiment_dir.mkdir(exist_ok=True, parents=True)
@@ -99,17 +107,6 @@ def run_training(
         (experiment_dir / "git_diff.txt").write_text(training_utils.get_git_diff())
         (experiment_dir / "run_config.yaml").write_text(yaml.dump(config))
         (experiment_dir / "model_config.yaml").write_text(yaml.dump(config.model))
-
-        # Add hyperparameters to TensorBoard.
-        assert writer is not None
-        writer.add_hparams(
-            hparam_dict=training_utils.flattened_hparam_dict_from_dataclass(config),
-            metric_dict={},
-            name=".",  # Hack to avoid timestamped subdirectory.
-        )
-
-        # Write logs to file.
-        # logger.add(experiment_dir / "trainlog.log", rotation="100 MB")
 
     # Setup.
     # import ipdb; ipdb.set_trace()
@@ -167,7 +164,7 @@ def run_training(
     accelerator.save_state(str(experiment_dir / f"checkpoints_{step}"))
 
     # Run training loop!
-    loss_helper = training_loss.TrainingLossComputer(config.loss, device=device)
+    loss_helper = training_loss.MotionLossComputer(config.loss, device=device)
     loop_metrics_gen = training_utils.loop_metric_generator(counter_init=step)
     prev_checkpoint_path: Path | None = None
     while True:
@@ -189,17 +186,15 @@ def run_training(
             scheduler.step()
             optim.zero_grad(set_to_none=True)
 
-            # The rest of the loop will only be executed by the main process.
+            # Logging for main process only
             if not accelerator.is_main_process:
                 continue
 
-            # Logging.
+            # Log metrics to wandb
             if step % 10 == 0:
-                assert writer is not None
-                for k, v in log_outputs.items():
-                    writer.add_scalar(k, v, step)
+                wandb.log(log_outputs, step=step)
 
-            # Print status update to terminal.
+            # Print status update to terminal
             if step % 20 == 0:
                 mem_free, mem_total = torch.cuda.mem_get_info()
                 logger.info(
