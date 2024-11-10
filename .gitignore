@@ -22,7 +22,7 @@ wandb/
 datasets/
 myenv/
 
-data/
+/data/
 egoallo_checkpoint_*
 egoallo_example_*
 
