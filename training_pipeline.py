@@ -1,8 +1,16 @@
+import os
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
+
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Optional, Dict, Any
 import logging
 from datetime import datetime
+import math
 
 import torch
 from torch.utils.data import DataLoader
@@ -14,6 +22,7 @@ from diffusers import DDPMScheduler
 from diffusers.training_utils import EMAModel
 
 from egoallo.motion_diffusion_pipeline import MotionDiffusionPipeline, MotionUNet
+from egoallo.training_utils import ipdb_safety_net
 from egoallo.data.amass_dataset_dynamic import EgoAmassHdf5DatasetDynamic
 from egoallo.data.dataclass import collate_dataclass, EgoTrainingData
 from egoallo.network import EgoDenoiseTraj
@@ -43,7 +52,7 @@ class EgoAlloTrainConfig:
     # Dataset arguments.
     batch_size: int = 256
     """Effective batch size."""
-    num_workers: int = 2
+    num_workers: int = 8
     subseq_len: int = 128
     dataset_slice_strategy: Literal[
         "deterministic", "random_uniform_len", "random_variable_len"
@@ -53,18 +62,25 @@ class EgoAlloTrainConfig:
     train_splits: tuple[Literal["train", "val", "test", "just_humaneva"], ...] = (
         "train",
     )
-    condition_on_prev_window: bool = True
+    condition_on_prev_window: bool = False
     """Whether to condition on previous motion window."""
     model: network.EgoDenoiserConfig = network.EgoDenoiserConfig(
         condition_on_prev_window=condition_on_prev_window
     )
 
     # Optimizer options.
-    learning_rate: float = 4e-5
     weight_decay: float = 1e-4
     warmup_steps: int = 1000
     max_grad_norm: float = 1.0
     
+    # Add base values for scaling
+    base_batch_size: int = 256
+    """Base batch size used to determine learning rate scaling"""
+    base_learning_rate: float = 1e-4
+    """Base learning rate before scaling"""
+    learning_rate_scaling: Literal["sqrt", "linear", "none"] = "sqrt"
+    """Method to scale learning rate with batch size"""
+
 class MotionDiffusionTrainer:
     """Handles the training of the Motion Diffusion model."""
     
@@ -85,6 +101,10 @@ class MotionDiffusionTrainer:
         self.accelerator = self._setup_accelerator()
         self.device = self.accelerator.device
         
+        # Calculate effective batch size and learning rate before other initialization
+        self.total_batch_size = self._calculate_total_batch_size()
+        self.learning_rate = self._calculate_scaled_learning_rate()
+
         # Initialize components
         self.model = self._setup_model()
         self.noise_scheduler = self._setup_scheduler()
@@ -109,13 +129,14 @@ class MotionDiffusionTrainer:
         # Create checkpoint directory
         self.checkpoint_dir = self.experiment_dir / "checkpoints"
         self.checkpoint_dir.mkdir(exist_ok=True, parents=True)
-
     def _setup_accelerator(self) -> Accelerator:
         """Initialize and configure the Accelerator."""
         return Accelerator(
             project_config=ProjectConfiguration(project_dir=str(self.experiment_dir)),
-            dataloader_config=DataLoaderConfiguration(split_batches=True),
-            cpu=self.config.device == "cpu"
+            dataloader_config=DataLoaderConfiguration(split_batches=False),
+            cpu=self.config.device == "cpu",
+            mixed_precision="fp16",
+            gradient_accumulation_steps=self.gradient_accumulation_steps,
         )
 
     def _setup_model(self) -> MotionUNet:
@@ -143,10 +164,10 @@ class MotionDiffusionTrainer:
         )
 
     def _setup_optimizer(self) -> torch.optim.AdamW:
-        """Initialize the optimizer."""
+        """Initialize the optimizer with the scaled learning rate."""
         return torch.optim.AdamW(
             self.model.parameters(),
-            lr=self.config.learning_rate,
+            lr=self.learning_rate,  # Use scaled learning rate
             weight_decay=self.config.weight_decay
         )
 
@@ -165,11 +186,13 @@ class MotionDiffusionTrainer:
     def _setup_dataloader(self) -> DataLoader:
         """Initialize the data loader."""
         dataset = EgoAmassHdf5DatasetDynamic(self.config)
+        effective_batch_size = self.total_batch_size
+        per_gpu_batch_size = effective_batch_size // torch.cuda.device_count()
         return DataLoader(
             dataset,
-            batch_size=self.config.batch_size,
+            batch_size=per_gpu_batch_size,
             shuffle=True,
-            num_workers=self.config.num_workers,
+            num_workers=self.config.num_workers * torch.cuda.device_count(),
             persistent_workers=self.config.num_workers > 0,
             pin_memory=True,
             collate_fn=collate_dataclass,
@@ -177,11 +200,20 @@ class MotionDiffusionTrainer:
         )
 
     def _initialize_wandb(self) -> None:
-        """Initialize Weights & Biases logging."""
+        """Initialize Weights & Biases logging with additional batch size metrics."""
+        config_dict = flattened_hparam_dict_from_dataclass(self.config)
+        # Add computed values to wandb config
+        config_dict.update({
+            "total_batch_size": self.total_batch_size,
+            "scaled_learning_rate": self.learning_rate,
+            "num_gpus": torch.cuda.device_count(),
+            "gradient_accumulation_steps": self.gradient_accumulation_steps,
+        })
+        
         wandb.init(
             project="motion_diffusion",
             name=self.config.experiment_name,
-            config=flattened_hparam_dict_from_dataclass(self.config)
+            config=config_dict
         )
 
     def _save_config(self) -> None:
@@ -217,10 +249,10 @@ class MotionDiffusionTrainer:
             "train/betas_loss": losses.betas_loss.item(),
             "train/body_rot6d_loss": losses.body_rot6d_loss.item(),
             "train/contacts_loss": losses.contacts_loss.item(),
-            "train/hand_rot6d_loss": losses.hand_rot6d_loss.item(),
-            "train/fk_loss": losses.fk_loss.item(),
-            "train/foot_skating_loss": losses.foot_skating_loss.item(),
-            "train/velocity_loss": losses.velocity_loss.item(),
+            # "train/hand_rot6d_loss": losses.hand_rot6d_loss.item(),
+            # "train/fk_loss": losses.fk_loss.item(),
+            # "train/foot_skating_loss": losses.foot_skating_loss.item(),
+            # "train/velocity_loss": losses.velocity_loss.item(),
             "train/global_step": self.global_step,
         }
         
@@ -238,9 +270,9 @@ class MotionDiffusionTrainer:
             f"Betas: {losses.betas_loss.item():.4f}, "
             f"Body Rot: {losses.body_rot6d_loss.item():.4f}, "
             f"Contacts: {losses.contacts_loss.item():.4f}, "
-            f"FK: {losses.fk_loss.item():.4f}, "
-            f"Foot Skating: {losses.foot_skating_loss.item():.4f}, "
-            f"Velocity: {losses.velocity_loss.item():.4f}"
+            # f"FK: {losses.fk_loss.item():.4f}, "
+            # f"Foot Skating: {losses.foot_skating_loss.item():.4f}, "
+            # f"Velocity: {losses.velocity_loss.item():.4f}"
         )
 
     def _log_training_progress(
@@ -376,6 +408,10 @@ class MotionDiffusionTrainer:
             
             # Backward pass
             self.accelerator.backward(losses.total_loss)
+
+            for name, param in self.accelerator.unwrap_model(self.model).named_parameters():
+                if param.grad is None:
+                    logger.info(f"{name} grad: {param.grad}")
             
             if self.accelerator.sync_gradients:
                 self.accelerator.clip_grad_norm_(
@@ -400,6 +436,39 @@ class MotionDiffusionTrainer:
         
         self.global_step += 1
 
+    def _calculate_total_batch_size(self) -> int:
+        """Calculate the total effective batch size across all GPUs."""
+        return (
+            self.config.batch_size *  # per-GPU batch size
+            torch.cuda.device_count() *  # number of GPUs
+            self.gradient_accumulation_steps  # gradient accumulation
+        )
+
+    def _calculate_scaled_learning_rate(self) -> float:
+        """Calculate the scaled learning rate based on total batch size."""
+        batch_size_ratio = self.total_batch_size / self.config.base_batch_size
+        
+        if self.config.learning_rate_scaling == "sqrt":
+            # Square root scaling (recommended for most cases)
+            scale_factor = math.sqrt(batch_size_ratio)
+        elif self.config.learning_rate_scaling == "linear":
+            # Linear scaling (used in some cases, especially with very large batches)
+            scale_factor = batch_size_ratio
+        else:  # "none"
+            # No scaling
+            scale_factor = 1.0
+        
+        scaled_lr = self.config.base_learning_rate * scale_factor
+        
+        if self.accelerator.is_main_process:
+            logger.info(f"Base learning rate: {self.config.base_learning_rate}")
+            logger.info(f"Total batch size: {self.total_batch_size}")
+            logger.info(f"Batch size ratio: {batch_size_ratio}")
+            logger.info(f"Learning rate scale factor: {scale_factor}")
+            logger.info(f"Scaled learning rate: {scaled_lr}")
+            
+        return scaled_lr
+
 def train_motion_diffusion(
     config: EgoAlloTrainConfig,
     num_epochs: int,
@@ -421,5 +490,6 @@ def train_motion_diffusion(
 
 if __name__ == "__main__":
     import tyro
+    # ipdb_safety_net()
     tyro.cli(train_motion_diffusion)
 

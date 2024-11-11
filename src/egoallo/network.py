@@ -460,7 +460,7 @@ class TransformerBlock(nn.Module):
 
         assert config.d_latent % config.n_heads == 0
         self.rotary_emb = (
-            RotaryEmbedding(config.d_latent // config.n_heads)
+            RotaryEmbedding(config.d_latent // config.n_heads, learned_freq=True)
             if config.use_rope_embedding
             else None
         )
