@@ -23,6 +23,10 @@ from egoallo.training_utils import (
     loop_metric_generator,
 )
 from egoallo import training_loss, network
+from egoallo.setup_logger import setup_logger
+from egoallo.training_loss import MotionLosses
+
+logger = setup_logger(output=None, name=__name__)
 
 # Original config class remains the same
 @dataclass(frozen=False)
@@ -101,6 +105,10 @@ class MotionDiffusionTrainer:
         if self.accelerator.is_main_process:
             self._initialize_wandb()
             self._save_config()
+
+        # Create checkpoint directory
+        self.checkpoint_dir = self.experiment_dir / "checkpoints"
+        self.checkpoint_dir.mkdir(exist_ok=True, parents=True)
 
     def _setup_accelerator(self) -> Accelerator:
         """Initialize and configure the Accelerator."""
@@ -202,6 +210,39 @@ class MotionDiffusionTrainer:
             for group_name, joint_indices in joint_groups.items()
         }
 
+    def _log_to_wandb(self, losses: Any, group_losses: Dict[str, torch.Tensor]) -> None:
+        """Log metrics to Weights & Biases."""
+        log_dict = {
+            "train/total_loss": losses.total_loss.item(),
+            "train/betas_loss": losses.betas_loss.item(),
+            "train/body_rot6d_loss": losses.body_rot6d_loss.item(),
+            "train/contacts_loss": losses.contacts_loss.item(),
+            "train/hand_rot6d_loss": losses.hand_rot6d_loss.item(),
+            "train/fk_loss": losses.fk_loss.item(),
+            "train/foot_skating_loss": losses.foot_skating_loss.item(),
+            "train/velocity_loss": losses.velocity_loss.item(),
+            "train/global_step": self.global_step,
+        }
+        
+        # Add any group losses if present
+        if group_losses:
+            log_dict.update(group_losses)
+            
+        wandb.log(log_dict)
+
+    def _log_to_console(self, losses: MotionLosses, group_losses: Dict[str, torch.Tensor]) -> None:
+        """Log metrics to console using the pre-configured logger."""
+        logger.info(
+            f"Step {self.global_step}: "
+            f"Total: {losses.total_loss.item():.4f}, "
+            f"Betas: {losses.betas_loss.item():.4f}, "
+            f"Body Rot: {losses.body_rot6d_loss.item():.4f}, "
+            f"Contacts: {losses.contacts_loss.item():.4f}, "
+            f"FK: {losses.fk_loss.item():.4f}, "
+            f"Foot Skating: {losses.foot_skating_loss.item():.4f}, "
+            f"Velocity: {losses.velocity_loss.item():.4f}"
+        )
+
     def _log_training_progress(
         self,
         losses: Any,
@@ -214,9 +255,87 @@ class MotionDiffusionTrainer:
         if self.global_step % 60 == 0:
             self._log_to_console(losses, group_losses)
 
+    def _save_checkpoint(self) -> None:
+        """Save model checkpoint and training state."""
+        if not self.accelerator.is_main_process:
+            return
+
+        # Create checkpoint subdirectory
+        ckpt_path = self.checkpoint_dir / f"checkpoint-{self.global_step}"
+        ckpt_path.mkdir(exist_ok=True, parents=True)
+
+        # Unwrap model
+        unwrapped_model = self.accelerator.unwrap_model(self.model)
+
+        # Create pipeline instance for saving
+        pipeline = MotionDiffusionPipeline(
+            unet=unwrapped_model,
+            scheduler=self.noise_scheduler
+        )
+
+        # Save the pipeline (includes model weights and config)
+        pipeline.save_pretrained(str(ckpt_path))
+
+        # Save optimizer state
+        torch.save(
+            self.optimizer.state_dict(),
+            ckpt_path / "optimizer.pt"
+        )
+
+        # Save EMA state if used
+        if self.ema is not None:
+            torch.save(
+                self.ema.state_dict(),
+                ckpt_path / "ema.pt"
+            )
+
+        # Save training state
+        torch.save(
+            {
+                "global_step": self.global_step,
+                "epoch": self.current_epoch,
+            },
+            ckpt_path / "training_state.pt"
+        )
+
+        logger.info(f"Saved checkpoint at step {self.global_step} to {ckpt_path}")
+
+    def load_checkpoint(self, checkpoint_path: Path) -> None:
+        """Load model and training state from checkpoint."""
+        if not checkpoint_path.exists():
+            logger.warning(f"Checkpoint path {checkpoint_path} does not exist. Starting from scratch.")
+            return
+
+        # Load pipeline (includes model weights and config)
+        pipeline = MotionDiffusionPipeline.from_pretrained(str(checkpoint_path))
+        self.model.load_state_dict(pipeline.unet.state_dict())
+        self.noise_scheduler = pipeline.scheduler
+
+        # Load optimizer state if exists
+        optimizer_path = checkpoint_path / "optimizer.pt"
+        if optimizer_path.exists():
+            self.optimizer.load_state_dict(torch.load(optimizer_path))
+
+        # Load EMA state if exists
+        if self.ema is not None:
+            ema_path = checkpoint_path / "ema.pt"
+            if ema_path.exists():
+                self.ema.load_state_dict(torch.load(ema_path))
+
+        # Load training state
+        training_state_path = checkpoint_path / "training_state.pt"
+        if training_state_path.exists():
+            training_state = torch.load(training_state_path)
+            self.global_step = training_state["global_step"]
+            self.current_epoch = training_state["epoch"]
+
+        logger.info(f"Loaded checkpoint from {checkpoint_path}")
+
     def train(self) -> None:
         """Execute the training loop."""
+        self.current_epoch = 0
         for epoch in range(self.num_epochs):
+            self.current_epoch = epoch
             self.model.train()
             for batch in self.dataloader:
                 self._train_step(batch, epoch)
