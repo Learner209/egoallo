@@ -15,6 +15,7 @@ import argparse
 import glob
 from typing import Optional, Tuple
 from torch import Tensor
+from pathlib import Path
 
 from yacs.config import CfgNode as CN
 # from egoego.config import make_cfg, CONFIG_FILE

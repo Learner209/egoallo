@@ -7,9 +7,9 @@ import numpy as np
 import torch
 import yaml
 from tqdm.auto import tqdm
+from egoallo.transforms import SO3
 
 from egoallo import fncsmpl
-from egoallo.eval_structs import load_relevant_outputs
 
 from .base import BaseEvaluator
 from .constants import (
@@ -30,6 +30,9 @@ from .types import (
     RootTransforms,
 )
 from egoallo.utilities import procrustes_align
+from egoallo.setup_logger import setup_logger
+
+logger = setup_logger(output="logs/evaluation", name=__name__)
 
 
 class BodyEvaluator(BaseEvaluator):
@@ -99,10 +102,10 @@ class BodyEvaluator(BaseEvaluator):
         pred_head_rot = pred_Ts_world_joint[:, :, HEAD_JOINT_INDEX, :4]
         label_head_rot = label_Ts_world_joint[:, HEAD_JOINT_INDEX, :4]
 
-        pred_matrix = self._quat_to_matrix(pred_head_rot)
-        label_matrix = self._quat_to_matrix(label_head_rot).inverse()
+        pred_matrix = SO3(pred_head_rot).as_matrix()
+        label_matrix = SO3(label_head_rot).as_matrix()
 
-        matrix_errors = torch.matmul(pred_matrix, label_matrix) - torch.eye(
+        matrix_errors = pred_matrix @ label_matrix.T - torch.eye(
             3, device=self.device
         )
         errors = torch.linalg.norm(
@@ -207,12 +210,12 @@ class BodyEvaluator(BaseEvaluator):
 
         # Check existing metrics
         if out_disagg_npz_path.exists() or out_yaml_path.exists():
-            print("Found existing metrics:")
-            print(out_yaml_path.read_text())
+            logger.info("Found existing metrics:")
+            logger.info(out_yaml_path.read_text())
             if not skip_confirm:
                 confirm = input("Metrics already computed. Overwrite? (y/n) ")
                 if confirm.lower() != "y":
-                    print("Aborting evaluation.")
+                    logger.info("Aborting evaluation.")
                     return
 
         # Get NPZ files
@@ -251,7 +254,7 @@ class BodyEvaluator(BaseEvaluator):
 
         # Save results
         np.savez(out_disagg_npz_path, **stats_per_subsequence)
-        print(f"Wrote disaggregated metrics to {out_disagg_npz_path}")
+        logger.info(f"Wrote disaggregated metrics to {out_disagg_npz_path}")
 
         # Write summary
         summary = {
@@ -268,8 +271,8 @@ class BodyEvaluator(BaseEvaluator):
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         summary_text = yaml.dump(summary)
         out_yaml_path.write_text(f"# Written at {timestamp}\n\n{summary_text}")
-        print(f"Wrote summary to {out_yaml_path}")
-        print(summary_text)
+        logger.info(f"Wrote summary to {out_yaml_path}")
+        logger.info(summary_text)
 
     def process_file(
         self,
@@ -278,17 +281,38 @@ class BodyEvaluator(BaseEvaluator):
         use_mean_body_shape: bool,
     ) -> MetricsDict:
         """Process a single NPZ file and compute metrics."""
-        relevant_outputs = load_relevant_outputs(npz_path)
+        # Load file based on extension
+        path = Path(npz_path)
+        if path.suffix == '.pt':
+            outputs = torch.load(path)
+        elif path.suffix == '.npz':
+            outputs = np.load(path)
+        else:
+            raise ValueError(f"Unsupported file extension: {path.suffix}")
+        
+        # Verify required keys exist
+        required_keys = [
+            "groundtruth_betas", "groundtruth_T_world_root", "groundtruth_body_quats",
+            "sampled_betas", "sampled_T_world_root", "sampled_body_quats"
+        ]
+        missing_keys = [key for key in required_keys if key not in outputs]
+        if missing_keys:
+            raise KeyError(f"Missing required keys in {path}: {missing_keys}")
+        
+        # Convert to torch tensors and move to device if needed
+        def to_tensor(x):
+            if isinstance(x, np.ndarray):
+                return torch.from_numpy(x).to(self.device)
+            elif isinstance(x, torch.Tensor):
+                return x.to(self.device)
+            else:
+                raise TypeError(f"Unexpected type: {type(x)}")
 
         # Load ground truth data
-        gt_betas = torch.from_numpy(relevant_outputs["groundtruth_betas"]).to(self.device)
-        gt_T_world_root = torch.from_numpy(
-            relevant_outputs["groundtruth_T_world_root"]
-        ).to(self.device)
-        gt_body_quats = torch.from_numpy(relevant_outputs["groundtruth_body_quats"]).to(
-            self.device
-        )
-
+        gt_betas = to_tensor(outputs["groundtruth_betas"])
+        gt_T_world_root = to_tensor(outputs["groundtruth_T_world_root"])
+        gt_body_quats = to_tensor(outputs["groundtruth_body_quats"])
+        
         gt_shaped = self.body_model.with_shape(gt_betas)
         gt_posed = gt_shaped.with_pose_decomposed(
             T_world_root=gt_T_world_root,
@@ -296,13 +320,9 @@ class BodyEvaluator(BaseEvaluator):
         )
 
         # Load predicted data
-        sampled_betas = torch.from_numpy(relevant_outputs["sampled_betas"]).to(self.device)
-        sampled_T_world_root = torch.from_numpy(
-            relevant_outputs["sampled_T_world_root"]
-        ).to(self.device)
-        sampled_body_quats = torch.from_numpy(relevant_outputs["sampled_body_quats"]).to(
-            self.device
-        )
+        sampled_betas = to_tensor(outputs["sampled_betas"])
+        sampled_T_world_root = to_tensor(outputs["sampled_T_world_root"])
+        sampled_body_quats = to_tensor(outputs["sampled_body_quats"])
 
         if use_mean_body_shape:
             mean_betas = torch.zeros_like(sampled_betas.mean(dim=1, keepdim=True))
@@ -387,8 +407,3 @@ class BodyEvaluator(BaseEvaluator):
             metrics["coco_mpjpe"] = float(coco_errors.mean().item())
 
         return metrics
-
-    def _quat_to_matrix(self, quat: torch.Tensor) -> torch.Tensor:
-        """Convert quaternion to rotation matrix."""
-        # Implementation depends on quaternion format
-        raise NotImplementedError 

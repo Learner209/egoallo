@@ -14,12 +14,7 @@
 			"path": "src/egoallo/scripts/aria_inference.py",
 			"bookmarks": [
 				{
-					"line": 70,
-					"column": 0,
-					"label": "inference_ipdb"
-				},
-				{
-					"line": 147,
+					"line": 104,
 					"column": 0,
 					"label": "run_sampling_with_stitching"
 				}

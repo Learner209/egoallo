@@ -326,8 +326,8 @@ class MotionDiffusionPipeline(DiffusionPipeline):
     @torch.no_grad()
     def __call__(
         self,
-        batch_size: int = 1,
-        num_inference_steps: int = 50,  # Use fewer steps for DDIM
+        batch_size: int = 2,
+        num_inference_steps: int = 51,  # Use fewer steps for DDIM
         generator: Optional[torch.Generator] = None,
         train_batch: Optional[EgoTrainingData] = None,
         return_intermediates: bool = False,
@@ -336,8 +336,9 @@ class MotionDiffusionPipeline(DiffusionPipeline):
         self.scheduler.set_timesteps(num_inference_steps)
 
         # Initialize noise
-        batch_size, time = train_batch.T_world_cpf.shape[:2]
-        shape = (batch_size, time, self.unet.config.d_state)
+        batch_size, time = train_batch.T_world_cpf.shape[:2]  # Changed from [:3] to [:2]
+        # Reduce time dimension by 1 since we're working with deltas between frames
+        shape = (batch_size, time - 1, self.unet.config.d_state)
         sample = torch.randn(shape, generator=generator, device=self.device)
 
         # Initialize storage for intermediate states if requested
@@ -346,10 +347,13 @@ class MotionDiffusionPipeline(DiffusionPipeline):
         # Denoising loop
         timesteps = self.scheduler.timesteps.to(self.device)
         for t in timesteps:
+            # Expand timestep tensor to match batch size
+            t_expanded = t.expand(batch_size)
+
             # Get model prediction
             model_output = self.unet.forward(
                 sample=sample,
-                timestep=t,
+                timestep=t_expanded,  # Pass expanded timestep
                 train_batch=train_batch,
                 return_dict=False
             )
@@ -357,7 +361,7 @@ class MotionDiffusionPipeline(DiffusionPipeline):
             # Scheduler step
             sample = self.scheduler.step(
                 model_output=model_output,
-                timestep=t,
+                timestep=t,  # Original timestep for scheduler
                 sample=sample,
                 generator=generator
             ).prev_sample

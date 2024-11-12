@@ -14,6 +14,7 @@ from egoallo.motion_diffusion_pipeline import MotionDiffusionPipeline
 from egoallo.network import EgoDenoiseTraj
 from egoallo.training_utils import ipdb_safety_net
 from egoallo.config.test_config import TestConfig
+from egoallo.evaluation.body_evaluator import BodyEvaluator
 
 
 def main(config: TestConfig):
@@ -59,7 +60,16 @@ def main(config: TestConfig):
         # Save ground truth and predictions for each item in batch
         for i in range(batch.betas.shape[0]):
             # Create output filename
-            output_path = config.output_dir / f"sequence_{batch_idx}_{i}.npz"
+            output_path = config.output_dir / f"sequence_{batch_idx}_{i}"
+
+            body_quats = pred_motion.get_body_quats()
+            T_world_root = pred_motion.get_T_world_root(
+                body_model=pipeline.unet.smpl_model,
+                Ts_world_cpf=batch.T_world_cpf[..., 1:, :]
+            )
+            
+            # Update the output path to use .pt extension
+            output_path = output_path.with_suffix('.pt')
             
             # Save in format expected by body_evaluator.py
             torch.save({
@@ -70,10 +80,24 @@ def main(config: TestConfig):
                 
                 # Sampled/predicted data
                 "sampled_betas": pred_motion.betas[i].cpu(),
-                "sampled_T_world_root": pred_motion.T_world_root[i].cpu(),
-                "sampled_body_quats": pred_motion.body_quats[i].cpu()
+                "sampled_T_world_root": T_world_root[i].cpu(),
+                "sampled_body_quats": body_quats[i].cpu()
             }, output_path)
             print(f"Saved sequence to {output_path}")
+
+    # Compute metrics if requested
+    if config.compute_metrics:
+        print("\nComputing evaluation metrics...")
+        evaluator = BodyEvaluator(
+            body_model_path=config.smplh_npz_path,
+            device=device
+        )
+        
+        evaluator.evaluate_directory(
+            dir_with_npz_files=config.output_dir,
+            use_mean_body_shape=config.use_mean_body_shape,
+            skip_confirm=config.skip_eval_confirm
+        )
 
 if __name__ == "__main__":
     import tyro

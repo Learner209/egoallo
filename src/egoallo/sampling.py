@@ -20,7 +20,7 @@ from .hand_detection_structs import (
 )
 from .tensor_dataclass import TensorDataclass
 from .transforms import SE3
-from src.egoallo.setup_logger import setup_logger
+from .setup_logger import setup_logger
 from .motion_diffusion_pipeline import MotionDiffusionPipeline
 from .data.dataclass import EgoTrainingData
 

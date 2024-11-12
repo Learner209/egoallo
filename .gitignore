@@ -19,6 +19,7 @@ experiments/
 blendify_assets
 objaverse/
 download_objaverse_xl.py
+test_results/
 
 datasets/
 myenv/
