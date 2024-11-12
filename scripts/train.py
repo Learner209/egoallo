@@ -34,52 +34,10 @@ from egoallo.training_utils import (
 from egoallo import training_loss, network
 from egoallo.setup_logger import setup_logger
 from egoallo.training_loss import MotionLosses
-
+from egoallo.config.train_config import EgoAlloTrainConfig
 logger = setup_logger(output=None, name=__name__)
 
-# Original config class remains the same
-@dataclass(frozen=False)
-class EgoAlloTrainConfig:
-    experiment_name: str = "april13"
-    dataset_hdf5_path: Path = Path("./data/egoalgo_no_skating_dataset.hdf5")
-    dataset_files_path: Path = Path("./data/egoalgo_no_skating_dataset_files.txt")
-    smplh_npz_path: Path = Path("./data/smplh/neutral/model.npz")
-    use_ipdb: bool = False
 
-    loss: training_loss.TrainingLossConfig = training_loss.TrainingLossConfig()
-    device: Literal["cpu", "cuda"] = "cuda"
-
-    # Dataset arguments.
-    batch_size: int = 256
-    """Effective batch size."""
-    num_workers: int = 8
-    subseq_len: int = 128
-    dataset_slice_strategy: Literal[
-        "deterministic", "random_uniform_len", "random_variable_len"
-    ] = "deterministic"
-    dataset_slice_random_variable_len_proportion: float = 0.3
-    """Only used if dataset_slice_strategy == 'random_variable_len'."""
-    train_splits: tuple[Literal["train", "val", "test", "just_humaneva"], ...] = (
-        "train",
-    )
-    condition_on_prev_window: bool = False
-    """Whether to condition on previous motion window."""
-    model: network.EgoDenoiserConfig = network.EgoDenoiserConfig(
-        condition_on_prev_window=condition_on_prev_window
-    )
-
-    # Optimizer options.
-    weight_decay: float = 1e-4
-    warmup_steps: int = 1000
-    max_grad_norm: float = 1.0
-    
-    # Add base values for scaling
-    base_batch_size: int = 256
-    """Base batch size used to determine learning rate scaling"""
-    base_learning_rate: float = 1e-4
-    """Base learning rate before scaling"""
-    learning_rate_scaling: Literal["sqrt", "linear", "none"] = "sqrt"
-    """Method to scale learning rate with batch size"""
 
 class MotionDiffusionTrainer:
     """Handles the training of the Motion Diffusion model."""
