@@ -15,6 +15,7 @@ from torch import Tensor, nn
 from .fncsmpl import SmplhModel, SmplhShapedAndPosed
 from .tensor_dataclass import TensorDataclass
 from .transforms import SE3, SO3
+from . import fncsmpl_extensions
 
 logger = setup_logger(output=None, name=__name__)
 
@@ -118,6 +119,51 @@ class EgoDenoiseTraj(TensorDataclass):
             hand_rotmats=hand_rotmats,
         )
 
+
+    def get_body_quats(self) -> Float[Tensor, "*batch timesteps n_joints 4"]:
+        """Convert body rot6d representation to quaternions.
+        
+        Returns:
+            Quaternions in wxyz format for each joint.
+        """
+        # Convert body rot6d to quaternions
+        body_rotmats = SO3.from_rot6d(
+            self.body_rot6d.reshape(-1, 6)
+        ).wxyz.reshape(*self.body_rot6d.shape[:-1], 4)
+
+        if self.hand_rot6d is not None:
+            # Convert hand rot6d to quaternions 
+            hand_rotmats = SO3.from_rot6d(
+                self.hand_rot6d.reshape(-1, 6)
+            ).wxyz.reshape(*self.hand_rot6d.shape[:-1], 4)
+            
+            # Concatenate body and hand quaternions
+            return torch.cat([body_rotmats, hand_rotmats], dim=-2)
+        
+        return body_rotmats
+
+    def get_T_world_root(
+        self, 
+        body_model: SmplhModel,
+        Ts_world_cpf: Float[Tensor, "... 7"]
+    ) -> Float[Tensor, "... 7"]:
+        """Compute root transform in world frame using CPF poses.
+        
+        Args:
+            body_model: SMPL+H body model instance
+            Ts_world_cpf: Transform from world to CPF frame in SE3 parameters format
+                         (qw, qx, qy, qz, x, y, z)
+        
+        Returns:
+            Transform from world to root frame in SE3 parameters format
+        """
+        # First apply poses to body model to get full body pose
+        posed = self.apply_to_body(body_model)
+        
+        # Then compute root transform using CPF poses
+        return fncsmpl_extensions.get_T_world_root_from_cpf_pose(
+            posed, Ts_world_cpf
+        )
 
 @dataclass(frozen=True)
 class EgoDenoiserConfig:
@@ -235,26 +281,16 @@ class EgoDenoiserConfig:
                 )
             cond = torch.cat(cond_parts, dim=-1)
         elif self.cond_param == "canonicalized":
-            # Align the first timestep.
-            # Put poses so start is at origin, facing forward.
-            R_world_cpf = SE3(T_world_cpf[:, 0:1, :]).rotation().wxyz
-            forward_cpf = R_world_cpf.new_tensor([0.0, 0.0, 1.0])
-            forward_world = SO3(R_world_cpf) @ forward_cpf
-            assert forward_world.shape == (batch, 1, 3)
-            R_canonical_world = SO3.from_z_radians(
-                -torch.arctan2(forward_world[..., 1], forward_world[..., 0])
-            ).wxyz
-            assert R_canonical_world.shape == (batch, 1, 4)
+            assert T_world_cpf_0 is not None, "T_world_cpf_0 is required for 'canonicalized' cond_param."
+            # Compute canonicalized transformations relative to the first frame
+            T_world_cpf_0_inv = SE3(T_world_cpf_0).inverse()
+            T_cpf_0_cpf_t = SE3(T_world_cpf_0_inv[:, None, :]).multiply(SE3(T_world_cpf)).parameters()
+            canonical_pose = SE3(T_cpf_0_cpf_t)
+            canonical_rot6d = SO3(canonical_pose.rotation().wxyz).as_rot6d()  # Shape: (batch, time, 6)
+            canonical_trans = canonical_pose.translation()                    # Shape: (batch, time, 3)
+            cond_dict['canonical_rot6d'] = canonical_rot6d
+            cond_dict['canonical_trans'] = canonical_trans
 
-            R_canonical_cpf = SO3(R_canonical_world) @ SE3(T_world_cpf).rotation()
-            t_canonical_cpf = SO3(R_canonical_world) @ SE3(T_world_cpf).translation()
-            t_canonical_cpf = t_canonical_cpf - t_canonical_cpf[:, 0:1, :]
-
-            cond = (
-                SE3.from_rotation_and_translation(R_canonical_cpf, t_canonical_cpf)
-                .as_matrix()[..., :3, :4]
-                .reshape((batch, time, 12))
-            )
         elif self.cond_param == "absolute":
             cond = SE3(T_world_cpf).as_matrix()[..., :3, :4].reshape((batch, time, 12))
         elif self.cond_param == "absrel":

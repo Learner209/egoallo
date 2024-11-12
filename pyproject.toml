@@ -29,6 +29,9 @@ dependencies = [
     "projectaria-tools[all]",
     "opencv-python",
     "gdown",
+    "termcolor",
+    "videoio",
+    "yacs",
 ]
 
 [tool.setuptools.package-data]

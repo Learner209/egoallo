@@ -12,6 +12,7 @@ from tqdm import tqdm
 from egoallo import fncsmpl
 from egoallo.guidance_optimizer_jax import GuidanceMode
 from egoallo.utilities import procrustes_align
+from egoallo.setup_logger import setup_logger
 
 from .base import BaseEvaluator
 from .constants import EGOEXO_NAMES_LEFT, EGOEXO_NAMES_RIGHT, VERTEX_IDS
@@ -25,6 +26,9 @@ from .types import (
     ProcrustesMode,
     ProcrustesOutput,
 )
+
+
+logger = setup_logger(output="logs/evaluation", name=__name__)
 
 
 class HandEvaluator(BaseEvaluator):
@@ -44,7 +48,7 @@ class HandEvaluator(BaseEvaluator):
 
     def _load_body_model(self, model_path: Path) -> torch.nn.Module:
         """Load the SMPL body model."""
-        return fncsmpl.SmplModel.load(model_path).to(self.device)
+        return fncsmpl.SmplhModel.load(model_path).to(self.device)
 
     @staticmethod
     def get_mano_from_openpose_indices(include_tips: bool = True) -> FloatArray:
@@ -232,7 +236,7 @@ class HandEvaluator(BaseEvaluator):
         for eval_mode in eval_modes:
             for hamer_frames_only in hamer_frames_only_options:
                 exp = f"{eval_mode=}-{hamer_frames_only=}"
-                print(f"Processing experiment: {exp}")
+                logger.info(f"Processing experiment: {exp}")
 
                 mpjpes = {}
                 pampjpes = {}
@@ -285,8 +289,8 @@ class HandEvaluator(BaseEvaluator):
                     "total": total_kp,
                 }
 
-                print(f"Experiment results for {exp}:")
-                print(stats)
+                logger.info(f"Experiment results for {exp}:")
+                logger.info(stats)
 
                 stats_from_exp[exp] = stats
                 stats_from_exp_all[exp] = stats_all

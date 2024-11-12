@@ -28,64 +28,25 @@ from egoallo.sampling import run_sampling_with_stitching, real_time_sampling_wit
 from egoallo.transforms import SE3, SO3
 from egoallo.vis_helpers import visualize_traj_and_hand_detections
 from egoallo.training_utils import pdb_safety_net, ipdb_safety_net
+from egoallo.motion_diffusion_pipeline import MotionDiffusionPipeline
+from egoallo.config.inference_config import InferenceConfig
 
+def main(config: InferenceConfig) -> None:
 
-@dataclasses.dataclass
-class Args:
-    traj_root: Path = Path("./egoallo_example_trajectories/coffeemachine/")
-    """Search directory for trajectories. This should generally be laid out as something like:
-
-    traj_dir/
-        video.vrs
-        egoallo_outputs/
-            {date}_{start_index}-{end_index}.npz
-            ...
-        ...
-    """
-    output_dir: Path = Path("./egoallo_example_trajectories/coffeemachine/")
-    """Output directory for the results. It can be separated from traj_root."""
-
-    checkpoint_dir: Path = Path("./egoallo_checkpoint_april13/checkpoints_3000000/")
-    # checkpoint_dir: Path = Path("./experiments/april13/v0/checkpoints_40000")
-    smplh_npz_path: Path = Path("./data/smplh/neutral/model.npz")
-
-    glasses_x_angle_offset: float = 0.0
-    """Rotate the CPF poses by some X angle."""
-    start_index: int = 0
-    """Index within the downsampled trajectory to start inference at."""
-    traj_length: int = 128
-    """How many timesteps to estimate body motion for."""
-    num_samples: int = 1
-    """Number of samples to take."""
-    guidance_mode: GuidanceMode = "no_hands"
-    """Which guidance mode to use."""
-    guidance_inner: bool = False
-    """Whether to apply guidance optimizer between denoising steps. This is
-    important if we're doing anything with hands. It can be turned off to speed
-    up debugging/experiments, or if we only care about foot skating losses."""
-    guidance_post: bool = True
-    """Whether to apply guidance optimizer after diffusion sampling."""
-    save_traj: bool = True
-    """Whether to save the output trajectory, which will be placed under `traj_dir/egoallo_outputs/some_name.npz`."""
-    visualize_traj: bool = True
-    """Whether to visualize the trajectory after sampling."""
-
-
-def main(args: Args) -> None:
-
-    # import ipdb; ipdb.set_trace()
+    if config.use_ipdb:
+        import ipdb; ipdb.set_trace()
 
     device = torch.device("cuda")
 
     # import ipdb; ipdb.set_trace()
-    args.output_dir.mkdir(parents=True, exist_ok=True)
-    traj_paths = InferenceTrajectoryPaths.find(args.traj_root, args.output_dir, soft_link=False)
+    config.output_dir.mkdir(parents=True, exist_ok=True)
+    traj_paths = InferenceTrajectoryPaths.find(config.traj_root, config.output_dir, soft_link=False)
     if traj_paths.splat_path is not None:
         print("Found splat at", traj_paths.splat_path)
     else:
         print("No scene splat found.")
     # Get point cloud + floor.
-    points_data, floor_z = load_point_cloud_and_find_ground(points_path=traj_paths.points_path, cached_pts_path=args.output_dir)
+    points_data, floor_z = load_point_cloud_and_find_ground(points_path=traj_paths.points_path, cached_pts_path=config.output_dir)
 
     # Read transforms from VRS / MPS, downsampled.
     transforms = InferenceInputTransforms.load(
@@ -93,24 +54,24 @@ def main(args: Args) -> None:
     ).to(device=device)
 
     # Note the off-by-one for Ts_world_cpf, which we need for relative transform computation.
-    args.traj_length = len(transforms.Ts_world_cpf) - args.start_index - 1
+    config.traj_length = len(transforms.Ts_world_cpf) - config.start_index - 1
     Ts_world_cpf = (
         SE3(
             transforms.Ts_world_cpf[
-                args.start_index : args.start_index + args.traj_length + 1
+                config.start_index : config.start_index + config.traj_length + 1
             ]
         )
         @ SE3.from_rotation(
             SO3.from_x_radians(
-                transforms.Ts_world_cpf.new_tensor(args.glasses_x_angle_offset)
+                transforms.Ts_world_cpf.new_tensor(config.glasses_x_angle_offset)
             )
         )
     ).parameters()
     pose_timestamps_sec = transforms.pose_timesteps[
-        args.start_index + 1 : args.start_index + args.traj_length + 1
+        config.start_index + 1 : config.start_index + config.traj_length + 1
     ]
     Ts_world_device = transforms.Ts_world_device[
-        args.start_index + 1 : args.start_index + args.traj_length + 1
+        config.start_index + 1 : config.start_index + config.traj_length + 1
     ]
     del transforms
 
@@ -138,39 +99,39 @@ def main(args: Args) -> None:
     print(f"{Ts_world_cpf.shape=}")
 
     server = None
-    if args.visualize_traj:
+    if config.visualize_traj:
         server = viser.ViserServer()
         server.gui.configure_theme(dark_mode=True)
 
-    denoiser_network = load_denoiser(args.checkpoint_dir).to(device)
-    body_model = fncsmpl.SmplhModel.load(args.smplh_npz_path).to(device)
+    denoiser_network = load_denoiser(config.checkpoint_dir).to(device)
+    body_model = fncsmpl.SmplhModel.load(config.smplh_npz_path).to(device)
 
     # traj = run_sampling_with_stitching(
     traj = real_time_sampling_with_stitching(
         denoiser_network,
         body_model=body_model,
-        guidance_mode=args.guidance_mode,
-        guidance_inner=args.guidance_inner,
-        guidance_post=args.guidance_post,
+        guidance_mode=config.guidance_mode,
+        guidance_inner=config.guidance_inner,
+        guidance_post=config.guidance_post,
         Ts_world_cpf=Ts_world_cpf,
         hamer_detections=hamer_detections,
         aria_detections=aria_detections,
-        num_samples=args.num_samples,
+        num_samples=config.num_samples,
         device=device,
         floor_z=floor_z,
     )
 
     # Save outputs in case we want to visualize later.
-    if args.save_traj:
+    if config.save_traj:
         save_name = (
             time.strftime("%Y%m%d-%H%M%S")
-            + f"_start_{args.start_index}_end_{args.start_index + args.traj_length}_guidance_mode_{args.guidance_mode}_guidance_post_{args.guidance_post}"
+            + f"_start_{config.start_index}_end_{config.start_index + config.traj_length}_guidance_mode_{config.guidance_mode}_guidance_post_{config.guidance_post}"
         )
-        out_path = args.output_dir / "egoallo_outputs" / (save_name + ".npz")
+        out_path = config.output_dir / "egoallo_outputs" / (save_name + ".npz")
         out_path.parent.mkdir(parents=True, exist_ok=True)
         assert not out_path.exists()
-        (args.output_dir / "egoallo_outputs" / (save_name + "_args.yaml")).write_text(
-            yaml.dump(dataclasses.asdict(args))
+        (config.output_dir / "egoallo_outputs" / (save_name + "_args.yaml")).write_text(
+            yaml.dump(dataclasses.asdict(config))
         )
 
         posed = traj.apply_to_body(body_model)
@@ -187,13 +148,13 @@ def main(args: Args) -> None:
             right_hand_quats=posed.local_quats[..., 36:51, :].numpy(force=True),
             contacts=traj.contacts.numpy(force=True),  # Sometimes we forgot this...
             betas=traj.betas.numpy(force=True),
-            frame_nums=np.arange(args.start_index, args.start_index + args.traj_length),
+            frame_nums=np.arange(config.start_index, config.start_index + config.traj_length),
             timestamps_ns=(np.array(pose_timestamps_sec) * 1e9).astype(np.int64),
         )
         print("saved!")
 
     # Visualize.
-    if args.visualize_traj:
+    if config.visualize_traj:
         assert server is not None
         loop_cb = visualize_traj_and_hand_detections(
             server,
@@ -214,4 +175,4 @@ if __name__ == "__main__":
     import tyro
     ipdb_safety_net()
 
-    main(tyro.cli(Args))
+    main(tyro.cli(InferenceConfig))

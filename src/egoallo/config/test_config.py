@@ -23,6 +23,11 @@ class TestConfig(EgoAlloTrainConfig):
     # Output settings
     output_dir: Path = Path("./test_results")
     
+    # Evaluation settings
+    compute_metrics: bool = True
+    use_mean_body_shape: bool = True
+    skip_eval_confirm: bool = False
+    
     def __post_init__(self):
         # Override train splits with test splits
         self.train_splits = ("test",)
