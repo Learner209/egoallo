@@ -29,7 +29,7 @@ from .types import (
     ProcrustesOutput,
     RootTransforms,
 )
-from .utils import procrustes_align
+from egoallo.utilities import procrustes_align
 
 
 class BodyEvaluator(BaseEvaluator):

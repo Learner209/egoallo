@@ -11,6 +11,7 @@ from tqdm import tqdm
 
 from egoallo import fncsmpl
 from egoallo.guidance_optimizer_jax import GuidanceMode
+from egoallo.utilities import procrustes_align
 
 from .base import BaseEvaluator
 from .constants import EGOEXO_NAMES_LEFT, EGOEXO_NAMES_RIGHT, VERTEX_IDS
@@ -24,7 +25,6 @@ from .types import (
     ProcrustesMode,
     ProcrustesOutput,
 )
-from .utils import procrustes_align
 
 
 class HandEvaluator(BaseEvaluator):
