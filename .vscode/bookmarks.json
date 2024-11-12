@@ -11,7 +11,7 @@
 			]
 		},
 		{
-			"path": "aria_3_inference.py",
+			"path": "src/egoallo/scripts/aria_inference.py",
 			"bookmarks": [
 				{
 					"line": 75,
