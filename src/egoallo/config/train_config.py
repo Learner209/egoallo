@@ -26,6 +26,11 @@ class EgoAlloTrainConfig(EgoAlloBaseConfig):
     base_batch_size: int = 256
     base_learning_rate: float = 1e-4
     learning_rate_scaling: Literal["sqrt", "linear", "none"] = "sqrt"
+
+    # EMA settings
+    use_ema: bool = True
+    ema_decay: float = 0.9999
+
     
     def __post_init__(self):
         # # Update model config with conditioning setting
