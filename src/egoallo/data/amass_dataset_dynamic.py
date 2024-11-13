@@ -12,7 +12,7 @@ from .dataclass import EgoTrainingData
 from .amass import AMASS_SPLITS
 
 if TYPE_CHECKING:
-    from training_pipeline import EgoAlloTrainConfig
+    from egoallo.config.train_config import EgoAlloTrainConfig
 
 @dataclass
 class DatasetState:
@@ -41,6 +41,9 @@ class EgoAmassHdf5DatasetDynamic(torch.utils.data.Dataset[EgoTrainingData]):
 
         # Initialize groups and cache
         with h5py.File(self._hdf5_path, "r") as hdf5_file:
+            # Determine minimum required sequence length based on conditioning
+            self.min_seq_len = self._subseq_len * 2 if config.condition_on_prev_window else self._subseq_len
+            
             self._groups = [
                 p
                 for p in config.dataset_files_path.read_text().splitlines()
@@ -49,7 +52,7 @@ class EgoAmassHdf5DatasetDynamic(torch.utils.data.Dataset[EgoTrainingData]):
                     h5py.Dataset,
                     cast(h5py.Group, hdf5_file[p])["T_world_root"],
                 ).shape[0]
-                >= self._subseq_len * 2  # Ensure enough frames for both current and prev window
+                >= self.min_seq_len  # Filter based on conditional requirement
             ]
             assert len(self._groups) > 0
             assert len(cast(h5py.Group, hdf5_file[self._groups[0]]).keys()) > 0
@@ -116,7 +119,7 @@ class EgoAmassHdf5DatasetDynamic(torch.utils.data.Dataset[EgoTrainingData]):
         group = self._groups[group_index]
         npz_group = self._get_npz_group(group)
         total_t = cast(h5py.Dataset, npz_group["T_world_root"]).shape[0]
-        assert total_t >= self._subseq_len * 2
+        assert total_t >= self.min_seq_len
 
         # Calculate slice indices
         start_t = slice_index + self._subseq_len  # Ensure start_t is at least subseq_len

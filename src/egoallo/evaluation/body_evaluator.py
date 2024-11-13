@@ -46,7 +46,7 @@ class BodyEvaluator(BaseEvaluator):
         self,
         pred_Ts_world_joint: BatchedJointTransforms,
     ) -> FloatArray:
-        """Compute foot skate metric."""
+        """Compute foot skate metric in millimeters."""
         num_samples, time = pred_Ts_world_joint.shape[:2]  # pred_Ts_world_joint: [N, T, J, 7]
 
         # Adjust position to floor
@@ -70,7 +70,7 @@ class BodyEvaluator(BaseEvaluator):
         exponent = 2 - 2 ** (foot_positions[:, 1:, :, 2] / H_thresh)  # [N, T-1, 4]
         fs_per_sample = torch.sum(
             torch.sum(foot_positions_diff_norm * exponent, dim=-1), dim=-1
-        )  # [N]
+        ) * 1000.0  # Convert to mm
 
         return fs_per_sample.cpu().numpy()
 
@@ -78,7 +78,7 @@ class BodyEvaluator(BaseEvaluator):
         self,
         pred_Ts_world_joint: BatchedJointTransforms,
     ) -> FloatArray:
-        """Compute foot contact metric."""
+        """Compute foot contact metric as a ratio of frames with proper ground contact."""
         foot_indices = torch.tensor(FOOT_INDICES, device=self.device)
         H_thresh = torch.tensor(
             FOOT_HEIGHT_THRESHOLDS,
@@ -86,12 +86,18 @@ class BodyEvaluator(BaseEvaluator):
             dtype=torch.float32,
         )
 
-        foot_positions = pred_Ts_world_joint[:, :, foot_indices, 4:7]
-        any_contact = torch.any(
-            torch.any(foot_positions[..., 2] < H_thresh, dim=-1), dim=-1
-        ).to(torch.float32)
+        foot_positions = pred_Ts_world_joint[:, :, foot_indices, 4:7]  # [N, T, 4, 3]
+        
+        # Check which feet are in contact with ground per frame
+        foot_contacts = foot_positions[..., 2] < H_thresh  # [N, T, 4]
+        
+        # Count number of feet in contact per frame
+        num_contacts_per_frame = torch.sum(foot_contacts, dim=-1)  # [N, T]
+        
+        # Calculate ratio of frames with at least one foot contact
+        contact_ratio = torch.mean((num_contacts_per_frame > 0).float(), dim=-1)  # [N]
 
-        return any_contact.cpu().numpy()
+        return contact_ratio.cpu().numpy()
 
     def compute_head_ori(
         self,
@@ -123,12 +129,12 @@ class BodyEvaluator(BaseEvaluator):
         label_Ts_world_joint: JointTransforms,
         pred_Ts_world_joint: BatchedJointTransforms,
     ) -> FloatArray:
-        """Compute head translation error."""
+        """Compute head translation error in millimeters."""
         errors = (
             pred_Ts_world_joint[:, :, HEAD_JOINT_INDEX, 4:7]
             - label_Ts_world_joint[:, HEAD_JOINT_INDEX, 4:7]
         )
-        mean_errors = torch.mean(torch.linalg.norm(errors, dim=-1), dim=-1)
+        mean_errors = torch.mean(torch.linalg.norm(errors, dim=-1), dim=-1) * 1000.0  # Convert to mm
         return mean_errors.cpu().numpy()
 
     def compute_mpjpe(
@@ -237,30 +243,30 @@ class BodyEvaluator(BaseEvaluator):
         }
 
         # Process files
-        with ThreadPoolExecutor() as executor:
-            futures = [
-                executor.submit(
-                    self.process_file,
-                    pt_paths[i],
-                    coco_regressor,
-                    use_mean_body_shape,
-                )
-                for i in range(num_sequences)
-            ]
+        # with ThreadPoolExecutor() as executor:
+        #     futures = [
+        #         executor.submit(
+        #             self.process_file,
+        #             pt_paths[i],
+        #             coco_regressor,
+        #             use_mean_body_shape,
+        #         )
+        #         for i in range(num_sequences)
+        #     ]
 
-            for i, future in enumerate(tqdm(futures, total=num_sequences)):
-                metrics = future.result()
-                for key in metrics_list:
-                    stats_per_subsequence[key][i] = metrics.get(key, np.nan)
+        #     for i, future in enumerate(tqdm(futures, total=num_sequences)):
+        #         metrics = future.result()
+        #         for key in metrics_list:
+        #             stats_per_subsequence[key][i] = metrics.get(key, np.nan)
 
-        # for i in tqdm(range(num_sequences)):
-        #     metrics = self.process_file(
-        #         pt_paths[i],
-        #         coco_regressor,
-        #         use_mean_body_shape,
-        #     )
-        #     for key in metrics_list:
-        #         stats_per_subsequence[key][i] = metrics.get(key, np.nan)
+        for i in tqdm(range(num_sequences)):
+            metrics = self.process_file(
+                pt_paths[i],
+                coco_regressor,
+                use_mean_body_shape,
+            )
+            for key in metrics_list:
+                stats_per_subsequence[key][i] = metrics.get(key, np.nan)
 
         # Save results
         torch.save(stats_per_subsequence, out_disagg_pt_path)

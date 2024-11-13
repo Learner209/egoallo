@@ -202,10 +202,10 @@ class HandEvaluator(BaseEvaluator):
                     continue
 
                 # Compute metrics
-                mpjpe = np.linalg.norm(gt_kpts - pred_kpts, axis=1)
+                mpjpe = np.linalg.norm(gt_kpts - pred_kpts, axis=1) * 1000.0
                 pampjpe = np.linalg.norm(
                     self.aligned_subtract(gt_kpts, pred_kpts), axis=1
-                )
+                ) * 1000.0
 
                 # Store results
                 if take_index not in mpjpes:
