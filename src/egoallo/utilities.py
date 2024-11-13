@@ -277,8 +277,8 @@ def procrustes_align(
     C = torch.matmul(y0.transpose(-1, -2), x0) / N_tensor
     U, D, Vh = torch.linalg.svd(C, full_matrices=False)
 
-    # Handle reflection
-    S = torch.eye(3, device=device, dtype=dtype).expand(*dims, 3, 3)
+    # Fix: Clone S before modifying to avoid in-place operation conflicts
+    S = torch.eye(3, device=device, dtype=dtype).expand(*dims, 3, 3).clone()
     det = torch.det(U) * torch.det(Vh)
     S[..., -1, -1] = torch.where(det < 0, -1.0, 1.0)
 

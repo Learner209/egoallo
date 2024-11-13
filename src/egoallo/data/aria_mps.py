@@ -42,7 +42,7 @@ def load_point_cloud_and_find_ground(
 
         print("Loading + filtering points")
         assert points_path.exists()
-        filtered_points_data = filter_points_from_confidence(
+        filtered_points_daa = filter_points_from_confidence(
             points_data,
             threshold_invdep=0.0001,
             threshold_dep=0.005,
