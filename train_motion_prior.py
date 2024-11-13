@@ -1,239 +1,228 @@
 """Training script for EgoAllo diffusion model using HuggingFace accelerate."""
 
-import dataclasses
+import os
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
+
 import shutil
 from pathlib import Path
-from typing import Literal
-
 import tensorboardX
-import torch.optim.lr_scheduler
-import torch.utils.data
-import tyro
+import torch
 import yaml
 from accelerate import Accelerator, DataLoaderConfiguration
 from accelerate.utils import ProjectConfiguration
-from diffusers import DDPMScheduler
 from diffusers.training_utils import EMAModel
 
 from egoallo import network, training_loss, training_utils
 from egoallo.data.amass_dataset_dynamic import EgoAmassHdf5DatasetDynamic
 from egoallo.data.dataclass import collate_dataclass
 from egoallo.setup_logger import setup_logger
+from egoallo.config.train_config import EgoAlloTrainConfig
 
 logger = setup_logger(output=None, name=__name__)
 
+class MotionPriorTrainer:
+    """Handles the training of the Motion Prior model."""
+    
+    def __init__(
+        self,
+        config: EgoAlloTrainConfig,
+        restore_checkpoint_dir: Path | None = None,
+    ):
+        self.config = config
+        self.experiment_dir = training_utils.get_experiment_dir(config.experiment_name)
+        assert not self.experiment_dir.exists()
+        
+        # Initialize accelerator
+        self.accelerator = self._setup_accelerator()
+        self.device = self.accelerator.device
+        
+        # Initialize components
+        self.model = self._setup_model()
+        self.train_loader = self._setup_dataloader()
+        self.optimizer = self._setup_optimizer()
+        self.lr_scheduler = self._setup_lr_scheduler()
+        self.ema = self._setup_ema() if config.use_ema else None
+        
+        # Prepare for distributed training
+        self.model, self.train_loader, self.optimizer, self.lr_scheduler = self.accelerator.prepare(
+            self.model, self.train_loader, self.optimizer, self.lr_scheduler
+        )
+        self.accelerator.register_for_checkpointing(self.lr_scheduler)
+        
+        # Setup writer for main process
+        self.writer = self._setup_writer()
+        
+        # Restore checkpoint if provided
+        self.step = self._restore_checkpoint(restore_checkpoint_dir)
+        
+        # Initialize training components
+        self.loss_helper = training_loss.TrainingLossComputer(config.loss, device=self.device)
+        self.loop_metrics_gen = training_utils.loop_metric_generator(counter_init=self.step)
+        self.prev_checkpoint_path = None
 
-@dataclasses.dataclass(frozen=True)
-class EgoAlloTrainConfig:
-    experiment_name: str = "april13"
-    dataset_hdf5_path: Path = Path("./data/egoalgo_no_skating_dataset.hdf5")
-    dataset_files_path: Path = Path("./data/egoalgo_no_skating_dataset_files.txt")
+    def _setup_accelerator(self) -> Accelerator:
+        """Initialize and configure the Accelerator."""
+        return Accelerator(
+            project_config=ProjectConfiguration(project_dir=str(self.experiment_dir)),
+            dataloader_config=DataLoaderConfiguration(split_batches=True),
+        )
 
-    model: network.EgoDenoiserConfig = network.EgoDenoiserConfig()
-    loss: training_loss.TrainingLossConfig = training_loss.TrainingLossConfig()
+    def _setup_model(self) -> network.EgoDenoiser:
+        """Initialize the model."""
+        return network.EgoDenoiser(self.config.model)
 
-    # Dataset arguments
-    batch_size: int = 256
-    """Effective batch size."""
-    num_workers: int = 2
-    subseq_len: int = 128
-    dataset_slice_strategy: Literal[
-        "deterministic", "random_uniform_len", "random_variable_len"
-    ] = "deterministic"
-    dataset_slice_random_variable_len_proportion: float = 0.3
-    """Only used if dataset_slice_strategy == 'random_variable_len'."""
-    train_splits: tuple[Literal["train", "val", "test", "just_humaneva"], ...] = (
-        "train",
-    )
+    def _setup_dataloader(self) -> torch.utils.data.DataLoader:
+        """Initialize the data loader."""
+        train_dataset = EgoAmassHdf5DatasetDynamic(self.config)
+        return torch.utils.data.DataLoader(
+            dataset=train_dataset,
+            batch_size=self.config.batch_size,
+            shuffle=True,
+            num_workers=self.config.num_workers,
+            persistent_workers=self.config.num_workers > 0,
+            pin_memory=True,
+            collate_fn=collate_dataclass,
+            drop_last=True,
+        )
 
-    # Training arguments
-    learning_rate: float = 1e-4
-    weight_decay: float = 1e-4
-    warmup_steps: int = 1000
-    max_grad_norm: float = 1.0
-    gradient_accumulation_steps: int = 1
-    use_ema: bool = True
-    ema_decay: float = 0.9999
-    mixed_precision: Literal["no", "fp16", "bf16"] = "fp16"
+    def _setup_optimizer(self) -> torch.optim.AdamW:
+        """Initialize the optimizer."""
+        return torch.optim.AdamW(
+            self.model.parameters(),
+            lr=self.config.learning_rate,
+            weight_decay=self.config.weight_decay,
+        )
 
+    def _setup_lr_scheduler(self) -> torch.optim.lr_scheduler.LambdaLR:
+        """Initialize the learning rate scheduler."""
+        return torch.optim.lr_scheduler.LambdaLR(
+            self.optimizer,
+            lr_lambda=lambda step: min(1.0, step / self.config.warmup_steps)
+        )
 
-def get_experiment_dir(experiment_name: str, version: int = 0) -> Path:
-    """Creates a directory to put experiment files in, suffixed with a version number."""
-    experiment_dir = (
-        Path(__file__).absolute().parent / "experiments" / experiment_name / f"v{version}"
-    )
-    if experiment_dir.exists():
-        return get_experiment_dir(experiment_name, version + 1)
-    return experiment_dir
+    def _setup_ema(self) -> EMAModel | None:
+        """Initialize EMA if enabled."""
+        if not self.config.use_ema:
+            return None
+        ema = EMAModel(
+            self.model.parameters(),
+            decay=self.config.ema_decay,
+            use_ema_warmup=True,
+        )
+        ema.to(self.device)
+        return ema
 
+    def _setup_writer(self) -> tensorboardX.SummaryWriter | None:
+        """Initialize tensorboard writer for main process."""
+        if not self.accelerator.is_main_process:
+            return None
+            
+        writer = tensorboardX.SummaryWriter(logdir=str(self.experiment_dir), flush_secs=10)
+        writer.add_hparams(
+            hparam_dict=training_utils.flattened_hparam_dict_from_dataclass(self.config),
+            metric_dict={},
+            name=".",
+        )
+        return writer
 
-def run_training(
+    def _restore_checkpoint(self, restore_checkpoint_dir: Path | None) -> int:
+        """Restore from checkpoint if provided and return current step."""
+        if restore_checkpoint_dir is not None:
+            self.accelerator.load_state(str(restore_checkpoint_dir))
+            if restore_checkpoint_dir.name.startswith("checkpoint_"):
+                return int(restore_checkpoint_dir.name.partition("_")[2])
+        return int(self.lr_scheduler.state_dict()["last_epoch"])
+
+    def _save_initial_state(self) -> None:
+        """Save initial experiment state."""
+        if self.accelerator.is_main_process:
+            training_utils.ipdb_safety_net()
+            self.experiment_dir.mkdir(exist_ok=True, parents=True)
+            
+            # Save configs and git info
+            (self.experiment_dir / "git_commit.txt").write_text(
+                training_utils.get_git_commit_hash()
+            )
+            (self.experiment_dir / "git_diff.txt").write_text(training_utils.get_git_diff())
+            (self.experiment_dir / "run_config.yaml").write_text(yaml.dump(self.config))
+            (self.experiment_dir / "model_config.yaml").write_text(yaml.dump(self.config.model))
+
+    def train(self) -> None:
+        """Execute the training loop."""
+        self._save_initial_state()
+        self.accelerator.save_state(str(self.experiment_dir / f"checkpoints_{self.step}"))
+
+        while True:
+            for train_batch in self.train_loader:
+                loop_metrics = next(self.loop_metrics_gen)
+                self.step = loop_metrics.counter
+                
+                self._train_step(train_batch, loop_metrics)
+                
+                if self.accelerator.is_main_process:
+                    self._handle_logging(loop_metrics)
+                    self._handle_checkpointing()
+
+    def _train_step(self, train_batch, loop_metrics):
+        """Execute a single training step."""
+        with self.accelerator.accumulate(self.model):
+            loss, log_outputs = self.loss_helper.compute_denoising_loss(
+                self.model,
+                unwrapped_model=self.accelerator.unwrap_model(self.model),
+                train_batch=train_batch,
+            )
+            log_outputs["learning_rate"] = self.lr_scheduler.get_last_lr()[0]
+            self.accelerator.log(log_outputs, step=self.step)
+            
+            self.accelerator.backward(loss)
+            if self.accelerator.sync_gradients:
+                self.accelerator.clip_grad_norm_(self.model.parameters(), self.config.max_grad_norm)
+            
+            self.optimizer.step()
+            self.lr_scheduler.step()
+            self.optimizer.zero_grad(set_to_none=True)
+
+            if self.ema is not None:
+                self.ema.step(self.model)
+
+    def _handle_logging(self, loop_metrics):
+        """Handle logging to tensorboard and console."""
+        if self.step % 10 == 0 and self.writer is not None:
+            for k, v in log_outputs.items():
+                self.writer.add_scalar(k, v, self.step)
+
+        if self.step % 20 == 0:
+            mem_free, mem_total = torch.cuda.mem_get_info()
+            logger.info(
+                f"step: {self.step} ({loop_metrics.iterations_per_sec:.2f} it/sec)"
+                f" mem: {(mem_total-mem_free)/1024**3:.2f}/{mem_total/1024**3:.2f}G"
+                f" lr: {self.lr_scheduler.get_last_lr()[0]:.7e}"
+                f" loss: {loss.item():.6e}"
+            )
+
+    def _handle_checkpointing(self):
+        """Handle model checkpointing."""
+        if self.step % 5000 == 0:
+            checkpoint_path = self.experiment_dir / f"checkpoints_{self.step}"
+            self.accelerator.save_state(str(checkpoint_path))
+            logger.info(f"Saved checkpoint to {checkpoint_path}")
+
+            if self.prev_checkpoint_path is not None:
+                shutil.rmtree(self.prev_checkpoint_path)
+            self.prev_checkpoint_path = None if self.step % 100_000 == 0 else checkpoint_path
+
+def train_motion_prior(
     config: EgoAlloTrainConfig,
     restore_checkpoint_dir: Path | None = None,
 ) -> None:
-    """Run training loop with given configuration."""
-    # Set up experiment directory + HF accelerate
-    experiment_dir = get_experiment_dir(config.experiment_name)
-    assert not experiment_dir.exists()
-    
-    accelerator = Accelerator(
-        project_config=ProjectConfiguration(project_dir=str(experiment_dir)),
-        dataloader_config=DataLoaderConfiguration(split_batches=True),
-        mixed_precision=config.mixed_precision,
-        gradient_accumulation_steps=config.gradient_accumulation_steps,
-    )
-    
-    writer = (
-        tensorboardX.SummaryWriter(logdir=str(experiment_dir), flush_secs=10)
-        if accelerator.is_main_process
-        else None
-    )
-    device = accelerator.device
-
-    # Initialize experiment
-    if accelerator.is_main_process:
-        training_utils.pdb_safety_net()
-        experiment_dir.mkdir(exist_ok=True, parents=True)
-        
-        # Save configs and git info
-        (experiment_dir / "git_commit.txt").write_text(
-            training_utils.get_git_commit_hash()
-        )
-        (experiment_dir / "git_diff.txt").write_text(training_utils.get_git_diff())
-        (experiment_dir / "run_config.yaml").write_text(yaml.dump(config))
-        (experiment_dir / "model_config.yaml").write_text(yaml.dump(config.model))
-
-        # Add hyperparameters to TensorBoard
-        assert writer is not None
-        writer.add_hparams(
-            hparam_dict=training_utils.flattened_hparam_dict_from_dataclass(config),
-            metric_dict={},
-            name=".",  # Hack to avoid timestamped subdirectory
-        )
-
-    # Setup model and optimizer
-    model = network.EgoDenoiser(config.model)
-    noise_scheduler = DDPMScheduler(
-        num_train_timesteps=1000,
-        beta_schedule="squaredcos_cap_v2",
-        prediction_type="sample",
-    )
-    
-    train_dataset = EgoAmassHdf5DatasetDynamic(config)
-    train_loader = torch.utils.data.DataLoader(
-        dataset=train_dataset,
-        batch_size=config.batch_size,
-        shuffle=True,
-        num_workers=config.num_workers,
-        persistent_workers=config.num_workers > 0,
-        pin_memory=True,
-        collate_fn=collate_dataclass,
-        drop_last=True,
-    )
-    
-    optimizer = torch.optim.AdamW(
-        model.parameters(),
-        lr=config.learning_rate,
-        weight_decay=config.weight_decay,
-    )
-    
-    lr_scheduler = torch.optim.lr_scheduler.LambdaLR(
-        optimizer, 
-        lr_lambda=lambda step: min(1.0, step / config.warmup_steps)
-    )
-
-    # Setup EMA if enabled
-    ema = None
-    if config.use_ema:
-        ema = EMAModel(
-            model.parameters(),
-            decay=config.ema_decay,
-            use_ema_warmup=True,
-        )
-        ema.to(device)
-
-    # Prepare for distributed training
-    model, train_loader, optimizer, lr_scheduler = accelerator.prepare(
-        model, train_loader, optimizer, lr_scheduler
-    )
-    accelerator.register_for_checkpointing(lr_scheduler)
-
-    # Restore checkpoint if provided
-    if restore_checkpoint_dir is not None:
-        accelerator.load_state(str(restore_checkpoint_dir))
-
-    # Get initial step count
-    if restore_checkpoint_dir is not None and restore_checkpoint_dir.name.startswith(
-        "checkpoint_"
-    ):
-        step = int(restore_checkpoint_dir.name.partition("_")[2])
-    else:
-        step = int(lr_scheduler.state_dict()["last_epoch"])
-        assert step == 0 or restore_checkpoint_dir is not None, step
-
-    # Save initial checkpoint
-    accelerator.save_state(str(experiment_dir / f"checkpoints_{step}"))
-
-    # Training loop
-    loss_helper = training_loss.TrainingLossComputer(config.loss, device=device)
-    loop_metrics_gen = training_utils.loop_metric_generator(counter_init=step)
-    prev_checkpoint_path: Path | None = None
-
-    while True:
-        for train_batch in train_loader:
-            loop_metrics = next(loop_metrics_gen)
-            step = loop_metrics.counter
-
-            with accelerator.accumulate(model):
-                loss, log_outputs = loss_helper.compute_denoising_loss(
-                    model,
-                    unwrapped_model=accelerator.unwrap_model(model),
-                    train_batch=train_batch,
-                )
-                log_outputs["learning_rate"] = lr_scheduler.get_last_lr()[0]
-                accelerator.log(log_outputs, step=step)
-                
-                accelerator.backward(loss)
-                if accelerator.sync_gradients:
-                    accelerator.clip_grad_norm_(model.parameters(), config.max_grad_norm)
-                
-                optimizer.step()
-                lr_scheduler.step()
-                optimizer.zero_grad(set_to_none=True)
-
-                if ema is not None:
-                    ema.step(model)
-
-            # Rest of loop only executed by main process
-            if not accelerator.is_main_process:
-                continue
-
-            # Logging
-            if step % 10 == 0 and writer is not None:
-                for k, v in log_outputs.items():
-                    writer.add_scalar(k, v, step)
-
-            # Print status
-            if step % 20 == 0:
-                mem_free, mem_total = torch.cuda.mem_get_info()
-                logger.info(
-                    f"step: {step} ({loop_metrics.iterations_per_sec:.2f} it/sec)"
-                    f" mem: {(mem_total-mem_free)/1024**3:.2f}/{mem_total/1024**3:.2f}G"
-                    f" lr: {lr_scheduler.get_last_lr()[0]:.7e}"
-                    f" loss: {loss.item():.6e}"
-                )
-
-            # Checkpointing
-            if step % 5000 == 0:
-                checkpoint_path = experiment_dir / f"checkpoints_{step}"
-                accelerator.save_state(str(checkpoint_path))
-                logger.info(f"Saved checkpoint to {checkpoint_path}")
-
-                # Keep checkpoints from only every 100k steps
-                if prev_checkpoint_path is not None:
-                    shutil.rmtree(prev_checkpoint_path)
-                prev_checkpoint_path = None if step % 100_000 == 0 else checkpoint_path
-
+    """Main training function."""
+    trainer = MotionPriorTrainer(config, restore_checkpoint_dir)
+    trainer.train()
 
 if __name__ == "__main__":
-    tyro.cli(run_training)
+    import tyro
+    tyro.cli(train_motion_prior)

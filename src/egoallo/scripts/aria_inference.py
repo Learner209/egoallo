@@ -28,7 +28,6 @@ from egoallo.sampling import run_sampling_with_stitching, real_time_sampling_wit
 from egoallo.transforms import SE3, SO3
 from egoallo.vis_helpers import visualize_traj_and_hand_detections
 from egoallo.training_utils import pdb_safety_net, ipdb_safety_net
-from egoallo.motion_diffusion_pipeline import MotionDiffusionPipeline
 from egoallo.config.inference_config import InferenceConfig
 
 def main(config: InferenceConfig) -> None:

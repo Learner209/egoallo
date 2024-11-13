@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from typing import Optional
 
 import numpy as np
 import torch
@@ -20,14 +21,17 @@ from .hand_detection_structs import (
 from .tensor_dataclass import TensorDataclass
 from .transforms import SE3
 from .setup_logger import setup_logger
-from .motion_diffusion_pipeline import MotionDiffusionPipeline
 from .data.dataclass import EgoTrainingData
 
 logger = setup_logger(output=None, name=__name__)
 
 
 def quadratic_ts() -> np.ndarray:
-    """DDIM sampling schedule."""
+    """DDIM sampling schedule.
+    
+    Returns:
+        np.ndarray: Array of timesteps in quadratic schedule
+    """
     end_step = 0
     start_step = 1000
     x = np.arange(end_step, int(np.sqrt(start_step))) ** 2
@@ -36,6 +40,8 @@ def quadratic_ts() -> np.ndarray:
 
 
 class CosineNoiseScheduleConstants(TensorDataclass):
+    """Constants used for cosine noise scheduling."""
+    
     alpha_t: Float[Tensor, "T"]
     r"""$1 - \beta_t$"""
 
@@ -44,6 +50,15 @@ class CosineNoiseScheduleConstants(TensorDataclass):
 
     @staticmethod
     def compute(timesteps: int, s: float = 0.008) -> CosineNoiseScheduleConstants:
+        """Compute cosine noise schedule constants.
+        
+        Args:
+            timesteps: Number of timesteps
+            s: Offset parameter
+            
+        Returns:
+            CosineNoiseScheduleConstants: Computed schedule constants
+        """
         steps = timesteps + 1
         x = torch.linspace(0, 1, steps, dtype=torch.float64)
 

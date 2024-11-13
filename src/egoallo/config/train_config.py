@@ -28,5 +28,6 @@ class EgoAlloTrainConfig(EgoAlloBaseConfig):
     learning_rate_scaling: Literal["sqrt", "linear", "none"] = "sqrt"
     
     def __post_init__(self):
-        # Update model config with conditioning setting
-        self.model = self.model.__class__(condition_on_prev_window=self.condition_on_prev_window) 
+        # # Update model config with conditioning setting
+        # self.model = self.model.__class__(condition_on_prev_window=self.condition_on_prev_window) 
+        pass

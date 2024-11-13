@@ -155,10 +155,10 @@ class TrainingLossComputer:
         """Compute a training loss for the EgoDenoiser model.
 
         Returns:
-            A tuple (loss tensor, dictionary of things to log).
+            A tuple (total loss tensor, dictionary of metrics to log).
         """
-        log_outputs: dict[str, Tensor | float] = {}
-
+        metrics: dict[str, Tensor | float] = {}
+        
         batch, time, num_joints, _ = train_batch.body_quats.shape
         assert num_joints == 21
         if unwrapped_model.config.include_hands:
@@ -236,6 +236,7 @@ class TrainingLossComputer:
             x_0_packed_pred, include_hands=unwrapped_model.config.include_hands
         )
 
+        # Compute individual loss terms
         loss_terms: dict[str, Tensor | float] = {
             "betas": self.weight_and_mask_loss(
                 (x_0_pred.betas - x_0.betas) ** 2 
@@ -300,23 +301,21 @@ class TrainingLossComputer:
                     ),
                 )
             )
-            # self.log(
-            #     "train/hand_motion_proportion",
-            #     torch.sum(hand_motion) / batch,
-            # )
         else:
             loss_terms["hand_rotmats"] = 0.0
 
         assert loss_terms.keys() == self.config.loss_weights.keys()
 
-        # Log loss terms.
+        # Log individual loss terms
         for name, term in loss_terms.items():
-            log_outputs[f"loss_term/{name}"] = term
+            metrics[f"train/loss_{name}"] = term
 
-        # Return loss.
-        loss = sum([loss_terms[k] * self.config.loss_weights[k] for k in loss_terms])
-        assert isinstance(loss, Tensor)
-        assert loss.shape == ()
-        log_outputs["train_loss"] = loss
+        # Compute weighted total loss
+        total_loss = sum([loss_terms[k] * self.config.loss_weights[k] for k in loss_terms])
+        assert isinstance(total_loss, Tensor)
+        assert total_loss.shape == ()
+        
+        # Add total loss to metrics
+        metrics["train/total_loss"] = total_loss
 
-        return loss, log_outputs
+        return total_loss, metrics
