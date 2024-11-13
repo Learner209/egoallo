@@ -28,6 +28,8 @@ class TestConfig(EgoAlloTrainConfig):
     compute_metrics: bool = True
     use_mean_body_shape: bool = True
     skip_eval_confirm: bool = True
+
+    batch_size: int = 1 # Override default of 256
     
     def __post_init__(self):
         # Override train splits with test splits

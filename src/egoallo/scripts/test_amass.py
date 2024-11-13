@@ -39,7 +39,8 @@ def main(config: TestConfig):
         batch_size=config.batch_size,
         shuffle=False,
         num_workers=config.num_workers,
-        collate_fn=collate_dataclass
+        collate_fn=collate_dataclass,
+        drop_last=False
     )
     
     # Test loop
@@ -103,7 +104,7 @@ def main(config: TestConfig):
 
 if __name__ == "__main__":
     import tyro
-    # import ipdb; ipdb.set_trace()
+    import ipdb; ipdb.set_trace()
     ipdb_safety_net()
     
     config = tyro.cli(TestConfig)
