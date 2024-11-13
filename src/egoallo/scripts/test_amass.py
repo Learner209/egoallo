@@ -15,7 +15,9 @@ from egoallo.network import EgoDenoiseTraj
 from egoallo.training_utils import ipdb_safety_net
 from egoallo.config.test_config import TestConfig
 from egoallo.evaluation.body_evaluator import BodyEvaluator
+from egoallo.setup_logger import setup_logger
 
+logger = setup_logger(output="logs/test", name=__name__)
 
 def main(config: TestConfig):
     device = torch.device(config.device)
@@ -74,33 +76,34 @@ def main(config: TestConfig):
             # Save in format expected by body_evaluator.py
             torch.save({
                 # Ground truth data
-                "groundtruth_betas": batch.betas[i].cpu(),
-                "groundtruth_T_world_root": batch.T_world_root[i].cpu(),
-                "groundtruth_body_quats": batch.body_quats[i].cpu(),
+                "groundtruth_betas": batch.betas[i, 1:].cpu(),
+                "groundtruth_T_world_root": batch.T_world_root[i, 1:].cpu(),
+                "groundtruth_body_quats": batch.body_quats[i, 1:].cpu(),
                 
                 # Sampled/predicted data
                 "sampled_betas": pred_motion.betas[i].cpu(),
                 "sampled_T_world_root": T_world_root[i].cpu(),
                 "sampled_body_quats": body_quats[i].cpu()
             }, output_path)
-            print(f"Saved sequence to {output_path}")
+            logger.info(f"Saved sequence to {output_path}")
 
     # Compute metrics if requested
     if config.compute_metrics:
-        print("\nComputing evaluation metrics...")
+        logger.info("\nComputing evaluation metrics...")
         evaluator = BodyEvaluator(
             body_model_path=config.smplh_npz_path,
             device=device
         )
         
         evaluator.evaluate_directory(
-            dir_with_npz_files=config.output_dir,
+            dir_with_pt_files=config.output_dir,
             use_mean_body_shape=config.use_mean_body_shape,
             skip_confirm=config.skip_eval_confirm
         )
 
 if __name__ == "__main__":
     import tyro
+    # import ipdb; ipdb.set_trace()
     ipdb_safety_net()
     
     config = tyro.cli(TestConfig)

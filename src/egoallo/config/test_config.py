@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from pathlib import Path
+from re import T
 from typing import Literal
 import torch
 
@@ -26,7 +27,7 @@ class TestConfig(EgoAlloTrainConfig):
     # Evaluation settings
     compute_metrics: bool = True
     use_mean_body_shape: bool = True
-    skip_eval_confirm: bool = False
+    skip_eval_confirm: bool = True
     
     def __post_init__(self):
         # Override train splits with test splits

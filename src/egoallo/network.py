@@ -160,23 +160,14 @@ class EgoDenoiseTraj(TensorDataclass):
         """Convert body rot6d representation to quaternions.
         
         Returns:
-            Quaternions in wxyz format for each joint.
+            Quaternions in wxyz format for each body joint.
         """
         # Convert body rot6d to quaternions
-        body_rotmats = SO3.from_rot6d(
+        body_quats = SO3.from_rot6d(
             self.body_rot6d.reshape(-1, 6)
         ).wxyz.reshape(*self.body_rot6d.shape[:-1], 4)
-
-        if self.hand_rot6d is not None:
-            # Convert hand rot6d to quaternions 
-            hand_rotmats = SO3.from_rot6d(
-                self.hand_rot6d.reshape(-1, 6)
-            ).wxyz.reshape(*self.hand_rot6d.shape[:-1], 4)
-            
-            # Concatenate body and hand quaternions
-            return torch.cat([body_rotmats, hand_rotmats], dim=-2)
         
-        return body_rotmats
+        return body_quats
 
     def get_T_world_root(
         self, 
