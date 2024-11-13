@@ -14,7 +14,7 @@
 			"path": "src/egoallo/scripts/aria_inference.py",
 			"bookmarks": [
 				{
-					"line": 104,
+					"line": 54,
 					"column": 0,
 					"label": "run_sampling_with_stitching"
 				}

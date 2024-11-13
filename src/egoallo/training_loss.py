@@ -1,7 +1,7 @@
 """Training loss configuration."""
 
 import dataclasses
-from typing import Literal
+from typing import Literal, Union, Tuple
 
 import torch.utils.data
 from jaxtyping import Bool, Float, Int
@@ -55,6 +55,7 @@ class TrainingLossComputer:
         # Pad for numerical stability, and scale between [padding, 1.0].
         padding = 0.01
         self.weight_t = weight_t / weight_t[1] * (1.0 - padding) + padding
+
     def compute_rotation_loss(
         self,
         pred_rot6d: torch.Tensor,  # (B, T, J, 6)
@@ -99,6 +100,51 @@ class TrainingLossComputer:
         
         # Return only total loss
         return weighted_loss.mean()
+
+    def weight_and_mask_loss(
+        self,
+        loss_per_step: Float[Tensor, "b t d"],
+        t: torch.Tensor,  # Added parameter for timestep weights
+        bt_mask: Bool[Tensor, "b t"],
+        bt_mask_sum: Int[Tensor, ""] | None = None,
+        reduction: str = 'mean'
+    ) -> Float[Tensor, ""] | Float[Tensor, "b d"]:
+        """Weight and mask per-timestep losses (squared errors).
+        
+        Args:
+            loss_per_step: Per-step losses with shape (batch, time, dim)
+            t: Timesteps for diffusion weighting with shape (batch,)
+            bt_mask: Binary mask with shape (batch, time)
+            bt_mask_sum: Optional pre-computed mask sum
+            reduction: Either 'mean' or 'none' to control output format
+            
+        Returns:
+            Weighted and masked loss, either scalar or per-batch/dim tensor
+        """
+        batch, time, d = loss_per_step.shape
+        assert bt_mask.shape == (batch, time)
+        
+        weight_t = self.weight_t[t].to(loss_per_step.device)
+        assert weight_t.shape == (batch,)
+        
+        if bt_mask_sum is None:
+            bt_mask_sum = torch.sum(bt_mask)
+
+        # Mean across d axis
+        per_step = torch.mean(loss_per_step, dim=-1) if reduction == 'mean' else loss_per_step
+        
+        # Sum across t axis
+        per_batch = torch.sum(per_step * bt_mask, dim=-1)
+        
+        # Weight by timestep
+        weighted = per_batch * weight_t
+        
+        if reduction == 'mean':
+            # Sum across b axis and normalize
+            return torch.sum(weighted) / bt_mask_sum
+        else:
+            # Return per-batch/dim losses
+            return weighted
 
     def compute_denoising_loss(
         self,
@@ -190,49 +236,25 @@ class TrainingLossComputer:
             x_0_packed_pred, include_hands=unwrapped_model.config.include_hands
         )
 
-        weight_t = self.weight_t[t].to(device)
-        assert weight_t.shape == (batch,)
-
-        def weight_and_mask_loss(
-            loss_per_step: Float[Tensor, "b t d"],
-            # bt stands for "batch time"
-            bt_mask: Bool[Tensor, "b t"] = train_batch.mask,
-            bt_mask_sum: Int[Tensor, ""] = torch.sum(train_batch.mask),
-        ) -> Float[Tensor, ""]:
-            """Weight and mask per-timestep losses (squared errors)."""
-            _, _, d = loss_per_step.shape
-            assert loss_per_step.shape == (batch, time, d)
-            assert bt_mask.shape == (batch, time)
-            assert weight_t.shape == (batch,)
-            return (
-                # Sum across b axis.
-                torch.sum(
-                    # Sum across t axis.
-                    torch.sum(
-                        # Mean across d axis.
-                        torch.mean(loss_per_step, dim=-1) * bt_mask,
-                        dim=-1,
-                    )
-                    * weight_t
-                )
-                / bt_mask_sum
-            )
-
         loss_terms: dict[str, Tensor | float] = {
-            "betas": weight_and_mask_loss(
-                # (b, t, 16)
-                (x_0_pred.betas - x_0.betas) ** 2
-                # (16,)
+            "betas": self.weight_and_mask_loss(
+                (x_0_pred.betas - x_0.betas) ** 2 
                 * x_0.betas.new_tensor(self.config.beta_coeff_weights),
+                t,
+                train_batch.mask
             ),
-            "body_rotmats": weight_and_mask_loss(
-                # (b, t, 21 * 3 * 3)
+            "body_rotmats": self.weight_and_mask_loss(
                 (x_0_pred.body_rotmats - x_0.body_rotmats).reshape(
                     (batch, time, 21 * 3 * 3)
-                )
-                ** 2,
+                ) ** 2,
+                t,
+                train_batch.mask
             ),
-            "contacts": weight_and_mask_loss((x_0_pred.contacts - x_0.contacts) ** 2),
+            "contacts": self.weight_and_mask_loss(
+                (x_0_pred.contacts - x_0.contacts) ** 2,
+                t,
+                train_batch.mask
+            ),
         }
 
         # Include hand objective.
@@ -261,12 +283,13 @@ class TrainingLossComputer:
 
             hand_bt_mask = torch.logical_and(hand_motion[:, None], train_batch.mask)
             loss_terms["hand_rotmats"] = torch.sum(
-                weight_and_mask_loss(
+                self.weight_and_mask_loss(
                     (x_0_pred.hand_rotmats - x_0.hand_rotmats).reshape(
                         batch, time, 30 * 3 * 3
                     )
                     ** 2,
-                    bt_mask=hand_bt_mask,
+                    t,
+                    hand_bt_mask,
                     # We want to weight the loss by the number of frames where
                     # the hands actually move, but gradients here can be too
                     # noisy and put NaNs into mixed-precision training when we
