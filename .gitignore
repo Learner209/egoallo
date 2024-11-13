@@ -19,6 +19,9 @@ experiments/
 blendify_assets/
 wandb/
 
+test_results/
+logs/
+
 datasets/
 myenv/
 
