@@ -147,7 +147,7 @@ def run_sampling_with_stitching(
 
     start_time = time.time()
     for i in tqdm(range(len(ts) - 1)):
-        print(f"Sampling {i}/{len(ts) - 1}, Overall size: {seq_len}")
+        # print(f"Sampling {i}/{len(ts) - 1}, Overall size: {seq_len}")
         t = ts[i]
         t_next = ts[i + 1]
 
