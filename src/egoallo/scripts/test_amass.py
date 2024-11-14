@@ -10,7 +10,6 @@ from tqdm import tqdm
 from egoallo import fncsmpl
 from egoallo.data.amass_dataset_dynamic import EgoAmassHdf5DatasetDynamic
 from egoallo.data.dataclass import collate_dataclass
-from egoallo.motion_diffusion_pipeline import MotionDiffusionPipeline
 from egoallo.network import EgoDenoiseTraj
 from egoallo.training_utils import ipdb_safety_net
 from egoallo.config.test_config import TestConfig
