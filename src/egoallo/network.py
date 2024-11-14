@@ -11,6 +11,7 @@ from jaxtyping import Bool, Float
 from rotary_embedding_torch import RotaryEmbedding
 from egoallo.setup_logger import setup_logger
 from torch import Tensor, nn
+from torch.cuda.amp import autocast
 
 from .fncsmpl import SmplhModel, SmplhShapedAndPosed
 from .tensor_dataclass import TensorDataclass
@@ -444,6 +445,7 @@ class EgoDenoiser(nn.Module):
     def get_d_state(self) -> int:
         return EgoDenoiseTraj.get_packed_dim(self.config.include_hands)
 
+    @autocast()
     def forward(
         self,
         x_t_packed: Float[Tensor, "batch time state_dim"],
@@ -463,7 +465,18 @@ class EgoDenoiser(nn.Module):
         level, not a timestep."""
         config = self.config
 
+        # Cast input tensors to the model's dtype
         x_t = EgoDenoiseTraj.unpack(x_t_packed, include_hands=self.config.include_hands)
+        device = x_t.betas.device
+        dtype = x_t.betas.dtype
+        
+        # Ensure all input tensors have consistent dtype
+        x_t.betas = x_t.betas.to(dtype)
+        x_t.body_rotmats = x_t.body_rotmats.to(dtype) 
+        x_t.contacts = x_t.contacts.to(dtype)
+        if x_t.hand_rotmats is not None:
+            x_t.hand_rotmats = x_t.hand_rotmats.to(dtype)
+
         (batch, time, num_body_joints, _, _) = x_t.body_rotmats.shape
         assert num_body_joints == 21
 
@@ -722,7 +735,7 @@ class TransformerBlock(nn.Module):
         config = self.config
         q, k, v = rearrange(
             self.sattn_qkv_proj(x),
-            "b t (qkv nh dh) -> qkv b nh t dh",
+            "b t (qkv nh dh) -> qkv b nh t dh", 
             qkv=3,
             nh=config.n_heads,
         )
@@ -731,11 +744,6 @@ class TransformerBlock(nn.Module):
             k = self.rotary_emb.rotate_queries_or_keys(k, seq_dim=-2)
         x = torch.nn.functional.scaled_dot_product_attention(
             q, k, v, dropout_p=config.dropout_p, attn_mask=attn_mask
-        )
-        x = self.dropout(x)
-        x = rearrange(x, "b nh t dh -> b t (nh dh)", nh=config.n_heads)
-        x = torch.nn.functional.scaled_dot_product_attention(
-            q, k, v, dropout_p=config.dropout_p
         )
         x = self.dropout(x)
         x = rearrange(x, "b nh t dh -> b t (nh dh)", nh=config.n_heads)

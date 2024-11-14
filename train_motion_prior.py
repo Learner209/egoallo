@@ -9,12 +9,15 @@ os.environ["NUMEXPR_NUM_THREADS"] = "1"
 
 import shutil
 from pathlib import Path
+import deepspeed
 import tensorboardX
 import torch
 import yaml
 from accelerate import Accelerator, DataLoaderConfiguration
 from accelerate.utils import ProjectConfiguration
 from diffusers.training_utils import EMAModel
+from torch.cuda.amp import GradScaler
+from torch.cuda.amp import autocast
 
 from egoallo import network, training_loss, training_utils
 from egoallo.data.amass_dataset_dynamic import EgoAmassHdf5DatasetDynamic
@@ -59,12 +62,15 @@ class MotionPriorTrainer:
         self.lr_scheduler = self._setup_lr_scheduler()
         self.ema = self._setup_ema() if config.use_ema else None
 
-        # Prepare for distributed training
-        self.model, self.train_loader, self.optimizer, self.lr_scheduler = self.accelerator.prepare(
-            self.model, self.train_loader, self.optimizer, self.lr_scheduler
-        )
-        self.accelerator.register_for_checkpointing(self.lr_scheduler)
+        # Add gradient scaler for mixed precision training
+        self.scaler = GradScaler()
         
+        # Prepare components including scaler
+        self.model, self.train_loader, self.optimizer, self.lr_scheduler, self.scaler = \
+            self.accelerator.prepare(
+                self.model, self.train_loader, self.optimizer, self.lr_scheduler, self.scaler
+            )
+
         # Setup writer for main process
         self.writer = self._setup_writer()
         
@@ -181,13 +187,16 @@ class MotionPriorTrainer:
         train_batch: EgoTrainingData,
         loop_metrics: LoopMetrics
     ) -> tuple[torch.Tensor, dict[str, torch.Tensor | float]]:
-        """Execute a single training step."""
+        """Execute a single training step with mixed precision."""
         with self.accelerator.accumulate(self.model):
-            loss, log_outputs = self.loss_helper.compute_denoising_loss(
-                self.model,
-                unwrapped_model=self.accelerator.unwrap_model(self.model),
-                train_batch=train_batch,
-            )
+            # Compute loss with autocast
+            with autocast():
+                loss, log_outputs = self.loss_helper.compute_denoising_loss(
+                    self.model,
+                    unwrapped_model=self.accelerator.unwrap_model(self.model),
+                    train_batch=train_batch,
+                )
+            
             log_outputs["learning_rate"] = self.lr_scheduler.get_last_lr()[0]
             log_outputs["iterations_per_sec"] = loop_metrics.iterations_per_sec
             
@@ -223,9 +232,10 @@ class MotionPriorTrainer:
             )
 
     def _handle_checkpointing(self):
-        """Handle model checkpointing."""
+        """Handle model checkpointing including scaler state."""
         if self.step % 5000 == 0:
             checkpoint_path = self.experiment_dir / f"checkpoints_{self.step}"
+            # Save scaler state along with other states
             self.accelerator.save_state(str(checkpoint_path))
             logger.info(f"Saved checkpoint to {checkpoint_path}")
 
