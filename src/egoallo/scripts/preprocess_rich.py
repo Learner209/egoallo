@@ -6,13 +6,11 @@ import time
 from pathlib import Path
 from typing import Optional
 
-import h5py
 import torch
 import tyro
 from tqdm import tqdm
 
 from egoallo.data.rich.rich_processor import RICHDataProcessor
-from egoallo.data.rich.rich_dataset_config import RICHDatasetConfig
 from egoallo.setup_logger import setup_logger
 
 logger = setup_logger(output="logs/rich_preprocess", name=__name__)
@@ -24,13 +22,12 @@ class RICHPreprocessConfig:
     rich_data_dir: Path = Path("./third_party/rich_toolkit")
     smplx_model_dir: Path = Path("./third_party/rich_toolkit/body_models/smplx")
     output_dir: Path = Path("./data/rich/processed_data")
-    output_hdf5: Path = Path("./data/rich/rich_dataset.hdf5")
     output_list_file: Path = Path("./data/rich/rich_dataset_files.txt")
     
     # Processing options
     target_fps: int = 30
-    min_sequence_length: int = 30  # Minimum frames per sequence
-    max_sequence_length: int = 300  # Maximum frames per sequence
+    min_sequence_length: int = 30
+    max_sequence_length: int = 300
     include_contact: bool = True
     use_pca: bool = True
     num_processes: int = 4
@@ -45,40 +42,34 @@ class RICHPreprocessConfig:
     debug: bool = False
 
 def process_sequence(args: tuple[RICHDataProcessor, str, str, Path]) -> Optional[str]:
-    """Process a single RICH sequence and return its group name if successful.
+    """Process a single RICH sequence and save as npz file.
     
     Args:
-        processor: RICH data processor instance
-        split: Dataset split name (train/val/test)
-        seq_name: Sequence name
-        output_path: Path to save processed sequence
+        args: Tuple of (processor, split, seq_name, output_path)
         
     Returns:
-        Group name for the sequence if processing successful, None otherwise
+        Relative path to the saved npz file if successful, None otherwise
     """
     processor, split, seq_name, output_path = args
-    try:
-        # Process sequence
-        processed_data = processor.process_sequence(split, seq_name)
+    
+    # Process sequence with early exit check
+    processed_data = processor.process_sequence(split, seq_name, output_path)
+    
+    # If None returned, file already exists
+    if processed_data is None:
+        rel_path = output_path.relative_to(output_path.parent.parent)
+        return str(rel_path)
         
-        # Save sequence
-        processor.save_sequence(processed_data, output_path)
-        
-        # Return group name for file list
-        group_name = f"{split}/{seq_name}"
-        logger.info(f"Successfully processed sequence {group_name}")
-        return group_name
-        
-    except Exception as e:
-        logger.error(f"Error processing sequence {seq_name}: {str(e)}")
-        return None
+    # Save as npz if new processing was needed
+    processor.save_sequence(processed_data, output_path)
+    
+    # Return relative path for file list
+    rel_path = output_path.relative_to(output_path.parent.parent)
+    logger.info(f"Successfully processed sequence {seq_name}")
+    return str(rel_path)
 
 def main(config: RICHPreprocessConfig) -> None:
-    """Main preprocessing function.
-    
-    Args:
-        config: Preprocessing configuration
-    """
+    """Main preprocessing function."""
     start_time = time.time()
     
     # Create output directories
@@ -96,35 +87,34 @@ def main(config: RICHPreprocessConfig) -> None:
     )
     
     # Set up task queue for parallel processing
-    task_queue = queue.Queue[tuple[RICHDataProcessor, str, str, Path]]()
+    task_queue = queue.Queue()
+    processed_files: list[str] = []
     
     # Collect all sequences to process
     for split in config.splits:
-        split_dir = config.rich_data_dir / 'data/bodies' / split
-        sequences = [d.name for d in split_dir.iterdir() if d.is_dir()]
+        split_dir = config.output_dir / split
+        split_dir.mkdir(exist_ok=True)
+        
+        sequences = [d.name for d in (config.rich_data_dir / 'data/bodies' / split).iterdir() if d.is_dir()]
         
         for seq_name in sequences:
-            output_path = config.output_dir / f"{split}_{seq_name}.pt"
-            if not output_path.exists():  # Skip if already processed
-                task_queue.put_nowait((processor, split, seq_name, output_path))
+            output_path = split_dir / f"{seq_name}.npz"
+            # No need to check existence here since it's handled in process_sequence
+            task_queue.put_nowait((processor, split, seq_name, output_path))
     
     total_count = task_queue.qsize()
     logger.info(f"Found {total_count} sequences to process")
     
-    # Process sequences and collect group names for file list
-    file_list: list[str] = []
-    
     def worker(device_idx: int) -> None:
-        """Worker function for parallel processing."""
         while True:
             try:
                 args = task_queue.get_nowait()
             except queue.Empty:
                 break
                 
-            group_name = process_sequence(args)
-            if group_name is not None:
-                file_list.append(group_name)
+            rel_path = process_sequence(args)
+            if rel_path is not None:
+                processed_files.append(rel_path)
                 
             logger.info(
                 f"Progress: {total_count - task_queue.qsize()}/{total_count} "
@@ -141,37 +131,25 @@ def main(config: RICHPreprocessConfig) -> None:
     for w in workers:
         w.join()
     
-    # Save processed sequences to HDF5
-    logger.info("Saving sequences to HDF5...")
-    with h5py.File(config.output_hdf5, "w") as f:
-        for split in config.splits:
-            split_dir = config.output_dir / split
-            for seq_path in tqdm(list(split_dir.glob("*.pt")), desc=f"Processing {split}"):
-                # Load processed sequence
-                seq_data = torch.load(seq_path, map_location="cpu")
-                
-                # Create HDF5 group and datasets
-                group_name = f"{split}/{seq_path.stem}"
-                group = f.create_group(group_name)
-                
-                for k, v in seq_data.items():
-                    if isinstance(v, torch.Tensor):
-                        v = v.numpy()
-                    chunks = (min(32, v.shape[0]),) + v.shape[1:] if v.ndim > 1 else None
-                    group.create_dataset(k, data=v, chunks=chunks)
+    # Add existing npz files to processed_files list
+    for split in config.splits:
+        split_dir = config.output_dir / split
+        existing_files = split_dir.glob("*.npz")
+        for file_path in existing_files:
+            rel_path = file_path.relative_to(config.output_dir)
+            if str(rel_path) not in processed_files:
+                processed_files.append(str(rel_path))
     
     # Save file list
-    config.output_list_file.write_text("\n".join(file_list))
+    config.output_list_file.write_text("\n".join(processed_files))
     
     total_time = time.time() - start_time
     logger.info(f"Total processing time: {total_time/60:.2f} minutes")
 
 if __name__ == "__main__":
-    # Set up debugging
+    # Parse config and run
+    config = tyro.cli(RICHPreprocessConfig)
     if config.debug:
         import ipdb
         ipdb.set_trace()
-    
-    # Parse config and run
-    config = tyro.cli(RICHPreprocessConfig)
     main(config) 
