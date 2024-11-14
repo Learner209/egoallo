@@ -4,6 +4,9 @@
 [submodule "third_party/humor"]
 	path = third_party/humor
 	url = git@github.com:Learner209/humor.git
-[submodule "third_party/egoego"]
-	path = third_party/egoego
-	url = git@github.com:lijiaman/egoego_release.git
+[submodule "third_party/rich_toolkit"]
+	path = third_party/rich_toolkit
+	url = git@github.com:Learner209/rich_toolkit.git
+[submodule "third_party/hps_toolkit"]
+	path = third_party/hps_toolkit
+	url = git@github.com:Learner209/hps_toolkit.git

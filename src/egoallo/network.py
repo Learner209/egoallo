@@ -12,6 +12,7 @@ from jaxtyping import Bool, Float
 from rotary_embedding_torch import RotaryEmbedding
 from egoallo.setup_logger import setup_logger
 from torch import Tensor, nn
+from torch.cuda.amp import autocast
 
 from .fncsmpl import SmplhModel, SmplhShapedAndPosed
 from .tensor_dataclass import TensorDataclass
@@ -155,6 +156,42 @@ class EgoDenoiseTraj(TensorDataclass):
             ).wxyz,
         )
         return posed
+
+    def get_body_quats(self) -> Float[Tensor, "*batch timesteps n_joints 4"]:
+        """Convert body rot6d representation to quaternions.
+        
+        Returns:
+            Quaternions in wxyz format for each body joint.
+        """
+        # Convert body rot6d to quaternions
+        body_quats = SO3.from_rot6d(
+            self.body_rot6d.reshape(-1, 6)
+        ).wxyz.reshape(*self.body_rot6d.shape[:-1], 4)
+        
+        return body_quats
+
+    def get_T_world_root(
+        self, 
+        body_model: SmplhModel,
+        Ts_world_cpf: Float[Tensor, "... 7"]
+    ) -> Float[Tensor, "... 7"]:
+        """Compute root transform in world frame using CPF poses.
+        
+        Args:
+            body_model: SMPL+H body model instance
+            Ts_world_cpf: Transform from world to CPF frame in SE3 parameters format
+                         (qw, qx, qy, qz, x, y, z)
+        
+        Returns:
+            Transform from world to root frame in SE3 parameters format
+        """
+        # First apply poses to body model to get full body pose
+        posed = self.apply_to_body(body_model)
+        
+        # Then compute root transform using CPF poses
+        return fncsmpl_extensions.get_T_world_root_from_cpf_pose(
+            posed, Ts_world_cpf
+        )
 
     def get_body_quats(self) -> Float[Tensor, "*batch timesteps n_joints 4"]:
         """Convert body rot6d representation to quaternions.
@@ -575,7 +612,7 @@ class TransformerBlock(nn.Module):
         config = self.config
         q, k, v = rearrange(
             self.sattn_qkv_proj(x),
-            "b t (qkv nh dh) -> qkv b nh t dh",
+            "b t (qkv nh dh) -> qkv b nh t dh", 
             qkv=3,
             nh=config.n_heads,
         )

@@ -16,9 +16,9 @@ htmlcov
 lightning_logs/
 outputs/
 experiments/
-blendify_assets
-objaverse/
-download_objaverse_xl.py
+blendify_assets/
+wandb/
+
 test_results/
 logs/
 
