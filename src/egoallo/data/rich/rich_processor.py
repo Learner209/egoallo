@@ -1,91 +1,58 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple, Union
 
 import numpy as np
 import torch
-from smplx import SMPLX
-import trimesh
-from sklearn.cluster import DBSCAN
+from torch import Tensor
+from jaxtyping import Float
 
 from egoallo.setup_logger import setup_logger
 from egoallo.data.motion_processing import MotionProcessor
+from egoallo.fncsmpl import SmplhModel, SmplhShaped, SmplhShapedAndPosed, SmplMesh
+from egoallo.transforms import SE3, SO3
+import pickle
+from smplx.body_models import SMPLH
 
 logger = setup_logger(output="logs/rich_processor", name=__name__)
 
 class RICHDataProcessor:
-    """Process RICH dataset sequences for training and evaluation.
-    
-    This class handles loading and preprocessing of RICH dataset sequences,
-    including SMPL-X parameters, human-scene contact annotations, and
-    floor height detection.
-    """
+    """Process RICH dataset sequences using functional SMPL-H."""
     
     def __init__(
         self,
         rich_data_dir: str,
-        smplx_model_dir: str,
+        smplh_model_dir: str,
         output_dir: str,
         fps: int = 30,
         include_contact: bool = True,
-        use_pca: bool = True,
         device: str = "cuda",
     ) -> None:
-        """Initialize the RICH data processor.
-        
-        Args:
-            rich_data_dir: Path to RICH dataset root directory
-            smplx_model_dir: Path to SMPL-X model files
-            output_dir: Output directory for processed sequences
-            fps: Target frames per second for sequences
-            include_contact: Whether to include contact annotations
-            use_pca: Whether to use PCA for hand poses
-            device: Device to use for processing
-        """
         self.rich_data_dir = Path(rich_data_dir)
-        self.smplx_model_dir = Path(smplx_model_dir)
+        self.smplh_model_dir = Path(smplh_model_dir)
         self.output_dir = Path(output_dir)
         self.fps = fps
         self.include_contact = include_contact
-        self.use_pca = use_pca
         self.device = device
 
-        # Constants for contact and floor detection
-        self.floor_vel_thresh = 0.005
-        self.floor_height_offset = 0.01
-        self.contact_vel_thresh = 0.005
-        self.contact_toe_height_thresh = 0.04
-        self.contact_ankle_height_thresh = 0.08
-
-        # Load gender and image extension mappings
+        # Load gender mapping
         with open(self.rich_data_dir / "resource/gender.json", "r") as f:
             self.gender_mapping = json.load(f)
+
+        # Load image extension mapping
         with open(self.rich_data_dir / "resource/imgext.json", "r") as f:
             self.img_ext_mapping = json.load(f)
 
-        # Initialize SMPL-X models for each gender
+        # Initialize SMPL-H models for each gender
         self.body_models = {}
         for gender in ["male", "female", "neutral"]:
-            self.body_models[gender] = SMPLX(
-                model_path=str(self.smplx_model_dir),
-                gender=gender,
-                num_pca_comps=12 if use_pca else 45,
-                flat_hand_mean=False,
-                create_expression=True,
-                create_jaw_pose=True,
-            ).to(device)
+            model_path = self.smplh_model_dir / f"{gender}/model.npz"
+            self.body_models[gender] = SmplhModel.load(model_path)
 
         # Initialize motion processor
-        self.motion_processor = MotionProcessor(
-            floor_vel_thresh=self.floor_vel_thresh,
-            floor_height_offset=self.floor_height_offset,
-            contact_vel_thresh=self.contact_vel_thresh,
-            contact_toe_height_thresh=self.contact_toe_height_thresh,
-            contact_ankle_height_thresh=self.contact_ankle_height_thresh
-        )
+        self.motion_processor = MotionProcessor()
         
         # Joint indices mapping
         self.joint_indices = {
@@ -95,24 +62,39 @@ class RICHDataProcessor:
             "right_ankle": 9
         }
 
+    def _convert_rotations(
+        self,
+        global_orient: Float[Tensor, "... 3"],
+        body_pose: Float[Tensor, "... 63"],
+        left_hand_pose: Float[Tensor, "... 45"],
+        right_hand_pose: Float[Tensor, "... 45"],
+        transl: Float[Tensor, "... 3"]
+    ) -> tuple[Float[Tensor, "... 7"], Float[Tensor, "... 21 4"], Float[Tensor, "... 15 4"], Float[Tensor, "... 15 4"]]:
+        """Convert rotation representations."""
+        # Convert global orientation and translation to SE(3)
+        T_world_root = SE3.from_rotation_and_translation(
+            rotation=SO3.exp(global_orient),
+            translation=transl
+        ).parameters()  # (..., 7)
+
+        # Convert body pose to quaternions (21 joints)
+        body_rots = body_pose.reshape(*body_pose.shape[:-1], 21, 3)
+        body_quats = SO3.exp(body_rots).wxyz  # (..., 21, 4)
+
+        # Convert hand poses to quaternions (15 joints each)
+        import ipdb; ipdb.set_trace()
+        left_hand_rots = left_hand_pose.reshape(*left_hand_pose.shape[:-1], 15, 3)
+        right_hand_rots = right_hand_pose.reshape(*right_hand_pose.shape[:-1], 15, 3)
+        left_hand_quats = SO3.exp(left_hand_rots).wxyz  # (..., 15, 4)
+        right_hand_quats = SO3.exp(right_hand_rots).wxyz  # (..., 15, 4)
+
+        return T_world_root, body_quats, left_hand_quats, right_hand_quats
+
     def process_frame_data(
         self, split: str, seq_name: str, frame_id: int
-    ) -> Tuple[Dict[str, Union[np.ndarray, torch.Tensor]], Optional[np.ndarray], Optional[np.ndarray]]:
-        """Load and process SMPL-X parameters and contact data for a single frame.
-        
-        Args:
-            split: Dataset split (train/val/test)
-            seq_name: Name of the sequence
-            frame_id: Frame ID to load
-            
-        Returns:
-            Tuple containing:
-                - Dictionary of SMPL-X parameters
-                - Contact vertex indices (if include_contact=True)
-                - Contact displacement vectors (if include_contact=True)
-        """
+    ) -> Tuple[Dict[str, Union[np.ndarray, torch.Tensor]], Optional[np.ndarray], Dict[str, Any]]:
+        """Process a single frame of RICH data."""
         scene_name, sub_id, _ = seq_name.split("_")
-        gender = self.gender_mapping[f"{int(sub_id)}"]
         
         # Load SMPL-X parameters
         params_path = (
@@ -127,32 +109,23 @@ class RICHDataProcessor:
             k: torch.from_numpy(v).float().to(self.device)
             for k, v in body_params.items()
         }
+
+        # Load HSC parameters
+        hsc_path = (
+            self.rich_data_dir / "data/human_scene_contact" / split / seq_name /
+            f"{frame_id:05d}" / f"{sub_id}.pkl"
+        )
+        with open(hsc_path, "rb") as f:
+            hsc_params = pickle.load(f)
         
-        # Process hand poses if using PCA
-        if self.use_pca:
-            body_model = self.body_models[gender]
-            for side in ['left', 'right']:
-                hand_pose = body_params_tensor[f'{side}_hand_pose']
-                hand_components = getattr(body_model, f'np_{side}_hand_components')
-                hand_components = torch.from_numpy(hand_components).float().to(self.device)
-                body_params_tensor[f'{side}_hand_pose'] = torch.einsum(
-                    'bi,ij->bj', [hand_pose, hand_components]
-                )
-        
-        contact_verts = contact_vecs = None
-        if self.include_contact:
-            # Load contact annotations if available
-            contact_path = (
-                self.rich_data_dir / "data/human_scene_contact" / split / 
-                seq_name / f"{frame_id:05d}" / f"{sub_id}.pkl"
-            )
-            if contact_path.exists():
-                with open(contact_path, "rb") as f:
-                    contact_data = np.load(f, allow_pickle=True)
-                contact_verts = np.where(contact_data["contact"] > 0.0)[0]
-                contact_vecs = contact_data["s2m_dist_id"]
-                
-        return body_params_tensor, contact_verts, contact_vecs
+        # Extract contact information
+        contact_data = {
+            'vertex_contacts': hsc_params['contact'],  # (6890,) vertex contact labels
+            'displacement_vectors': hsc_params['s2m_dist_id'],  # (10475,3) displacement vectors
+            'closest_faces': hsc_params['closest_triangles_id']  # (10475,3,3) closest scene triangles
+        }
+
+        return body_params_tensor, None, contact_data
 
     def process_sequence(self, split: str, seq_name: str, output_path: Path) -> Optional[Dict[str, Any]]:
         """Process a complete sequence."""
@@ -162,7 +135,7 @@ class RICHDataProcessor:
             
         scene_name, sub_id, _ = seq_name.split('_')
         gender = self.gender_mapping[f'{int(sub_id)}']
-        body_model = self.body_models[gender]
+        body_model: SmplhModel = self.body_models[gender]
         
         # Get frame IDs
         seq_dir = self.rich_data_dir / "data/bodies" / split / seq_name
@@ -172,46 +145,65 @@ class RICHDataProcessor:
         ])
         
         # Process each frame
-        processed_frames = []
-        contact_info = []
         joints_sequence = []
+        processed_frames = []
+        contact_data_sequence = []
         
         for frame_id in frame_ids:
             # Load and process frame data
-            body_params, contact_verts, contact_vecs = self.process_frame_data(
-                split, seq_name, frame_id
-            )
+            body_params, _, contact_data = self.process_frame_data(split, seq_name, frame_id)
             
-            # Forward pass through SMPL-X
-            model_output = body_model(
-                betas=body_params['betas'],
-                global_orient=body_params['global_orient'],
-                body_pose=body_params['body_pose'],
-                left_hand_pose=body_params['left_hand_pose'],
-                right_hand_pose=body_params['right_hand_pose'],
-                return_verts=True
+            # Convert rotations to required format
+            
+            # Convert PCA coefficients to axis-angle format
+            left_hand_pose, right_hand_pose = body_model.convert_hand_poses(
+                left_hand_pca=body_params['left_hand_pose'],  # (..., num_pca)
+                right_hand_pca=body_params['right_hand_pose']  # (..., num_pca)
             )
+
+            T_world_root, body_quats, left_hand_quats, right_hand_quats = self._convert_rotations(
+                body_params['global_orient'],  # (..., 3)
+                body_params['body_pose'],  # (..., 63)
+                left_hand_pose,  # (..., 15, 3)
+                right_hand_pose,  # (..., 15, 3)
+                body_params['transl']  # (..., 3)
+            )  # Returns (..., 7), (..., 21, 4), (..., 15, 4), (..., 15, 4)
+
+            # Process through SMPL-H pipeline
+            shaped: SmplhShaped = body_model.with_shape(body_params['betas'])  # (..., num_betas)
+            posed: SmplhShapedAndPosed = shaped.with_pose_decomposed(
+                T_world_root=T_world_root,  # (..., 7)
+                body_quats=body_quats,  # (..., 21, 4)
+                left_hand_quats=left_hand_quats,  # (..., 15, 4)
+                right_hand_quats=right_hand_quats  # (..., 15, 4)
+            )
+            mesh: SmplMesh = posed.lbs()
             
             # Store joints for floor height detection
-            joints_sequence.append(model_output.joints.detach().cpu().numpy())
+            joints = mesh.verts.detach().cpu().numpy()  # (..., num_verts, 3)
+            joints_sequence.append(joints)
             
-            # Store processed frame data
+            # Convert per-vertex contacts to per-joint contacts using posed mesh
+            vertex_contacts = torch.from_numpy(contact_data['vertex_contacts']).float().to(self.device)  # (6890,)
+            # Use weighted average of nearby vertex contacts for joint contacts
+            joint_contacts = posed.compute_joint_contacts(vertex_contacts)  # (num_joints,)
+            
+            # Store processed data
             processed_frames.append(body_params)
-            if self.include_contact:
-                contact_info.append({
-                    'contact_verts': contact_verts,
-                    'contact_vecs': contact_vecs
-                })
+            contact_data_sequence.append({
+                'vertex_contacts': contact_data['vertex_contacts'],
+                'displacement_vectors': contact_data['displacement_vectors'],
+                'closest_faces': contact_data['closest_faces'],
+                'joint_contacts': joint_contacts.cpu().numpy()
+            })
         
-        # Convert joints sequence to numpy array
+        # Process floor height only (removed contact detection)
         joints_sequence = np.stack(joints_sequence)
+        floor_height = self.motion_processor.detect_floor_height(joints_sequence, [
+            self.joint_indices["left_toe"], self.joint_indices["right_toe"]
+        ])
         
-        # Replace floor height detection with common implementation
-        floor_height, contact_labels = self.motion_processor.process_floor_and_contacts(
-            joints_sequence, self.joint_indices
-        )
-        
-        # Use floor height for translation adjustment
+        # Adjust heights
         for frame_data in processed_frames:
             if 'transl' in frame_data:
                 frame_data['transl'][:, 2] -= floor_height
@@ -221,14 +213,10 @@ class RICHDataProcessor:
             'body_params': processed_frames,
             'frame_ids': frame_ids,
             'gender': gender,
-            'fps': self.fps
+            'fps': self.fps,
+            'floor_height': floor_height,
+            'contact_data': contact_data_sequence
         }
-        
-        if self.include_contact:
-            sequence_data.update({
-                'contact_verts': [info['contact_verts'] for info in contact_info],
-                'contact_vecs': [info['contact_vecs'] for info in contact_info]
-            })
             
         return sequence_data
 

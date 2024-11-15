@@ -19,8 +19,8 @@ class RICHDatasetConfig:
     rich_data_dir: Path = Path("./third_party/rich_toolkit")
     """Path to RICH dataset root directory"""
     
-    smplx_model_dir: Path = Path("./third_party/rich_toolkit/body_models/smplx")
-    """Path to SMPL-X model directory"""
+    smplh_model_dir: Path = Path("./assets/smpl_based_model/smplh")
+    """Path to SMPL-H model directory"""
     
     output_dir: Path = Path("./data/rich/processed_data")
     """Directory for saving processed sequences"""
@@ -65,15 +65,15 @@ class RICHDatasetConfig:
         """Convert paths to Path objects and validate configuration."""
         # Convert string paths to Path objects
         self.rich_data_dir = Path(self.rich_data_dir)
-        self.smplx_model_dir = Path(self.smplx_model_dir)
+        self.smplh_model_dir = Path(self.smplh_model_dir)
         self.output_dir = Path(self.output_dir)
         self.output_list_file = Path(self.output_list_file)
         
         # Validate paths
         if not self.rich_data_dir.exists():
             raise ValueError(f"RICH dataset directory not found: {self.rich_data_dir}")
-        if not self.smplx_model_dir.exists():
-            raise ValueError(f"SMPL-X model directory not found: {self.smplx_model_dir}")
+        if not self.smplh_model_dir.exists():
+            raise ValueError(f"SMPL-H model directory not found: {self.smplh_model_dir}")
             
         # Create output directory
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -108,7 +108,7 @@ class RICHDatasetConfig:
         """
         return {
             "rich_data_dir": str(self.rich_data_dir),
-            "smplx_model_dir": str(self.smplx_model_dir),
+            "smplh_model_dir": str(self.smplh_model_dir),
             "output_dir": str(self.output_dir),
             "fps": self.target_fps,
             "include_contact": self.include_contact,

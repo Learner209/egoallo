@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import dataclasses
 from pathlib import Path
-from typing import List
+from typing import List, Any
 
 import torch
 
@@ -16,7 +16,7 @@ class AMASSDatasetConfig:
     amass_dir: Path = Path("datasets/AMASS/SMPLH_G")
     """Path to AMASS dataset root"""
     
-    smpl_dir: Path = Path("assets/smpl_based_model/smplh")
+    smplh_dir: Path = Path("./assets/smpl_based_model/smplh")
     """Path to SMPL model directory"""
     
     output_dir: Path = Path("./data/amass/processed")
@@ -69,15 +69,15 @@ class AMASSDatasetConfig:
         """Validate configuration."""
         # Convert paths
         self.amass_dir = Path(self.amass_dir)
-        self.smpl_dir = Path(self.smpl_dir)
+        self.smplh_dir = Path(self.smplh_dir)
         self.output_dir = Path(self.output_dir)
         self.output_list_file = Path(self.output_list_file)
         
         # Validate paths
         if not self.amass_dir.exists():
             raise ValueError(f"AMASS directory not found: {self.amass_dir}")
-        if not self.smpl_dir.exists():
-            raise ValueError(f"SMPL directory not found: {self.smpl_dir}")
+        if not self.smplh_dir.exists():
+            raise ValueError(f"SMPL directory not found: {self.smplh_dir}")
             
         # Create output directories
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -93,11 +93,11 @@ class AMASSDatasetConfig:
         if self.num_processes <= 0:
             raise ValueError(f"Number of processes must be positive, got {self.num_processes}")
     
-    def get_processor_kwargs(self) -> dict:
+    def get_processor_kwargs(self) -> dict[str, Any]:
         """Get kwargs for AMASSProcessor initialization."""
         return {
             "amass_dir": str(self.amass_dir),
-            "smpl_dir": str(self.smpl_dir),
+            "smplh_dir": str(self.smplh_dir),
             "output_dir": str(self.output_dir),
             "fps": self.target_fps,
             "include_velocities": self.include_velocities,
