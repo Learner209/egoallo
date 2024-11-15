@@ -13,10 +13,10 @@ class AMASSDatasetConfig:
     """Configuration for AMASS dataset preprocessing."""
     
     # Dataset paths
-    amass_dir: Path = Path("./data/amass")
+    amass_dir: Path = Path("datasets/AMASS/SMPLH_G")
     """Path to AMASS dataset root"""
     
-    smpl_dir: Path = Path("./data/smpl")
+    smpl_dir: Path = Path("assets/smpl_based_model/smplh")
     """Path to SMPL model directory"""
     
     output_dir: Path = Path("./data/amass/processed")
@@ -38,7 +38,7 @@ class AMASSDatasetConfig:
     include_align_rot: bool = True
     """Whether to compute alignment rotations"""
     
-    num_processes: int = 4
+    num_processes: int = 1
     """Number of parallel processes"""
     
     # Dataset splits

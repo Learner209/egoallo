@@ -7,7 +7,7 @@ from typing import Any, Dict, Optional, Tuple, List
 
 import numpy as np
 import torch
-from smplx import SMPL
+from smplx import SMPLH
 from tqdm import tqdm
 
 from egoallo.setup_logger import setup_logger
@@ -58,14 +58,17 @@ class AMASSProcessor:
             "right_toe": 11
         }
         
-        # Initialize SMPL body models
+        # Initialize SMPLH body models
         self.body_models = {}
         for gender in ['male', 'female', 'neutral']:
-            self.body_models[gender] = SMPL(
-                model_path=str(self.smpl_dir),
+            model_path = os.path.join(str(self.smpl_dir), f'{gender}/model.npz')
+            self.body_models[gender] = SMPLH(
+                model_path=model_path,
                 gender=gender,
                 batch_size=1,
-                num_betas=10
+                num_betas=16,
+                use_pca=False,
+                flat_hand_mean=True,
             ).to(self.device)
     
     def process_sequence(
@@ -87,37 +90,41 @@ class AMASSProcessor:
         gender = str(seq_data.get('gender', 'neutral'))
         fps = int(seq_data['mocap_framerate'])
         
-        # Get poses and other parameters
-        poses = seq_data['poses']  # (N, 156)
-        trans = seq_data['trans']  # (N, 3)
-        betas = seq_data['betas']  # (10,)
+        # Split poses into components
+        poses = seq_data['poses']  # (N, 156) - Full SMPLH poses
+        trans = seq_data['trans']  # (N, 3) 
+        betas = seq_data['betas'][:16]  # (16,) - Take first 16 shape params
         
         num_frames = len(poses)
         if num_frames < min_frames:
             logger.warning(f"Sequence too short: {num_frames} frames")
             return None
             
+        # Split pose parameters
+        root_orient = poses[:, :3]  # (N, 3) - Global root orientation
+        body_pose = poses[:, 3:66]  # (N, 63) - Body joint rotations (21 joints)
+        hand_pose = poses[:, 66:]  # (N, 90) - Hand joint rotations
+        
         # Convert to tensors
-        poses = torch.from_numpy(poses).float().to(self.device)
-        trans = torch.from_numpy(trans).float().to(self.device)
-        betas = torch.from_numpy(betas).float().to(self.device)
+        root_orient = torch.from_numpy(root_orient).float().to(self.device)  # (N, 3)
+        body_pose = torch.from_numpy(body_pose).float().to(self.device)  # (N, 63) 
+        hand_pose = torch.from_numpy(hand_pose).float().to(self.device)  # (N, 90)
+        trans = torch.from_numpy(trans).float().to(self.device)  # (N, 3)
+        betas = torch.from_numpy(betas).float().to(self.device)  # (16,)
         
-        # Split poses
-        root_orient = poses[:, :3]
-        body_pose = poses[:, 3:66]
-        
-        # Forward pass through SMPL
+        # Forward pass through SMPLH
         body_model = self.body_models[gender]
         body_output = body_model(
-            betas=betas.expand(num_frames, -1),
-            global_orient=root_orient,
-            body_pose=body_pose,
-            transl=trans,
+            betas=betas.expand(num_frames, -1),  # (N, 16)
+            global_orient=root_orient,  # (N, 3)
+            body_pose=body_pose,  # (N, 63)
+            hand_pose=hand_pose,  # (N, 90)
+            transl=trans,  # (N, 3)
             return_verts=True
         )
         
         # Get joint positions
-        joints = body_output.joints.detach().cpu().numpy()
+        joints = body_output.joints.detach().cpu().numpy()  # (N, J, 3)
         
         # Process floor height and contacts
         floor_height, contacts = self.motion_processor.process_floor_and_contacts(
@@ -133,27 +140,27 @@ class AMASSProcessor:
         if self.include_velocities:
             dt = 1.0 / fps
             
-            # Joint velocities
+            # Joint velocities (N-2, J, 3)
             joint_vel = np.stack([
                 self.motion_processor.compute_joint_velocity(joints[:, i])
                 for i in range(joints.shape[1])
             ], axis=1)
             
-            # Translation velocities
+            # Translation velocities (N-2, 3)
             trans_vel = self.motion_processor.compute_joint_velocity(
                 trans.cpu().numpy()
             )
             
-            # Angular velocities
+            # Angular velocities (N-2, 3)
             root_orient_mat = body_output.global_orient.detach().cpu().numpy()
             root_ang_vel = self.motion_processor.compute_angular_velocity(
                 root_orient_mat, dt
             )
             
             velocities = {
-                'joints': joint_vel,
-                'trans': trans_vel,
-                'root_orient': root_ang_vel
+                'joints': joint_vel,  # (N-2, J, 3)
+                'trans': trans_vel,  # (N-2, 3)
+                'root_orient': root_ang_vel  # (N-2, 3)
             }
         
         # Compute alignment rotations if requested
@@ -165,13 +172,16 @@ class AMASSProcessor:
         
         # Prepare sequence data
         sequence_data = {
-            'poses': poses.cpu().numpy(),
-            'trans': trans.cpu().numpy(),
-            'betas': betas.cpu().numpy(),
-            'gender': gender,
-            'fps': fps,
-            'joints': joints,
-            'contacts': contacts
+            'poses': poses.cpu().numpy(),  # (N, 156)
+            'trans': trans.cpu().numpy(),  # (N, 3)
+            'betas': betas.cpu().numpy(),  # (16,)
+            'gender': gender,  # str
+            'fps': fps,  # float
+            'joints': joints,  # (N, J, 3)
+            'contacts': contacts,  # (N, J)
+            'hand_pose': hand_pose.cpu().numpy(),  # (N, 90)
+            'root_orient': root_orient.cpu().numpy(),  # (N, 3)
+            'body_pose': body_pose.cpu().numpy(),  # (N, 63)
         }
         
         if velocities is not None:
