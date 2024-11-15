@@ -23,7 +23,7 @@ from diffusers.training_utils import EMAModel
 
 from egoallo.motion_diffusion_pipeline import MotionDiffusionPipeline, MotionUNet
 from egoallo.training_utils import ipdb_safety_net
-from egoallo.data.amass_dataset_dynamic import EgoAmassHdf5DatasetDynamic
+from egoallo.data.amass_dataset import AmassHdf5Dataset
 from egoallo.data.dataclass import collate_dataclass, EgoTrainingData
 from egoallo.network import EgoDenoiseTraj
 from egoallo.training_utils import (
@@ -143,7 +143,7 @@ class MotionDiffusionTrainer:
 
     def _setup_dataloader(self) -> DataLoader:
         """Initialize the data loader."""
-        dataset = EgoAmassHdf5DatasetDynamic(self.config)
+        dataset = AmassHdf5Dataset(self.config)
         effective_batch_size = self.total_batch_size
         per_gpu_batch_size = effective_batch_size // torch.cuda.device_count()
         return DataLoader(

@@ -1,20 +1,10 @@
 {
 	"files": [
 		{
-			"path": "src/egoallo/data/amass.py",
-			"bookmarks": [
-				{
-					"line": 11,
-					"column": 13,
-					"label": "amass_splits"
-				}
-			]
-		},
-		{
 			"path": "src/egoallo/scripts/aria_inference.py",
 			"bookmarks": [
 				{
-					"line": 104,
+					"line": 101,
 					"column": 0,
 					"label": "run_sampling_with_stitching"
 				}

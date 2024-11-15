@@ -9,10 +9,47 @@ import torch.utils
 import torch.utils.data
 
 from .dataclass import EgoTrainingData
-from .amass import AMASS_SPLITS
 
 if TYPE_CHECKING:
     from egoallo.config.train_config import EgoAlloTrainConfig
+
+
+AMASS_SPLITS = {
+    "train": [
+        "ACCAD",
+        "BMLhandball",
+        "BMLmovi",
+        "BioMotionLab_NTroje",
+        "CMU",
+        "DFaust_67",
+        "DanceDB",
+        "EKUT",
+        "Eyes_Japan_Dataset",
+        "KIT",
+        "MPI_Limits",
+        "TCD_handMocap",
+        "TotalCapture",
+    ],
+    "val": [
+        "HumanEva",
+        "MPI_HDM05",
+        "MPI_mosh",
+        "SFU",
+    ],
+    "test": [
+        "Transitions_mocap",
+        "SSM_synced",
+    ],
+    "test_humor": [
+        # HuMoR splits are different...
+        "Transitions_mocap",
+        "HumanEva",
+    ],
+    # This is just used for debugging / overfitting...
+    "just_humaneva": [
+        "HumanEva",
+    ],
+}
 
 @dataclass
 class DatasetState:
@@ -21,7 +58,7 @@ class DatasetState:
     last_slice_index: int = -1
     prev_window: Optional[EgoTrainingData] = None
 
-class EgoAmassHdf5DatasetDynamic(torch.utils.data.Dataset[EgoTrainingData]):
+class AmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
     """Dataset which loads from our preprocessed hdf5 file with dynamic window support."""
 
     def __init__(self, config: "EgoAlloTrainConfig") -> None:
@@ -67,7 +104,7 @@ class EgoAmassHdf5DatasetDynamic(torch.utils.data.Dataset[EgoTrainingData]):
             self._cum_len = np.cumsum(self._group_lengths)
 
             # Cache for better performance
-            self._cache: dict[str, dict[str, np.ndarray]] = {}
+            self._cache: dict[str, dict[str, np.ndarray[Any, Any]]] = {}
 
     def _load_sequence_data(self, group: str, start_t: int, end_t: int, total_t: int) -> dict[str, Any]:
         """Load sequence data from HDF5 file or cache."""
@@ -100,7 +137,7 @@ class EgoAmassHdf5DatasetDynamic(torch.utils.data.Dataset[EgoTrainingData]):
             
         return kwargs
 
-    def _get_npz_group(self, group: str) -> Union[h5py.Group, dict[str, np.ndarray]]:
+    def _get_npz_group(self, group: str) -> Union[h5py.Group, dict[str, np.ndarray[Any, Any]]]:
         """Get NPZ group from cache or HDF5 file."""
         if group not in self._cache:
             with h5py.File(self._hdf5_path, "r") as hdf5_file:
