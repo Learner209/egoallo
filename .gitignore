@@ -27,8 +27,7 @@ myenv/
 assets
 wandb/
 
-data/
-!src/egoallo/data
+/data
 egoallo_checkpoint_*
 egoallo_example_*
 
