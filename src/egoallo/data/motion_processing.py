@@ -1,0 +1,195 @@
+"""Common utilities for motion capture data processing."""
+from __future__ import annotations
+
+import numpy as np
+from typing import Dict, Tuple, Optional
+from sklearn.cluster import DBSCAN
+
+
+class MotionProcessor:
+    """Common utilities for processing motion capture sequences.
+    
+    This class provides dataset-independent methods for processing motion data,
+    including floor detection, contact processing, and motion analysis.
+    """
+    
+    def __init__(
+        self,
+        floor_vel_thresh: float = 0.005,
+        floor_height_offset: float = 0.01,
+        contact_vel_thresh: float = 0.005,
+        contact_toe_height_thresh: float = 0.04,
+        contact_ankle_height_thresh: float = 0.08,
+    ):
+        """Initialize motion processor with detection thresholds.
+        
+        Args:
+            floor_vel_thresh: Velocity threshold for static foot detection
+            floor_height_offset: Offset from detected floor height
+            contact_vel_thresh: Velocity threshold for contact detection
+            contact_toe_height_thresh: Height threshold for toe contacts
+            contact_ankle_height_thresh: Height threshold for ankle contacts
+        """
+        self.floor_vel_thresh = floor_vel_thresh
+        self.floor_height_offset = floor_height_offset
+        self.contact_vel_thresh = contact_vel_thresh
+        self.contact_toe_height_thresh = contact_toe_height_thresh
+        self.contact_ankle_height_thresh = contact_ankle_height_thresh
+    
+    def process_floor_and_contacts(
+        self, joints: np.ndarray, joint_indices: Dict[str, int]
+    ) -> Tuple[float, np.ndarray]:
+        """Process floor height and contact labels from joint positions.
+        
+        Args:
+            joints: Joint positions of shape (num_frames, num_joints, 3)
+            joint_indices: Dictionary mapping joint names to indices
+            
+        Returns:
+            Tuple containing:
+                - Estimated floor height
+                - Boolean contact labels of shape (num_frames, num_joints)
+        """
+        floor_height = self.detect_floor_height(joints, [
+            joint_indices["left_toe"], joint_indices["right_toe"]
+        ])
+        
+        # Initialize contact array
+        contacts = np.zeros((joints.shape[0], joints.shape[1]), dtype=bool)
+        
+        # Process toe and ankle contacts
+        for side in ["left", "right"]:
+            # Toe contacts
+            toe_idx = joint_indices[f"{side}_toe"]
+            toe_vel = self.compute_joint_velocity(joints[:, toe_idx])
+            contacts[:, toe_idx] = (
+                (toe_vel < self.contact_vel_thresh) & 
+                (joints[:, toe_idx, 2] < floor_height + self.contact_toe_height_thresh)
+            )
+            
+            # Ankle contacts
+            ankle_idx = joint_indices[f"{side}_ankle"]
+            ankle_vel = self.compute_joint_velocity(joints[:, ankle_idx])
+            contacts[:, ankle_idx] = (
+                (ankle_vel < self.contact_vel_thresh) & 
+                (joints[:, ankle_idx, 2] < floor_height + self.contact_ankle_height_thresh)
+            )
+            
+        return floor_height, contacts
+    
+    def detect_floor_height(
+        self, joints: np.ndarray, foot_joints: list[int]
+    ) -> float:
+        """Detect floor height using DBSCAN clustering on foot joint positions.
+        
+        Args:
+            joints: Joint positions of shape (num_frames, num_joints, 3)
+            foot_joints: List of indices for foot joints to use
+            
+        Returns:
+            Estimated floor height
+        """
+        # Get foot joint velocities
+        foot_vels = np.stack([
+            self.compute_joint_velocity(joints[:, joint_idx])
+            for joint_idx in foot_joints
+        ])
+        
+        # Find static frames
+        static_mask = np.any(foot_vels < self.floor_vel_thresh, axis=0)
+        static_heights = joints[static_mask][..., 2].flatten()
+        
+        if len(static_heights) == 0:
+            return np.min(joints[..., 2])
+        
+        # Cluster heights using DBSCAN
+        clustering = DBSCAN(eps=0.005, min_samples=3).fit(
+            static_heights.reshape(-1, 1)
+        )
+        valid_clusters = np.unique(clustering.labels_[clustering.labels_ != -1])
+        
+        if len(valid_clusters) == 0:
+            floor_height = np.min(static_heights)
+        else:
+            # Use lowest significant cluster
+            cluster_heights = [
+                np.median(static_heights[clustering.labels_ == i])
+                for i in valid_clusters
+            ]
+            floor_height = np.min(cluster_heights)
+            
+        return float(floor_height)
+    
+    @staticmethod
+    def compute_joint_velocity(positions: np.ndarray) -> np.ndarray:
+        """Compute joint velocity from positions.
+        
+        Args:
+            positions: Joint positions of shape (num_frames, 3)
+            
+        Returns:
+            Joint velocities of shape (num_frames,)
+        """
+        velocities = np.linalg.norm(np.diff(positions, axis=0), axis=1)
+        # Pad to match original length
+        return np.pad(velocities, (0, 1), mode='edge')
+    
+    @staticmethod
+    def compute_angular_velocity(
+        rot_mats: np.ndarray, dt: float = 1.0/30
+    ) -> np.ndarray:
+        """Compute angular velocities from rotation matrices.
+        
+        Args:
+            rot_mats: Rotation matrices of shape (..., 3, 3)
+            dt: Time step between frames
+            
+        Returns:
+            Angular velocities of shape (..., 3)
+        """
+        # Compute rotation matrix derivatives
+        dR = np.gradient(rot_mats, dt, axis=0)
+        R = rot_mats[1:-1]  # Use middle frames
+        
+        # Convert to skew-symmetric matrices
+        w_mat = np.matmul(dR, np.transpose(R, (0, 1, 3, 2)))
+        
+        # Extract angular velocity vector
+        ang_vel = np.stack([
+            -w_mat[..., 1, 2] + w_mat[..., 2, 1],
+            w_mat[..., 0, 2] - w_mat[..., 2, 0],
+            -w_mat[..., 0, 1] + w_mat[..., 1, 0]
+        ], axis=-1) / 2.0
+        
+        return ang_vel
+    
+    @staticmethod
+    def compute_alignment_rotation(
+        forward_dir: np.ndarray, 
+        up_dir: np.ndarray = np.array([0, 1, 0])
+    ) -> np.ndarray:
+        """Compute rotation to align motion with canonical frame.
+        
+        Args:
+            forward_dir: Forward direction vector
+            up_dir: Up direction vector (default: y-up)
+            
+        Returns:
+            3x3 rotation matrix
+        """
+        # Project forward direction to horizontal plane
+        forward_flat = forward_dir.copy()
+        forward_flat[1] = 0  # Zero out vertical component
+        forward_flat /= np.linalg.norm(forward_flat)
+        
+        # Compute rotation matrix columns
+        right = np.cross(up_dir, forward_flat)
+        right /= np.linalg.norm(right)
+        
+        new_up = np.cross(forward_flat, right)
+        new_up /= np.linalg.norm(new_up)
+        
+        # Assemble rotation matrix
+        rot_mat = np.stack([right, new_up, forward_flat], axis=1)
+        
+        return rot_mat 
