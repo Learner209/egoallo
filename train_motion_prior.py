@@ -20,7 +20,7 @@ from torch.cuda.amp import GradScaler
 from torch.cuda.amp import autocast
 
 from egoallo import network, training_loss, training_utils
-from egoallo.data.amass_dataset_dynamic import EgoAmassHdf5DatasetDynamic
+from egoallo.data.amass_dataset import EgoAmassHdf5Dataset
 from egoallo.data.dataclass import collate_dataclass
 from egoallo.setup_logger import setup_logger
 from egoallo.config.train_config import EgoAlloTrainConfig
@@ -92,7 +92,16 @@ class MotionPriorTrainer:
 
     def _setup_dataloader(self) -> torch.utils.data.DataLoader:
         """Initialize the data loader."""
-        train_dataset = EgoAmassHdf5DatasetDynamic(self.config)
+        train_dataset = EgoAmassHdf5Dataset(
+            hdf5_path=self.config.dataset_hdf5_path,
+            file_list_path=self.config.dataset_files_path,
+            splits=self.config.train_splits,
+            subseq_len=self.config.subseq_len,
+            cache_files=True,
+            slice_strategy=self.config.dataset_slice_strategy,
+            random_variable_len_proportion=self.config.dataset_slice_random_variable_len_proportion,
+            random_variable_len_min=16
+        )
         return torch.utils.data.DataLoader(
             dataset=train_dataset,
             batch_size=self.config.batch_size,

@@ -1,7 +1,7 @@
 {
 	"files": [
 		{
-			"path": "src/egoallo/data/amass.py",
+			"path": "src/egoallo/data/amass_dataset.py",
 			"bookmarks": [
 				{
 					"line": 11,
