@@ -1,3 +1,5 @@
+"""Training script for EgoAllo diffusion model using HuggingFace accelerate."""
+
 import os
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
@@ -5,21 +7,17 @@ os.environ["MKL_NUM_THREADS"] = "1"
 os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
 os.environ["NUMEXPR_NUM_THREADS"] = "1"
 
-from dataclasses import dataclass
+import shutil
 from pathlib import Path
-from typing import Literal, Optional, Dict, Any
-import logging
-from datetime import datetime
-import math
-
+import deepspeed
+import tensorboardX
 import torch
-from torch.utils.data import DataLoader
-import wandb
 import yaml
 from accelerate import Accelerator, DataLoaderConfiguration
 from accelerate.utils import ProjectConfiguration
-from diffusers import DDPMScheduler
 from diffusers.training_utils import EMAModel
+from torch.cuda.amp import GradScaler
+from torch.cuda.amp import autocast
 
 from egoallo.motion_diffusion_pipeline import MotionDiffusionPipeline, MotionUNet
 from egoallo.training_utils import ipdb_safety_net
@@ -33,24 +31,24 @@ from egoallo.training_utils import (
 )
 from egoallo import training_loss, network
 from egoallo.setup_logger import setup_logger
-from egoallo.training_loss import MotionLosses
 from egoallo.config.train_config import EgoAlloTrainConfig
+from egoallo.training_utils import get_experiment_dir, LoopMetrics
+from egoallo.data.dataclass import EgoTrainingData
+
+import math
+
 logger = setup_logger(output=None, name=__name__)
 
-
-
-class MotionDiffusionTrainer:
-    """Handles the training of the Motion Diffusion model."""
+class MotionPriorTrainer:
+    """Handles the training of the Motion Prior model."""
     
     def __init__(
         self,
         config: EgoAlloTrainConfig,
-        num_epochs: int,
         gradient_accumulation_steps: int = 1,
         use_ema: bool = True,
     ):
         self.config = config
-        self.num_epochs = num_epochs
         self.gradient_accumulation_steps = gradient_accumulation_steps
         self.use_ema = use_ema
         self.experiment_dir = get_experiment_dir(config.experiment_name)
@@ -58,85 +56,94 @@ class MotionDiffusionTrainer:
         # Initialize accelerator
         self.accelerator = self._setup_accelerator()
         self.device = self.accelerator.device
-        
+                        
         # Calculate effective batch size and learning rate before other initialization
         self.total_batch_size = self._calculate_total_batch_size()
         self.learning_rate = self._calculate_scaled_learning_rate()
-
+        # Initialize step counter before other components
+        self.step = 0  # Initialize step to 0 by default
+        
         # Initialize components
         self.model = self._setup_model()
-        self.noise_scheduler = self._setup_scheduler()
-        self.loss_computer = self._setup_loss_computer()
+        self.train_loader = self._setup_dataloader()
         self.optimizer = self._setup_optimizer()
-        self.ema = self._setup_ema() if use_ema else None
-        self.dataloader = self._setup_dataloader()
-        
-        # Prepare for distributed training
-        self.model, self.dataloader, self.optimizer = self.accelerator.prepare(
-            self.model, self.dataloader, self.optimizer
-        )
-        
-        self.global_step = 0
-        self.loop_metrics_gen = loop_metric_generator()
-        
-        # Initialize wandb if main process
-        if self.accelerator.is_main_process:
-            self._initialize_wandb()
-            self._save_config()
+        self.lr_scheduler = self._setup_lr_scheduler()
+        self.ema = self._setup_ema() if config.use_ema else None
 
-        # Create checkpoint directory
-        self.checkpoint_dir = self.experiment_dir / "checkpoints"
-        self.checkpoint_dir.mkdir(exist_ok=True, parents=True)
+        # Add gradient scaler for mixed precision training
+        self.scaler = GradScaler()
+        
+        # Prepare components including scaler
+        self.model, self.train_loader, self.optimizer, self.lr_scheduler, self.scaler = \
+            self.accelerator.prepare(
+                self.model, self.train_loader, self.optimizer, self.lr_scheduler, self.scaler
+            )
+
+        # Setup writer for main process
+        self.writer = self._setup_writer()
+        
+        # Initialize training components
+        self.loss_helper = training_loss.TrainingLossComputer(config.loss, device=self.device)
+        self.loop_metrics_gen = training_utils.loop_metric_generator(counter_init=self.step)
+        self.prev_checkpoint_path = None
+
     def _setup_accelerator(self) -> Accelerator:
         """Initialize and configure the Accelerator."""
         return Accelerator(
             project_config=ProjectConfiguration(project_dir=str(self.experiment_dir)),
             dataloader_config=DataLoaderConfiguration(split_batches=False),
-            cpu=self.config.device == "cpu",
-            mixed_precision="fp16",
-            gradient_accumulation_steps=self.gradient_accumulation_steps,
         )
 
-    def _setup_model(self) -> MotionUNet:
-        """Initialize the UNet model."""
-        return MotionUNet(
-            self.config.model,
-            smplh_npz_path=self.config.smplh_npz_path,
-            device=self.device
-        )
+    def _setup_model(self) -> network.EgoDenoiser:
+        """Initialize the model."""
+        return network.EgoDenoiser(self.config.model)
 
-    def _setup_scheduler(self) -> DDPMScheduler:
-        """Initialize the noise scheduler."""
-        return DDPMScheduler(
-            num_train_timesteps=1000,
-            beta_schedule="squaredcos_cap_v2",
-            prediction_type="sample"
+    def _setup_dataloader(self) -> torch.utils.data.DataLoader:
+        """Initialize the data loader."""
+        train_dataset = EgoAmassHdf5Dataset(
+            hdf5_path=self.config.dataset_hdf5_path,
+            file_list_path=self.config.dataset_files_path,
+            splits=self.config.train_splits,
+            subseq_len=self.config.subseq_len,
+            cache_files=True,
+            slice_strategy=self.config.dataset_slice_strategy,
+            random_variable_len_proportion=self.config.dataset_slice_random_variable_len_proportion,
+            random_variable_len_min=16
         )
-
-    def _setup_loss_computer(self) -> training_loss.MotionLossComputer:
-        """Initialize the loss computer."""
-        return training_loss.MotionLossComputer(
-            self.config.loss,
-            self.device,
-            self.noise_scheduler
+        return torch.utils.data.DataLoader(
+            dataset=train_dataset,
+            batch_size=self.config.batch_size,
+            shuffle=True,
+            num_workers=self.config.num_workers,
+            persistent_workers=self.config.num_workers > 0,
+            pin_memory=True,
+            collate_fn=collate_dataclass,
+            drop_last=True,
         )
 
     def _setup_optimizer(self) -> torch.optim.AdamW:
-        """Initialize the optimizer with the scaled learning rate."""
+        """Initialize the optimizer."""
         return torch.optim.AdamW(
             self.model.parameters(),
-            lr=self.learning_rate,  # Use scaled learning rate
-            weight_decay=self.config.weight_decay
+            lr=self.learning_rate,
+            weight_decay=self.config.weight_decay,
         )
 
-    def _setup_ema(self) -> Optional[EMAModel]:
+    def _setup_lr_scheduler(self) -> torch.optim.lr_scheduler.LambdaLR:
+        """Initialize the learning rate scheduler."""
+        return torch.optim.lr_scheduler.LambdaLR(
+            self.optimizer,
+            lr_lambda=lambda step: min(1.0, step / self.config.warmup_steps)
+        )
+
+    def _setup_ema(self) -> EMAModel | None:
         """Initialize EMA if enabled."""
-        if not self.use_ema:
+        if not self.config.use_ema:
             return None
         ema = EMAModel(
             self.model.parameters(),
-            decay=0.9999,
-            use_ema_warmup=True
+            decay=self.config.ema_decay,
+            use_ema_warmup=True,
         )
         ema.to(self.device)
         return ema
@@ -248,151 +255,114 @@ class MotionDiffusionTrainer:
     def _save_checkpoint(self) -> None:
         """Save model checkpoint and training state."""
         if not self.accelerator.is_main_process:
-            return
-
-        # Create checkpoint subdirectory
-        ckpt_path = self.checkpoint_dir / f"checkpoint-{self.global_step}"
-        ckpt_path.mkdir(exist_ok=True, parents=True)
-
-        # Unwrap model
-        unwrapped_model = self.accelerator.unwrap_model(self.model)
-
-        # Create pipeline instance for saving
-        pipeline = MotionDiffusionPipeline(
-            unet=unwrapped_model,
-            scheduler=self.noise_scheduler
+            return None
+            
+        writer = tensorboardX.SummaryWriter(logdir=str(self.experiment_dir), flush_secs=10)
+        writer.add_hparams(
+            hparam_dict=training_utils.flattened_hparam_dict_from_dataclass(self.config),
+            metric_dict={},
+            name=".",
         )
+        return writer
 
-        # Save the pipeline (includes model weights and config)
-        pipeline.save_pretrained(str(ckpt_path))
+    def _restore_checkpoint(self, restore_checkpoint_dir: Path | None) -> int:
+        """Restore from checkpoint if provided and return current step."""
+        if restore_checkpoint_dir is not None:
+            self.accelerator.load_state(str(restore_checkpoint_dir))
+            if restore_checkpoint_dir.name.startswith("checkpoint_"):
+                return int(restore_checkpoint_dir.name.partition("_")[2])
+        return int(self.lr_scheduler.state_dict()["last_epoch"])
 
-        # Save optimizer state
-        torch.save(
-            self.optimizer.state_dict(),
-            ckpt_path / "optimizer.pt"
-        )
-
-        # Save EMA state if used
-        if self.ema is not None:
-            torch.save(
-                self.ema.state_dict(),
-                ckpt_path / "ema.pt"
+    def _save_initial_state(self) -> None:
+        """Save initial experiment state."""
+        if self.accelerator.is_main_process:
+            training_utils.ipdb_safety_net()
+            self.experiment_dir.mkdir(exist_ok=True, parents=True)
+            
+            # Save configs and git info
+            (self.experiment_dir / "git_commit.txt").write_text(
+                training_utils.get_git_commit_hash()
             )
-
-        # Save training state
-        torch.save(
-            {
-                "global_step": self.global_step,
-                "epoch": self.current_epoch,
-            },
-            ckpt_path / "training_state.pt"
-        )
-
-        logger.info(f"Saved checkpoint at step {self.global_step} to {ckpt_path}")
-
-    def load_checkpoint(self, checkpoint_path: Path) -> None:
-        """Load model and training state from checkpoint."""
-        if not checkpoint_path.exists():
-            logger.warning(f"Checkpoint path {checkpoint_path} does not exist. Starting from scratch.")
-            return
-
-        # Load pipeline (includes model weights and config)
-        pipeline = MotionDiffusionPipeline.from_pretrained(str(checkpoint_path))
-        self.model.load_state_dict(pipeline.unet.state_dict())
-        self.noise_scheduler = pipeline.scheduler
-
-        # Load optimizer state if exists
-        optimizer_path = checkpoint_path / "optimizer.pt"
-        if optimizer_path.exists():
-            self.optimizer.load_state_dict(torch.load(optimizer_path))
-
-        # Load EMA state if exists
-        if self.ema is not None:
-            ema_path = checkpoint_path / "ema.pt"
-            if ema_path.exists():
-                self.ema.load_state_dict(torch.load(ema_path))
-
-        # Load training state
-        training_state_path = checkpoint_path / "training_state.pt"
-        if training_state_path.exists():
-            training_state = torch.load(training_state_path)
-            self.global_step = training_state["global_step"]
-            self.current_epoch = training_state["epoch"]
-
-        logger.info(f"Loaded checkpoint from {checkpoint_path}")
+            (self.experiment_dir / "git_diff.txt").write_text(training_utils.get_git_diff())
+            (self.experiment_dir / "run_config.yaml").write_text(yaml.dump(self.config))
+            (self.experiment_dir / "model_config.yaml").write_text(yaml.dump(self.config.model))
 
     def train(self) -> None:
         """Execute the training loop."""
-        self.current_epoch = 0
-        for epoch in range(self.num_epochs):
-            self.current_epoch = epoch
-            self.model.train()
-            for batch in self.dataloader:
-                self._train_step(batch, epoch)
+        self._save_initial_state()
+        self.accelerator.save_state(str(self.experiment_dir / f"checkpoints_{self.step}"))
 
-    def _train_step(self, batch: EgoTrainingData, epoch: int) -> None:
-        """Execute a single training step."""
-        loop_metrics = next(self.loop_metrics_gen)
-        
-        # Prepare input data
-        clean_motion = batch.pack().pack()
-        noise = torch.randn_like(clean_motion)
-        timesteps = torch.randint(
-            0,
-            self.noise_scheduler.config.num_train_timesteps,
-            (clean_motion.shape[0],),
-            device=self.device,
-            dtype=torch.long
-        )
-        
-        # Add noise
-        noisy_motion = self.noise_scheduler.add_noise(clean_motion, noise, timesteps)
-        
-        # Forward pass and loss computation
+        while True:
+            for train_batch in self.train_loader:
+                loop_metrics = next(self.loop_metrics_gen)
+                self.step = loop_metrics.counter
+                
+                loss, log_outputs = self._train_step(train_batch, loop_metrics)
+                
+                if self.accelerator.is_main_process:
+                    self._handle_logging(log_outputs)
+                    self._handle_checkpointing()
+
+    def _train_step(
+        self,
+        train_batch: EgoTrainingData,
+        loop_metrics: LoopMetrics
+    ) -> tuple[torch.Tensor, dict[str, torch.Tensor | float]]:
+        """Execute a single training step with mixed precision."""
         with self.accelerator.accumulate(self.model):
-            x0_pred = self.model.forward(
-                sample=noisy_motion,
-                timestep=timesteps,
-                train_batch=batch,
-            )
-            
-            losses, joint_losses = self.loss_computer.compute_loss(
-                x0_pred=x0_pred.sample,
-                batch=batch,
-                unwrapped_model=self.accelerator.unwrap_model(self.model),
-                t=timesteps,
-                return_joint_losses=True
-            )
-            
-            # Backward pass
-            self.accelerator.backward(losses.total_loss)
-
-            for name, param in self.accelerator.unwrap_model(self.model).named_parameters():
-                if param.grad is None:
-                    logger.info(f"{name} grad: {param.grad}")
-            
-            if self.accelerator.sync_gradients:
-                self.accelerator.clip_grad_norm_(
-                    self.model.parameters(),
-                    self.config.max_grad_norm
+            # Compute loss with autocast
+            with autocast():
+                loss, log_outputs = self.loss_helper.compute_denoising_loss(
+                    self.model,
+                    unwrapped_model=self.accelerator.unwrap_model(self.model),
+                    train_batch=train_batch,
                 )
             
+            log_outputs["learning_rate"] = self.lr_scheduler.get_last_lr()[0]
+            log_outputs["iterations_per_sec"] = loop_metrics.iterations_per_sec
+            
+            self.accelerator.log(log_outputs, step=self.step)
+            
+            self.accelerator.backward(loss)
+            if self.accelerator.sync_gradients:
+                self.accelerator.clip_grad_norm_(self.model.parameters(), self.config.max_grad_norm)
+            
             self.optimizer.step()
+            self.lr_scheduler.step()
             self.optimizer.zero_grad(set_to_none=True)
+
+            if self.ema is not None:
+                self.ema.step(self.model)
             
-            if self.use_ema:
-                self.ema.step(self.model.parameters())
-        
-        # Logging
-        if self.accelerator.is_main_process:
-            group_losses = self._compute_joint_group_losses(joint_losses)
-            self._log_training_progress(losses, group_losses)
-            
-            # Save checkpoint
-            if self.global_step % 5000 == 0:
-                self._save_checkpoint()
-        
-        self.global_step += 1
+        return loss, log_outputs
+
+    def _handle_logging(self, log_outputs):
+        """Handle logging to tensorboard and console."""
+        if self.step % 10 == 0 and self.writer is not None:
+            for k, v in log_outputs.items():
+                self.writer.add_scalar(k, v, self.step)
+
+        if self.step % 20 == 0:
+            iterations_per_sec = log_outputs['iterations_per_sec']
+            mem_free, mem_total = torch.cuda.mem_get_info()
+            logger.info(
+                f"step: {self.step} ({iterations_per_sec:.2f} it/sec)"
+                f" mem: {(mem_total-mem_free)/1024**3:.2f}/{mem_total/1024**3:.2f}G"
+                f" lr: {self.lr_scheduler.get_last_lr()[0]:.7e}"
+                f" loss: {log_outputs['train/total_loss'].item():.6e}"
+            )
+
+    def _handle_checkpointing(self):
+        """Handle model checkpointing including scaler state."""
+        if self.step % 5000 == 0:
+            checkpoint_path = self.experiment_dir / f"checkpoints_{self.step}"
+            # Save scaler state along with other states
+            self.accelerator.save_state(str(checkpoint_path))
+            logger.info(f"Saved checkpoint to {checkpoint_path}")
+
+            if self.prev_checkpoint_path is not None:
+                shutil.rmtree(self.prev_checkpoint_path)
+            self.prev_checkpoint_path = None if self.step % 100_000 == 0 else checkpoint_path
 
     def _calculate_total_batch_size(self) -> int:
         """Calculate the total effective batch size across all GPUs."""
@@ -427,27 +397,20 @@ class MotionDiffusionTrainer:
             
         return scaled_lr
 
-def train_motion_diffusion(
+def train_motion_prior(
     config: EgoAlloTrainConfig,
-    num_epochs: int,
-    gradient_accumulation_steps: int = 1,
-    use_ema: bool = True,
-    use_ipdb: bool = False,
+    restore_checkpoint_dir: Path | None = None,
 ) -> None:
     """Main training function."""
-    if use_ipdb:
-        import ipdb; ipdb.set_trace()
-    
-    trainer = MotionDiffusionTrainer(
-        config,
-        num_epochs,
-        gradient_accumulation_steps,
-        use_ema
+    trainer = MotionPriorTrainer(
+        config=config,
+        gradient_accumulation_steps=1,  # You can make this configurable if needed
+        use_ema=config.use_ema
     )
+    if restore_checkpoint_dir is not None:
+        trainer.step = trainer._restore_checkpoint(restore_checkpoint_dir)
     trainer.train()
 
 if __name__ == "__main__":
     import tyro
-    # ipdb_safety_net()
-    tyro.cli(train_motion_diffusion)
-
+    tyro.cli(train_motion_prior)

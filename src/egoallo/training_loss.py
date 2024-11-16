@@ -10,9 +10,7 @@ from torch.nn.parallel import DistributedDataParallel
 from diffusers import DDPMScheduler
 from jaxtyping import Bool, Float, Int
 
-from .data.amass import EgoTrainingData
-from .fncsmpl import forward_kinematics
-from .network import EgoDenoiseTraj
+from .data.amass_dataset import EgoTrainingData
 from .transforms import SO3
 from .motion_diffusion_pipeline import MotionUNet
 from . import network
