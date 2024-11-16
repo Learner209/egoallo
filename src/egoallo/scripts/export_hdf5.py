@@ -11,7 +11,7 @@ import torch.cuda
 import tyro
 
 from egoallo import fncsmpl
-from egoallo.data.amass import EgoTrainingData
+from egoallo.data.amass_dataset import EgoTrainingData
 from egoallo.setup_logger import setup_logger
 
 logger = setup_logger(output=None, name=__name__)

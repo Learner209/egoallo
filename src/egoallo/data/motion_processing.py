@@ -4,7 +4,7 @@ from __future__ import annotations
 import numpy as np
 from typing import Dict, Tuple, Optional
 from sklearn.cluster import DBSCAN
-
+from jaxtyping import Float
 
 class MotionProcessor:
     """Common utilities for processing motion capture sequences.
@@ -37,8 +37,8 @@ class MotionProcessor:
         self.contact_ankle_height_thresh = contact_ankle_height_thresh
     
     def process_floor_and_contacts(
-        self, joints: np.ndarray, joint_indices: Dict[str, int]
-    ) -> Tuple[float, np.ndarray]:
+        self, joints: Float[np.ndarray, "*batch 3"], joint_indices: Dict[str, int]
+    ) -> Tuple[float, Float[np.ndarray, "*batch 3"]]:
         """Process floor height and contact labels from joint positions.
         
         Args:
@@ -78,7 +78,7 @@ class MotionProcessor:
         return floor_height, contacts
     
     def detect_floor_height(
-        self, joints: np.ndarray, foot_joints: list[int]
+        self, joints: Float[np.ndarray, "*batch 3"], foot_joints: list[int]
     ) -> float:
         """Detect floor height using DBSCAN clustering on foot joint positions.
         
@@ -121,7 +121,7 @@ class MotionProcessor:
         return float(floor_height)
     
     @staticmethod
-    def compute_joint_velocity(positions: np.ndarray) -> np.ndarray:
+    def compute_joint_velocity(positions: Float[np.ndarray, "*batch 3"]) -> Float[np.ndarray, "*batch 3"]:
         """Compute joint velocity from positions.
         
         Args:
@@ -136,8 +136,9 @@ class MotionProcessor:
     
     @staticmethod
     def compute_angular_velocity(
-        rot_mats: np.ndarray, dt: float = 1.0/30
-    ) -> np.ndarray:
+        rot_mats: Float[np.ndarray, "*batch 3 3"], 
+        dt: float = 1.0/30
+    ) -> Float[np.ndarray, "*batch 3"]:
         """Compute angular velocities from rotation matrices.
         
         Args:
@@ -147,22 +148,29 @@ class MotionProcessor:
         Returns:
             Angular velocities of shape (..., 3)
         """
-        # Compute rotation matrix derivatives
-        dR = np.gradient(rot_mats, dt, axis=0)
-        R = rot_mats[1:-1]  # Use middle frames
+        # Compute rotation matrix derivatives along first batch dimension
+        dR = np.gradient(rot_mats, dt, axis=0)  # (N, ..., 3, 3)
+        
+        # Slice rotation matrices to match derivative shape
+        R = rot_mats  # (N-2, ..., 3, 3)
         
         # Convert to skew-symmetric matrices
-        w_mat = np.matmul(dR, np.transpose(R, (0, 1, 3, 2)))
+        # Transpose R to align with dR for matrix multiplication
+        R_T = np.swapaxes(R, -2, -1)  # (N-2, ..., 3, 3)
+        w_mat = np.matmul(dR, R_T)  # (N-2, ..., 3, 3)
         
-        # Extract angular velocity vector
+        # Extract angular velocity vector from skew-symmetric matrix
         ang_vel = np.stack([
-            -w_mat[..., 1, 2] + w_mat[..., 2, 1],
-            w_mat[..., 0, 2] - w_mat[..., 2, 0],
-            -w_mat[..., 0, 1] + w_mat[..., 1, 0]
-        ], axis=-1) / 2.0
+            -w_mat[..., 1, 2] + w_mat[..., 2, 1],  # x component
+            w_mat[..., 0, 2] - w_mat[..., 2, 0],   # y component
+            -w_mat[..., 0, 1] + w_mat[..., 1, 0]   # z component
+        ], axis=-1) / 2.0  # (N-2, ..., 3)
+        
+        # Pad to match original sequence length
+        ang_vel = np.pad(ang_vel, ((1,1), *[(0,0) for _ in range(ang_vel.ndim-2)], (0,0)), 
+                        mode='edge')  # (N, ..., 3)
         
         return ang_vel
-    
     @staticmethod
     def compute_alignment_rotation(
         forward_dir: np.ndarray, 

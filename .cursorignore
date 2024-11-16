@@ -1,3 +1,5 @@
 third_party/
-assets/
-wandb/
+/data
+/datasets
+/assets
+/wandb

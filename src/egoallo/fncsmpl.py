@@ -32,6 +32,7 @@ from jaxtyping import Float, Int, jaxtyped
 from torch import Tensor
 
 from .tensor_dataclass import TensorDataclass
+import pickle
 from .transforms import SE3, SO3
 
 
@@ -55,14 +56,36 @@ class SmplhModel(TensorDataclass):
     """Canonical mesh verts."""
     shapedirs: Float[Tensor, "verts 3 n_betas"]
     """Shape bases."""
+    hands_components_l: Float[Tensor, "num_pca 45"] | None = None
+    """Left hand PCA components. Optional."""
+    hands_components_r: Float[Tensor, "num_pca 45"] | None = None
+    """Right hand PCA components. Optional."""
 
     @staticmethod
-    def load(model_path: Path) -> SmplhModel:
-        """Load a body model from an NPZ file."""
-        params_numpy: dict[str, np.ndarray] = {
-            k: _normalize_dtype(v)
-            for k, v in np.load(model_path, allow_pickle=True).items()
-        }
+    def load(model_path: Path, num_pca_comps: int = 12) -> SmplhModel:
+        """Load a body model from an NPZ or PKL file.
+        
+        Args:
+            model_path: Path to model file (.npz or .pkl)
+            num_pca_comps: Number of PCA components to use for hands
+            
+        Returns:
+            Loaded SMPL-H model
+        """
+        # Load data based on file extension
+        ext = model_path.suffix.lower()[1:]
+        if ext == 'pkl':
+            with open(model_path, 'rb') as f:
+                model_data = pickle.load(f, encoding='latin1')
+        elif ext == 'npz':
+            model_data = np.load(model_path, allow_pickle=True)
+        else:
+            raise ValueError(f'Unknown file extension: {ext}')
+
+        # Convert to dict if needed
+        params_numpy = {k: _normalize_dtype(v) for k, v in model_data.items()}
+
+        # Verify model type
         assert (
             "bs_style" not in params_numpy
             or params_numpy.pop("bs_style").item() == b"lbs"
@@ -71,14 +94,27 @@ class SmplhModel(TensorDataclass):
             "bs_type" not in params_numpy
             or params_numpy.pop("bs_type").item() == b"lrotmin"
         )
+
+        # Extract parent indices
         parent_indices = tuple(
             int(index) for index in params_numpy.pop("kintree_table")[0][1:] - 1
         )
+
+        # Convert numpy arrays to tensors
         params = {
             k: torch.from_numpy(v)
             for k, v in params_numpy.items()
             if v.dtype in (np.int32, np.float32)
         }
+
+        # Extract hand components if available, limiting to num_pca_comps
+        hands_components_l = None
+        hands_components_r = None
+        if "hands_componentsl" in params:
+            hands_components_l = params["hands_componentsl"][:num_pca_comps]
+        if "hands_componentsr" in params:
+            hands_components_r = params["hands_componentsr"][:num_pca_comps]
+
         return SmplhModel(
             faces=params["f"],
             J_regressor=params["J_regressor"],
@@ -87,7 +123,63 @@ class SmplhModel(TensorDataclass):
             posedirs=params["posedirs"],
             v_template=params["v_template"],
             shapedirs=params["shapedirs"],
+            hands_components_l=hands_components_l,
+            hands_components_r=hands_components_r,
         )
+
+    @classmethod
+    def pca_to_aa(
+        cls,
+        hand_pose_pca: Float[Tensor, "*#batch num_pca"],
+        hand_components: Float[Tensor, "num_pca 45"],
+    ) -> Float[Tensor, "*#batch 15 3"]:
+        """Convert PCA coefficients to axis-angle rotations for hand poses.
+        
+        Args:
+            hand_pose_pca: PCA coefficients for hand pose
+            hand_components: Hand components matrix (left or right)
+            
+        Returns:
+            Hand joint rotations in axis-angle format
+        """
+        # Multiply PCA coefficients with components to get axis-angle values
+        # import ipdb; ipdb.set_trace()
+        hand_pose = einsum(
+            hand_pose_pca,
+            hand_components,
+            "... num_pca, num_pca joints3 -> ... joints3"
+        )
+        # Reshape to (batch_size, 45) format
+        return hand_pose.reshape(*hand_pose.shape[:-1], 45)
+
+    def convert_hand_poses(
+        self,
+        left_hand_pca: Float[Tensor, "*#batch num_pca"] | None = None,
+        right_hand_pca: Float[Tensor, "*#batch num_pca"] | None = None,
+    ) -> tuple[Float[Tensor, "*#batch 15 3"] | None, Float[Tensor, "*#batch 15 3"] | None]:
+        """Convert both hand PCA coefficients to axis-angle format.
+        
+        Args:
+            left_hand_pca: PCA coefficients for left hand pose
+            right_hand_pca: PCA coefficients for right hand pose
+            
+        Returns:
+            Tuple of (left_hand_pose, right_hand_pose) in axis-angle format
+        """
+        left_hand_pose = None
+        right_hand_pose = None
+        
+        if left_hand_pca is not None:
+            left_hand_pose = self.pca_to_aa(
+                left_hand_pca, self.hands_components_l
+            )
+        
+        if right_hand_pca is not None:
+            right_hand_pose = self.pca_to_aa(
+                right_hand_pca, self.hands_components_r
+            )
+            
+        return left_hand_pose, right_hand_pose
 
     def get_num_joints(self) -> int:
         """Get the number of joints in this model."""
@@ -264,6 +356,37 @@ class SmplhShapedAndPosed(TensorDataclass):
             verts=verts_transformed,
             faces=self.shaped_model.body_model.faces,
         )
+
+    def compute_joint_contacts(
+        self, vertex_contacts: Float[Tensor, "*#batch verts"]
+    ) -> Float[Tensor, "*#batch joints"]:
+        """Convert per-vertex contact labels to per-joint contact labels using skinning weights."""
+        # Get skinning weights from the body model
+        weights = self.shaped_model.body_model.weights  # (verts, joints+1)
+        
+        # Remove root weights (first column) as we only want joint contacts
+        joint_weights = weights[:, 1:]  # (verts, joints)
+        
+        # Instead of using einsum with singleton dimension, we can:
+        # 1. Remove the singleton dimension from vertex_contacts_expanded
+        # 2. Use a simpler einsum pattern
+        vertex_contacts = vertex_contacts.squeeze(-1) if vertex_contacts.dim() > 2 else vertex_contacts
+        
+        # Weighted sum of contact labels
+        weighted_contacts = einsum(
+            vertex_contacts,
+            joint_weights,
+            "... verts, verts joints -> ... joints"
+        )
+        
+        # Normalize by sum of weights
+        weight_sums = joint_weights.sum(dim=0)  # (joints,)
+        joint_contacts = weighted_contacts / weight_sums
+        
+        # Threshold to get binary labels (optional, adjust threshold as needed)
+        # joint_contacts = (joint_contacts > 0.3).float()
+        
+        return joint_contacts
 
 
 @jaxtyped(typechecker=typeguard.typechecked)

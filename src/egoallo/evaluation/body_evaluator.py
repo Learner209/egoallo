@@ -346,7 +346,6 @@ class BodyEvaluator(BaseEvaluator):
         )
         # Compute metrics
         metrics = {}
-        # import ipdb; ipdb.set_trace()
         
         # Add batch dimension to predicted tensors if needed
         if len(sampled_posed.T_world_root.shape) == 2:  # [T, 7]

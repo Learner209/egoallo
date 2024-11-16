@@ -12,6 +12,7 @@ from tqdm import tqdm
 
 from egoallo.data.rich.rich_processor import RICHDataProcessor
 from egoallo.setup_logger import setup_logger
+from egoallo.training_utils import ipdb_safety_net
 
 logger = setup_logger(output="logs/rich_preprocess", name=__name__)
 
@@ -20,7 +21,7 @@ class RICHPreprocessConfig:
     """Configuration for preprocessing RICH dataset."""
     # Dataset paths and options
     rich_data_dir: Path = Path("./third_party/rich_toolkit")
-    smplx_model_dir: Path = Path("./third_party/rich_toolkit/body_models/smplx")
+    smplh_model_dir: Path = Path("./assets/smpl_based_model/smplh/merged")
     output_dir: Path = Path("./data/rich/processed_data")
     output_list_file: Path = Path("./data/rich/rich_dataset_files.txt")
     
@@ -30,7 +31,7 @@ class RICHPreprocessConfig:
     max_sequence_length: int = 300
     include_contact: bool = True
     use_pca: bool = True
-    num_processes: int = 4
+    num_processes: int = 1
     
     # Data split options
     splits: list[str] = dataclasses.field(default_factory=lambda: ["train", "val", "test"])
@@ -78,11 +79,10 @@ def main(config: RICHPreprocessConfig) -> None:
     # Initialize processor
     processor = RICHDataProcessor(
         rich_data_dir=str(config.rich_data_dir),
-        smplx_model_dir=str(config.smplx_model_dir),
+        smplh_model_dir=str(config.smplh_model_dir),
         output_dir=str(config.output_dir),
         fps=config.target_fps,
         include_contact=config.include_contact,
-        use_pca=config.use_pca,
         device=config.device
     )
     
@@ -130,6 +130,18 @@ def main(config: RICHPreprocessConfig) -> None:
         w.start()
     for w in workers:
         w.join()
+
+    # # Single thread version
+    # for i in range(total_count):
+    #     args = task_queue.get()
+    #     rel_path = process_sequence(args)
+    #     if rel_path is not None:
+    #         processed_files.append(rel_path)
+            
+    #     logger.info(
+    #         f"Progress: {i+1}/{total_count} "
+    #         f"({(i+1)/total_count * 100:.2f}%)"
+    #     )
     
     # Add existing npz files to processed_files list
     for split in config.splits:
@@ -152,4 +164,6 @@ if __name__ == "__main__":
     if config.debug:
         import ipdb
         ipdb.set_trace()
+    
+    ipdb_safety_net()
     main(config) 
