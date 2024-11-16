@@ -310,12 +310,12 @@ class MotionDiffusionPipeline(DiffusionPipeline):
     """Pipeline for generating human motion using diffusion models"""
 
     unet: MotionUNet
-    scheduler: DDIMScheduler  # Change the type hint to DDIMScheduler
+    scheduler: DDIMScheduler | DDPMScheduler
 
     def __init__(
         self,
         unet: MotionUNet,
-        scheduler: DDIMScheduler,  # Accept a DDIMScheduler
+        scheduler: DDIMScheduler | DDPMScheduler,
     ):
         super().__init__()
         self.register_modules(

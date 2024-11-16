@@ -32,3 +32,6 @@ class EgoAlloBaseConfig:
     
     # Debug settings
     use_ipdb: bool = False 
+
+    def __post_init__(self):
+        pass
