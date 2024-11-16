@@ -165,16 +165,21 @@ class MotionPriorTrainer:
     ) -> tuple[torch.Tensor, dict]:
         """Execute a single training step with proper loss computation."""
         with self.accelerator.accumulate(self.pipeline):
+            # Move the entire batch to the correct device
+            train_batch = train_batch.to(self.device)
+            
             with autocast():
                 # Sample noise and timesteps
                 batch_size = train_batch.T_world_cpf.shape[0]
-                noise = torch.randn([*train_batch.T_world_cpf.shape[:2], self.pipeline.unet.config.d_state], device=self.device)
-                # Move timesteps to the same device as the model
+                noise = torch.randn(
+                    [*train_batch.T_world_cpf.shape[:2], self.pipeline.unet.config.d_state], 
+                    device=self.device
+                )
                 timesteps = torch.randint(
                     0, 
                     self.pipeline.scheduler.config.num_train_timesteps, 
                     (batch_size,), 
-                    device=self.device  # Changed from train_batch.T_world_cpf.device to self.device
+                    device=self.device
                 )
                 
                 # Add noise to input
@@ -182,7 +187,7 @@ class MotionPriorTrainer:
                     train_batch.pack().pack(),
                     noise,
                     timesteps
-                ).to(self.device)
+                )
                 
                 # Get model prediction
                 model_pred = self.pipeline.unet.forward(
@@ -201,6 +206,10 @@ class MotionPriorTrainer:
                     return_joint_losses=True
                 )
 
+            # Ensure loss is valid before backward pass
+            if losses.total_loss is None or not losses.total_loss.requires_grad:
+                raise ValueError("Loss is None or doesn't require gradients")
+            
             # Backward pass and optimization
             self.accelerator.backward(losses.total_loss)
             if self.accelerator.sync_gradients:
