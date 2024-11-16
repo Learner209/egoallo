@@ -12,7 +12,6 @@ from jaxtyping import Bool, Float
 from rotary_embedding_torch import RotaryEmbedding
 from egoallo.setup_logger import setup_logger
 from torch import Tensor, nn
-from torch.cuda.amp import autocast
 
 from .fncsmpl import SmplhModel, SmplhShapedAndPosed
 from .tensor_dataclass import TensorDataclass
