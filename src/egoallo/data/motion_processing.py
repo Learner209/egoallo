@@ -89,6 +89,9 @@ class MotionProcessor:
         Returns:
             Estimated floor height
         """
+        MAX_SAMPLES = int(3e5)  # Maximum number of frames to process
+        # import ipdb; ipdb.set_trace()
+        
         # Get foot joint velocities
         foot_vels = np.stack([
             self.compute_joint_velocity(joints[:, joint_idx])
@@ -101,6 +104,22 @@ class MotionProcessor:
         
         if len(static_heights) == 0:
             return np.min(joints[..., 2])
+            
+        # Intelligent downsampling if sequence is too long
+        if len(static_heights) > MAX_SAMPLES:
+            # Compute histogram to understand height distribution
+            hist, bin_edges = np.histogram(static_heights, bins='auto')
+            weights = 1.0 / (hist[np.digitize(static_heights, bin_edges[1:], right=True)] + 1)
+            weights /= np.sum(weights)
+            
+            # Stratified sampling to preserve distribution
+            indices = np.random.choice(
+                len(static_heights), 
+                size=MAX_SAMPLES, 
+                p=weights,
+                replace=False
+            )
+            static_heights = static_heights[indices]
         
         # Cluster heights using DBSCAN
         clustering = DBSCAN(eps=0.005, min_samples=3).fit(

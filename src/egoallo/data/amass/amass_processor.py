@@ -133,6 +133,7 @@ class AMASSProcessor:
             right_hand_quats=right_hand_quats
         )
         # mesh: SmplMesh = posed.lbs()
+        # import ipdb; ipdb.set_trace()
 
         # Extract joint positions (22 SMPL-H joints)
         joints = torch.cat([
