@@ -17,7 +17,6 @@ from accelerate import Accelerator, DataLoaderConfiguration
 from accelerate.utils import ProjectConfiguration
 from diffusers.training_utils import EMAModel
 from torch.cuda.amp import GradScaler
-from torch.cuda.amp import autocast
 
 from egoallo import network, training_loss, training_utils
 from egoallo.data.amass_dataset import EgoAmassHdf5Dataset
@@ -199,12 +198,11 @@ class MotionPriorTrainer:
         """Execute a single training step with mixed precision."""
         with self.accelerator.accumulate(self.model):
             # Compute loss with autocast
-            with autocast():
-                loss, log_outputs = self.loss_helper.compute_denoising_loss(
-                    self.model,
-                    unwrapped_model=self.accelerator.unwrap_model(self.model),
-                    train_batch=train_batch,
-                )
+            loss, log_outputs = self.loss_helper.compute_denoising_loss(
+                self.model,
+                unwrapped_model=self.accelerator.unwrap_model(self.model),
+                train_batch=train_batch,
+            )
             
             log_outputs["learning_rate"] = self.lr_scheduler.get_last_lr()[0]
             log_outputs["iterations_per_sec"] = loop_metrics.iterations_per_sec
