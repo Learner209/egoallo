@@ -140,7 +140,16 @@ class RICHDataProcessor:
         frame_ids = sorted([
             int(d.name) for d in seq_dir.iterdir() 
             if d.is_dir() and d.name.isdigit()
-        ])
+        ]) 
+
+        seq_dir_context = self.rich_data_dir / "data/human_scene_contact" / split / seq_name
+        
+        frame_ids_context = sorted([
+            int(d.name) for d in seq_dir_context.iterdir() 
+            if d.is_dir() and d.name.isdigit()
+        ]) 
+
+        frame_ids = sorted(set(frame_ids) & set(frame_ids_context))
         
         # Process each frame
         joints_sequence = []

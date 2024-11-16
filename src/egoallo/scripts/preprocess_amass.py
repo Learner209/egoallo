@@ -37,15 +37,15 @@ def process_sequence(
         logger.info(f"Skipping {seq_path.name} - already processed")
         return str(rel_path)
     
-    # try:
-    # Process sequence
-    sequence_data = processor.process_sequence(seq_path)
-    if sequence_data is not None:
-        processor.save_sequence(sequence_data, output_path)
-        rel_path = output_path.relative_to(output_path.parent.parent)
-        return str(rel_path)
-    # except Exception as e:
-        # logger.error(f"Error processing {seq_path}: {str(e)}")
+    try:
+        # Process sequence
+        sequence_data = processor.process_sequence(seq_path)
+        if sequence_data is not None:
+            processor.save_sequence(sequence_data, output_path)
+            rel_path = output_path.relative_to(output_path.parent.parent)
+            return str(rel_path)
+    except Exception as e:
+        logger.error(f"Error processing {seq_path}: {str(e)}")
     
     return None
 
@@ -133,4 +133,4 @@ if __name__ == "__main__":
         ipdb.set_trace()
 
     ipdb_safety_net()
-    main(config) 
+    
