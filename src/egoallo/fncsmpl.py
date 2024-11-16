@@ -62,7 +62,7 @@ class SmplhModel(TensorDataclass):
     """Right hand PCA components. Optional."""
 
     @staticmethod
-    def load(model_path: Path, num_pca_comps: int = 6) -> SmplhModel:
+    def load(model_path: Path, num_pca_comps: int = 12) -> SmplhModel:
         """Load a body model from an NPZ or PKL file.
         
         Args:
@@ -143,13 +143,14 @@ class SmplhModel(TensorDataclass):
             Hand joint rotations in axis-angle format
         """
         # Multiply PCA coefficients with components to get axis-angle values
+        # import ipdb; ipdb.set_trace()
         hand_pose = einsum(
             hand_pose_pca,
             hand_components,
             "... num_pca, num_pca joints3 -> ... joints3"
         )
-        # Reshape to (batch_size, 15, 3) format
-        return hand_pose.reshape(*hand_pose.shape[:-1], 15, 3)
+        # Reshape to (batch_size, 45) format
+        return hand_pose.reshape(*hand_pose.shape[:-1], 45)
 
     def convert_hand_poses(
         self,
@@ -359,29 +360,23 @@ class SmplhShapedAndPosed(TensorDataclass):
     def compute_joint_contacts(
         self, vertex_contacts: Float[Tensor, "*#batch verts"]
     ) -> Float[Tensor, "*#batch joints"]:
-        """Convert per-vertex contact labels to per-joint contact labels using skinning weights.
-        
-        Args:
-            vertex_contacts: Binary contact labels for each vertex (0 or 1)
-            
-        Returns:
-            Joint contact labels (continuous values between 0 and 1)
-        """
+        """Convert per-vertex contact labels to per-joint contact labels using skinning weights."""
         # Get skinning weights from the body model
         weights = self.shaped_model.body_model.weights  # (verts, joints+1)
         
         # Remove root weights (first column) as we only want joint contacts
         joint_weights = weights[:, 1:]  # (verts, joints)
         
-        # Compute weighted average of vertex contacts for each joint
-        # Expand vertex_contacts to match broadcasting
-        vertex_contacts_expanded = vertex_contacts.unsqueeze(-1)  # (*batch, verts, 1)
+        # Instead of using einsum with singleton dimension, we can:
+        # 1. Remove the singleton dimension from vertex_contacts_expanded
+        # 2. Use a simpler einsum pattern
+        vertex_contacts = vertex_contacts.squeeze(-1) if vertex_contacts.dim() > 2 else vertex_contacts
         
         # Weighted sum of contact labels
         weighted_contacts = einsum(
-            vertex_contacts_expanded,
+            vertex_contacts,
             joint_weights,
-            "... verts 1, verts joints -> ... joints"
+            "... verts, verts joints -> ... joints"
         )
         
         # Normalize by sum of weights

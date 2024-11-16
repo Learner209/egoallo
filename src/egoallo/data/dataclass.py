@@ -105,6 +105,8 @@ class EgoTrainingData(TensorDataclass):
         assert raw_fields["pose_body"].shape == (timesteps, 63)
         assert raw_fields["pose_hand"].shape == (timesteps, 90)
         assert raw_fields["joints"].shape == (timesteps, 22, 3)
+        assert raw_fields["betas"].shape == (1, 16)
+        assert raw_fields['contacts'].shape == (timesteps, 21)
 
         T_world_root = torch.cat(
             [

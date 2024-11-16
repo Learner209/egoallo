@@ -11,10 +11,9 @@ from jaxtyping import Float
 
 from egoallo.setup_logger import setup_logger
 from egoallo.data.motion_processing import MotionProcessor
-from egoallo.fncsmpl import SmplhModel, SmplhShaped, SmplhShapedAndPosed, SmplMesh
+from egoallo.fncsmpl import SmplhModel, SmplhShaped, SmplhShapedAndPosed
 from egoallo.transforms import SE3, SO3
 import pickle
-from smplx.body_models import SMPLH
 
 logger = setup_logger(output="logs/rich_processor", name=__name__)
 
@@ -48,8 +47,8 @@ class RICHDataProcessor:
         # Initialize SMPL-H models for each gender
         self.body_models = {}
         for gender in ["male", "female", "neutral"]:
-            model_path = self.smplh_model_dir / f"{gender}/model.npz"
-            self.body_models[gender] = SmplhModel.load(model_path)
+            model_path = self.smplh_model_dir / f"SMPLH_{gender.upper()}.pkl"
+            self.body_models[gender] = SmplhModel.load(model_path).to(self.device)
 
         # Initialize motion processor
         self.motion_processor = MotionProcessor()
@@ -82,7 +81,6 @@ class RICHDataProcessor:
         body_quats = SO3.exp(body_rots).wxyz  # (..., 21, 4)
 
         # Convert hand poses to quaternions (15 joints each)
-        import ipdb; ipdb.set_trace()
         left_hand_rots = left_hand_pose.reshape(*left_hand_pose.shape[:-1], 15, 3)
         right_hand_rots = right_hand_pose.reshape(*right_hand_pose.shape[:-1], 15, 3)
         left_hand_quats = SO3.exp(left_hand_rots).wxyz  # (..., 15, 4)
@@ -156,6 +154,7 @@ class RICHDataProcessor:
             # Convert rotations to required format
             
             # Convert PCA coefficients to axis-angle format
+            # import ipdb; ipdb.set_trace()
             left_hand_pose, right_hand_pose = body_model.convert_hand_poses(
                 left_hand_pca=body_params['left_hand_pose'],  # (..., num_pca)
                 right_hand_pca=body_params['right_hand_pose']  # (..., num_pca)
@@ -177,16 +176,17 @@ class RICHDataProcessor:
                 left_hand_quats=left_hand_quats,  # (..., 15, 4)
                 right_hand_quats=right_hand_quats  # (..., 15, 4)
             )
-            mesh: SmplMesh = posed.lbs()
+            # mesh: SmplMesh = posed.lbs()
             
             # Store joints for floor height detection
-            joints = mesh.verts.detach().cpu().numpy()  # (..., num_verts, 3)
+            joints = torch.cat([posed.T_world_root[..., None, :], posed.Ts_world_joint], dim=-2)
+            joints = joints.detach().cpu().numpy()  # (..., num_verts, 3)
             joints_sequence.append(joints)
             
             # Convert per-vertex contacts to per-joint contacts using posed mesh
             vertex_contacts = torch.from_numpy(contact_data['vertex_contacts']).float().to(self.device)  # (6890,)
             # Use weighted average of nearby vertex contacts for joint contacts
-            joint_contacts = posed.compute_joint_contacts(vertex_contacts)  # (num_joints,)
+            joint_contacts = posed.compute_joint_contacts(vertex_contacts.unsqueeze(0)).squeeze(0)  # (num_joints,)
             
             # Store processed data
             processed_frames.append(body_params)
@@ -198,7 +198,8 @@ class RICHDataProcessor:
             })
         
         # Process floor height only (removed contact detection)
-        joints_sequence = np.stack(joints_sequence)
+        # import ipdb; ipdb.set_trace()
+        joints_sequence = np.concatenate([j[None] if j.ndim == 2 else j for j in joints_sequence], axis=0)
         floor_height = self.motion_processor.detect_floor_height(joints_sequence, [
             self.joint_indices["left_toe"], self.joint_indices["right_toe"]
         ])
@@ -240,11 +241,25 @@ class RICHDataProcessor:
         
         # Add contact data if included
         if self.include_contact:
+            # Stack all contact data from sequence
             save_data.update({
-                "contact_verts": np.array(sequence_data["contact_verts"], dtype=object),
-                "contact_vecs": np.array(sequence_data["contact_vecs"], dtype=object)
+                'contacts': np.stack([
+                    frame_data['joint_contacts'] 
+                    for frame_data in sequence_data['contact_data']
+                ]),
+                'vertex_contacts': np.stack([
+                    frame_data['vertex_contacts']
+                    for frame_data in sequence_data['contact_data']
+                ]),
+                'displacement_vectors': np.stack([
+                    frame_data['displacement_vectors']
+                    for frame_data in sequence_data['contact_data']
+                ]),
+                'closest_faces': np.stack([
+                    frame_data['closest_faces']
+                    for frame_data in sequence_data['contact_data']
+                ])
             })
-            
         # Save compressed NPZ file
         np.savez_compressed(output_path, **save_data)
         logger.info(f"Saved processed sequence to {output_path}") 

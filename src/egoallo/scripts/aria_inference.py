@@ -37,7 +37,6 @@ def main(config: InferenceConfig) -> None:
 
     device = torch.device("cuda")
 
-    # import ipdb; ipdb.set_trace()
     config.output_dir.mkdir(parents=True, exist_ok=True)
     traj_paths = InferenceTrajectoryPaths.find(config.traj_root, config.output_dir, soft_link=False)
     if traj_paths.splat_path is not None:

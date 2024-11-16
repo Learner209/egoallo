@@ -141,7 +141,6 @@ class AMASSProcessor:
         ], dim=-2).detach().cpu().numpy()  # (N, 22, 3)
 
         # Process floor height and contacts
-        # import ipdb; ipdb.set_trace()
         floor_height, contacts = self.motion_processor.process_floor_and_contacts(
             joints, self.joint_indices
         )
@@ -164,7 +163,6 @@ class AMASSProcessor:
             )
             
             root_orient_mat = SO3.exp(root_orient).as_matrix().detach().cpu().numpy()
-            # import ipdb; ipdb.set_trace()
             root_ang_vel = self.motion_processor.compute_angular_velocity(
                 root_orient_mat, dt
             )
