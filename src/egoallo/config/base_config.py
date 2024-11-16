@@ -15,13 +15,15 @@ class EgoAlloBaseConfig:
     smplh_npz_path: Path = Path("./data/smplh/neutral/model.npz")
     
     # Model settings
-    model: network.EgoDenoiserConfig = network.EgoDenoiserConfig()
+    model: network.EgoDenoiserConfig = network.EgoDenoiserConfig(
+        condition_on_prev_window=True
+    )
     loss: training_loss.TrainingLossConfig = training_loss.TrainingLossConfig()
     
     # Dataset settings
     batch_size: int = 256
     num_workers: int = 8
-    subseq_len: int = 128
+    subseq_len: int = 32
     dataset_slice_strategy: Literal[
         "deterministic", "random_uniform_len", "random_variable_len"
     ] = "deterministic"

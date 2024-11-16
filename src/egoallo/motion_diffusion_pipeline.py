@@ -144,13 +144,21 @@ class MotionUNet(ModelMixin, nn.Module):
                 config.d_latent
             )
 
-        # Add encoder for previous window if enabled
-        if config.condition_on_prev_window:
-            # Projection for previous window features
-            self.prev_window_proj = nn.Linear(
-                config.d_latent,
-                config.d_latent
-            )
+        # Add encoders for previous window components
+        self.prev_window_encoders = nn.ModuleDict({
+            "betas": _make_encoder(16, config),              # betas dim: 16
+            "body_rot6d": _make_encoder(21 * 6, config),     # body_rot6d dim: 21 * 6
+            "contacts": _make_encoder(21, config),           # contacts dim: 21
+        }) if config.condition_on_prev_window else None
+        
+        if config.include_hand_motion and config.condition_on_prev_window:
+            self.prev_window_encoders["hand_rot6d"] = _make_encoder(30 * 6, config)  # hand_rot6d dim: 30 * 6
+        
+        # Projection for combined previous window features
+        self.prev_window_proj = nn.Linear(
+            config.d_latent,
+            config.d_latent
+        ) if config.condition_on_prev_window else None
 
     def _encode_conditioning(
         self,
@@ -196,6 +204,55 @@ class MotionUNet(ModelMixin, nn.Module):
 
         return encoder_out
 
+    def _encode_window(
+        self,
+        window: EgoDenoiseTraj,
+        batch: int,
+        time: int,
+        device: torch.device,
+    ) -> torch.Tensor:
+        """Encode previous window information.
+        
+        Args:
+            window: Previous window trajectory
+            batch: Batch size
+            time: Sequence length
+            device: Target device
+            
+        Returns:
+            encoded_window: Encoded window features (batch, time, d_latent)
+        """
+        # Initialize window encoding
+        window_encoding = torch.zeros((batch, time, self.config.d_latent), device=device)  # (B, T, D)
+        
+        # Encode each component
+        window_encoding = (
+            self.prev_window_encoders["betas"](window.betas.reshape(batch, time, -1))           # (B, T, D)
+            + self.prev_window_encoders["body_rot6d"](window.body_rot6d.reshape(batch, time, -1))  # (B, T, D)
+            + self.prev_window_encoders["contacts"](window.contacts)                            # (B, T, D)
+        )
+        
+        if self.config.include_hand_motion and window.hand_rot6d is not None:
+            window_encoding += self.prev_window_encoders["hand_rot6d"](
+                window.hand_rot6d.reshape(batch, time, -1)
+            )  # (B, T, D)
+        
+        # Add positional encoding
+        if self.config.positional_encoding == "rope":
+            pos_enc = 0
+        elif self.config.positional_encoding == "transformer":
+            pos_enc = make_positional_encoding(
+                d_latent=self.config.d_latent,
+                length=time,
+                dtype=window_encoding.dtype,
+            )[None, ...].to(device)  # (1, T, D)
+        else:
+            raise ValueError(f"Unknown positional encoding: {self.config.positional_encoding}")
+            
+        window_encoding = window_encoding + pos_enc  # (B, T, D)
+        
+        return window_encoding
+
     def forward(
         self,
         sample: torch.FloatTensor,
@@ -212,7 +269,7 @@ class MotionUNet(ModelMixin, nn.Module):
             timestep = timestep[None]
             
         # Unpack sample and get dimensions
-        x_t = EgoDenoiseTraj.unpack(sample, include_hands=config.include_hand_motion)
+        x_t = EgoDenoiseTraj.unpack(sample, include_hands=config.include_hand_motion, prev_window=train_batch.prev_window.pack() if config.condition_on_prev_window else None)
         batch, time = x_t.body_rot6d.shape[:2]
         device = sample.device
         
@@ -258,15 +315,13 @@ class MotionUNet(ModelMixin, nn.Module):
         
         # Add previous window conditioning if configured
         if config.condition_on_prev_window and x_t.prev_window is not None:
-            prev_encoded = self._encode_conditioning(
-                config.make_cond(
-                    x_t.prev_window.T_cpf_tm1_cpf_t,
-                    T_world_cpf=x_t.prev_window.T_world_cpf,
-                    hand_positions_wrt_cpf=None
-                ),
-                batch, time, device, torch.zeros_like(noise_emb)
-            )
-            encoder_out = encoder_out + self.prev_window_proj(prev_encoded)
+            prev_encoded = self._encode_window(
+                x_t.prev_window,
+                batch,
+                time,
+                device
+            )  # (B, T, D)
+            encoder_out = encoder_out + self.prev_window_proj(prev_encoded)  # (B, T, D)
         
         # Add noise token if configured
         if self.noise_emb_token_proj is not None:

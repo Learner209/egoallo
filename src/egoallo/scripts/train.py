@@ -85,7 +85,7 @@ class MotionPriorTrainer:
 
         # Initialize loss computer
         self.loss_computer = MotionLossComputer(
-            config=TrainingLossConfig(**self.config.loss_config),
+            config=TrainingLossConfig(),
             device=self.device,
             scheduler=self.pipeline.scheduler
         )

@@ -98,7 +98,7 @@ class AmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
             self._group_lengths = [
                 cast(
                     h5py.Dataset, cast(h5py.Group, hdf5_file[g])["T_world_root"]
-                ).shape[0] - self._subseq_len  # Subtract subseq_len to ensure space for prev window
+                ).shape[0] - (self._subseq_len) * int(config.condition_on_prev_window)  # Subtract subseq_len to ensure space for prev window
                 for g in self._groups
             ]
             self._cum_len = np.cumsum(self._group_lengths)
@@ -158,7 +158,7 @@ class AmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         total_t = cast(h5py.Dataset, npz_group["T_world_root"]).shape[0]
         assert total_t >= self.min_seq_len
 
-        # Calculate slice indices
+        # Calculate slice indices for current window
         start_t = slice_index + self._subseq_len  # Ensure start_t is at least subseq_len
         end_t = min(start_t + self._subseq_len, total_t)
 
@@ -167,6 +167,27 @@ class AmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         kwargs["mask"] = torch.ones(self._subseq_len, dtype=torch.bool)
         
         current_window = EgoTrainingData(**kwargs)
+
+        # Handle previous window if conditioning is enabled
+        if self.config.condition_on_prev_window:
+            # Calculate slice indices for previous window
+            prev_start_t = slice_index  # Previous window starts at slice_index
+            prev_end_t = start_t  # Previous window ends where current window starts
+            
+            # Check if we're still in the same sequence
+            if prev_start_t >= 0:
+                # Load previous window from same sequence
+                prev_kwargs = self._load_sequence_data(group, prev_start_t, prev_end_t, total_t)
+                prev_kwargs["mask"] = torch.ones(self._subseq_len, dtype=torch.bool)
+                prev_window = EgoTrainingData(**prev_kwargs)
+                prev_window.prev_window = None
+            else:
+                # No previous window available at the start of a sequence
+                prev_window = None
+                
+            # Set the previous window
+            current_window = current_window.with_prev_window(prev_window)
+
         return current_window
 
     def _find_group_and_slice_index(self, global_index: int) -> tuple[int, int]:

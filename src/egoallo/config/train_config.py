@@ -30,21 +30,11 @@ class EgoAlloTrainConfig(EgoAlloBaseConfig):
     # Max steps
     max_steps: int = 100000
     
-    # Loss settings
-    loss_config: Dict[str, Any] = field(default_factory=lambda: {
-        "loss_weights": {
-            "body_rot6d": 1.0,
-            "betas": 0.1,
-            "contacts": 0.1
-        },
-        "cond_dropout_prob": 0.0,
-        "weight_loss_by_t": "emulate_eps_pred"
-    })
-    
     # EMA settings
     use_ema: bool = True
     ema_decay: float = 0.9999
     
     def __post_init__(self):
         super().__post_init__()
+        # import ipdb; ipdb.set_trace()
         self.model = self.model.__class__(condition_on_prev_window=self.condition_on_prev_window)

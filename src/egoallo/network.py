@@ -252,8 +252,8 @@ class EgoDenoiserConfig:
     include_hand_motion: bool = True
     """Whether to include hand joint rotations (+15 per hand) in the denoised state."""
 
-    condition_on_hand_positions: bool = False
-    """Whether to include hand positions in the conditioning information for better guidance."""
+    include_hand_positions_cond: bool = False
+    """Whether to include hand positions in the conditioning information."""
 
     cond_param: Literal[
         "ours", "canonicalized", "absolute", "absrel", "absrel_global_deltas"
@@ -267,9 +267,6 @@ class EgoDenoiserConfig:
     "absolute" is the naive case, where we just pass in transformations
         directly.
     """
-
-    include_hand_positions_cond: bool = False
-    """Whether to include hand positions in the conditioning information."""
 
     condition_on_prev_window: bool = False
     """Whether to condition on previous motion window."""

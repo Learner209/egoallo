@@ -19,6 +19,7 @@ experiments/
 blendify_assets/
 wandb/
 /assets/
+/third_party/
 
 test_results/
 logs/
