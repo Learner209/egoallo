@@ -11,7 +11,7 @@ from torch.nn.parallel import DistributedDataParallel
 from torch.cuda.amp import autocast
 
 from . import network
-from .data.amass import EgoTrainingData
+from .data.amass_dataset import EgoTrainingData
 from .sampling import CosineNoiseScheduleConstants
 from .transforms import SO3
 
