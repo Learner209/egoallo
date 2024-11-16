@@ -21,6 +21,7 @@ wandb/
 
 test_results/
 logs/
+/assets/
 
 datasets/
 myenv/
