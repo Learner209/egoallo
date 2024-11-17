@@ -23,7 +23,7 @@ test_results/
 logs/
 /assets/
 
-datasets/
+datasets
 myenv/
 
 /data
