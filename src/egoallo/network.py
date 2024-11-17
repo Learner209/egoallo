@@ -11,7 +11,6 @@ from jaxtyping import Bool, Float
 from rotary_embedding_torch import RotaryEmbedding
 from egoallo.setup_logger import setup_logger
 from torch import Tensor, nn
-from torch.cuda.amp import autocast
 
 from .fncsmpl import SmplhModel, SmplhShapedAndPosed
 from .tensor_dataclass import TensorDataclass
@@ -445,7 +444,6 @@ class EgoDenoiser(nn.Module):
     def get_d_state(self) -> int:
         return EgoDenoiseTraj.get_packed_dim(self.config.include_hands)
 
-    @autocast()
     def forward(
         self,
         x_t_packed: Float[Tensor, "batch time state_dim"],

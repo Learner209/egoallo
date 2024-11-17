@@ -198,13 +198,11 @@ class MotionPriorTrainer:
     ) -> tuple[torch.Tensor, dict[str, torch.Tensor | float]]:
         """Execute a single training step with mixed precision."""
         with self.accelerator.accumulate(self.model):
-            # Compute loss with autocast
-            with autocast():
-                loss, log_outputs = self.loss_helper.compute_denoising_loss(
-                    self.model,
-                    unwrapped_model=self.accelerator.unwrap_model(self.model),
-                    train_batch=train_batch,
-                )
+            loss, log_outputs = self.loss_helper.compute_denoising_loss(
+                self.model,
+                unwrapped_model=self.accelerator.unwrap_model(self.model),
+                train_batch=train_batch,
+            )
             
             log_outputs["learning_rate"] = self.lr_scheduler.get_last_lr()[0]
             log_outputs["iterations_per_sec"] = loop_metrics.iterations_per_sec

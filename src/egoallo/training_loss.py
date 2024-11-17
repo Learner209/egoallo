@@ -8,7 +8,6 @@ from jaxtyping import Bool, Float, Int
 from torch import Tensor
 from torch._dynamo import OptimizedModule
 from torch.nn.parallel import DistributedDataParallel
-from torch.cuda.amp import autocast
 
 from . import network
 from .data.amass_dataset import EgoTrainingData
@@ -147,7 +146,6 @@ class TrainingLossComputer:
             # Return per-batch/dim losses
             return weighted
 
-    @autocast()
     def compute_denoising_loss(
         self,
         model: network.EgoDenoiser | DistributedDataParallel | OptimizedModule,

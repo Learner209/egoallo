@@ -31,7 +31,7 @@ class RICHPreprocessConfig:
     max_sequence_length: int = 300
     include_contact: bool = True
     use_pca: bool = True
-    num_processes: int = 1
+    num_processes: int = 8
     
     # Data split options
     splits: list[str] = dataclasses.field(default_factory=lambda: ["train", "val", "test"])
@@ -53,21 +53,25 @@ def process_sequence(args: tuple[RICHDataProcessor, str, str, Path]) -> Optional
     """
     processor, split, seq_name, output_path = args
     
-    # Process sequence with early exit check
-    processed_data = processor.process_sequence(split, seq_name, output_path)
-    
-    # If None returned, file already exists
-    if processed_data is None:
-        rel_path = output_path.relative_to(output_path.parent.parent)
-        return str(rel_path)
+    try:
+        # Process sequence with early exit check
+        processed_data = processor.process_sequence(split, seq_name, output_path)
         
-    # Save as npz if new processing was needed
-    processor.save_sequence(processed_data, output_path)
-    
-    # Return relative path for file list
-    rel_path = output_path.relative_to(output_path.parent.parent)
-    logger.info(f"Successfully processed sequence {seq_name}")
-    return str(rel_path)
+        # If None returned, file already exists
+        if processed_data is None:
+            rel_path = output_path.relative_to(output_path.parent.parent)
+            return str(rel_path)
+        
+        # Save as npz if new processing was needed
+        processor.save_sequence(processed_data, output_path)
+        
+        # Return relative path for file list
+        rel_path = output_path.relative_to(output_path.parent.parent)
+        logger.info(f"Successfully processed sequence {seq_name}")
+        return str(rel_path)
+    except Exception as e:
+        logger.error(f"Error processing {seq_name}: {str(e)}")
+        return None
 
 def main(config: RICHPreprocessConfig) -> None:
     """Main preprocessing function."""
@@ -131,7 +135,7 @@ def main(config: RICHPreprocessConfig) -> None:
     for w in workers:
         w.join()
 
-    # # Single thread version
+    # Single thread version
     # for i in range(total_count):
     #     args = task_queue.get()
     #     rel_path = process_sequence(args)
