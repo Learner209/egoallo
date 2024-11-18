@@ -21,9 +21,9 @@ from egoallo.data.dataclass import collate_dataclass
 
 @dataclasses.dataclass(frozen=True)
 class EgoAlloTrainConfig:
-    experiment_name: str
-    dataset_hdf5_path: Path
-    dataset_files_path: Path
+    experiment_name: str = "motion_prior"
+    dataset_hdf5_path: Path = Path("data/egoalgo_no_skating_dataset.hdf5")
+    dataset_files_path: Path = Path("data/egoalgo_no_skating_dataset_files.txt")
 
     model: network.EgoDenoiserConfig = network.EgoDenoiserConfig()
     loss: training_loss.TrainingLossConfig = training_loss.TrainingLossConfig()
