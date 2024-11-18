@@ -21,8 +21,8 @@ class RICHPreprocessConfig:
     """Configuration for preprocessing RICH dataset."""
     # Dataset paths and options
     rich_data_dir: Path = Path("./third_party/rich_toolkit")
-    smplh_model_dir: Path = Path("./assets/smpl_based_model/smplh/merged")
-    output_dir: Path = Path("./data/rich/processed_data")
+    smplh_model_dir: Path = Path("./assets/smpl_based_model/smplh/")
+    output_dir: Path = Path("./data/rich/processed")
     output_list_file: Path = Path("./data/rich/rich_dataset_files.txt")
     
     # Processing options
@@ -53,25 +53,25 @@ def process_sequence(args: tuple[RICHDataProcessor, str, str, Path]) -> Optional
     """
     processor, split, seq_name, output_path = args
     
-    try:
-        # Process sequence with early exit check
-        processed_data = processor.process_sequence(split, seq_name, output_path)
-        
-        # If None returned, file already exists
-        if processed_data is None:
-            rel_path = output_path.relative_to(output_path.parent.parent)
-            return str(rel_path)
-        
-        # Save as npz if new processing was needed
-        processor.save_sequence(processed_data, output_path)
-        
-        # Return relative path for file list
+    # try:
+    # Process sequence with early exit check
+    processed_data = processor.process_sequence(split, seq_name, output_path)
+    
+    # If None returned, file already exists
+    if processed_data is None:
         rel_path = output_path.relative_to(output_path.parent.parent)
-        logger.info(f"Successfully processed sequence {seq_name}")
         return str(rel_path)
-    except Exception as e:
-        logger.error(f"Error processing {seq_name}: {str(e)}")
-        return None
+    
+    # Save as npz if new processing was needed
+    processor.save_sequence(processed_data, output_path)
+    
+    # Return relative path for file list
+    rel_path = output_path.relative_to(output_path.parent.parent)
+    logger.info(f"Successfully processed sequence {seq_name}")
+    return str(rel_path)
+    # except Exception as e:
+    #     logger.error(f"Error processing {seq_name}: {str(e)}")
+    #     return None
 
 def main(config: RICHPreprocessConfig) -> None:
     """Main preprocessing function."""
@@ -126,26 +126,26 @@ def main(config: RICHPreprocessConfig) -> None:
             )
     
     # Start worker threads
-    workers = [
-        threading.Thread(target=worker, args=(i,))
-        for i in range(config.num_processes)
-    ]
-    for w in workers:
-        w.start()
-    for w in workers:
-        w.join()
+    # workers = [
+    #     threading.Thread(target=worker, args=(i,))
+    #     for i in range(config.num_processes)
+    # ]
+    # for w in workers:
+    #     w.start()
+    # for w in workers:
+    #     w.join()
 
     # Single thread version
-    # for i in range(total_count):
-    #     args = task_queue.get()
-    #     rel_path = process_sequence(args)
-    #     if rel_path is not None:
-    #         processed_files.append(rel_path)
+    for i in range(total_count):
+        args = task_queue.get()
+        rel_path = process_sequence(args)
+        if rel_path is not None:
+            processed_files.append(rel_path)
             
-    #     logger.info(
-    #         f"Progress: {i+1}/{total_count} "
-    #         f"({(i+1)/total_count * 100:.2f}%)"
-    #     )
+        logger.info(
+            f"Progress: {i+1}/{total_count} "
+            f"({(i+1)/total_count * 100:.2f}%)"
+        )
     
     # Add existing npz files to processed_files list
     for split in config.splits:

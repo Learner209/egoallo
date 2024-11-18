@@ -18,7 +18,7 @@ from egoallo import training_utils
 logger = setup_logger(output=None, name=__name__)
 
 def main(
-    smplh_npz_path: Path = Path("./assets/smpl_based_model/smplh/merged/SMPLH_MALE.pkl"),
+    smplh_npz_path: Path = Path("./assets/smpl_based_model/smplh/SMPLH_MALE.pkl"),
     data_npz_dir: Path = Path("./data/amass/processed"),
     output_file: Path = Path("./data/amass/processed.hdf5"),
     output_list_file: Path = Path("./data/amass/processed_files.txt"),
@@ -30,7 +30,7 @@ def main(
     assert torch.cuda.is_available()
 
     task_queue = queue.Queue[Path]()
-    # print(f"Scanning for NPZ files in: {data_npz_dir}")
+    print(f"Scanning for NPZ files in: {data_npz_dir}")
     for path in data_npz_dir.rglob("*.npz"):
         task_queue.put_nowait(path)
 
@@ -49,12 +49,16 @@ def main(
                 except queue.Empty:
                     break
 
+                rel_path = npz_path.relative_to(data_npz_dir)
+                video_output_path = Path("./logs/amass_viz").joinpath(rel_path).with_suffix('.mp4')
+                video_output_path.parent.mkdir(parents=True, exist_ok=True)
+                
                 print(f"Processing {npz_path} on device {device_idx}...")
                 train_data = EgoTrainingData.load_from_npz(
                     device_body_model, npz_path, include_hands=include_hands
                 )
                 EgoTrainingData.visualize_ego_training_data(
-                    train_data, body_model, "logs/amass_viz/output.mp4"
+                    train_data, body_model, str(video_output_path)
                 )
 
                 rel_path = npz_path.relative_to(data_npz_dir)
@@ -92,12 +96,12 @@ def main(
                 )
 
         # Original multi-threaded version:
-        # num_workers = min(torch.cuda.device_count(), 20)
-        # workers = [
-        #     threading.Thread(target=worker, args=(i % torch.cuda.device_count(),))
-        #     for i in range(num_workers)
-        # ]
-        #
+        num_workers = min(torch.cuda.device_count(), 20)
+        workers = [
+            threading.Thread(target=worker, args=(i % torch.cuda.device_count(),))
+            for i in range(num_workers)
+        ]
+        
         # for w in workers:
         #     w.start()
         # for w in workers:

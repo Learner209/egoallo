@@ -138,13 +138,14 @@ class AMASSProcessor:
         # Extract joint positions (22 SMPL-H joints)
         joints = torch.cat([
             posed.T_world_root[..., None, 4:7],  # Root position
-            posed.Ts_world_joint[..., 3:6]  # Other joint positions
+            posed.Ts_world_joint[..., 4:7]  # Other joint positions
         ], dim=-2).detach().cpu().numpy()  # (N, 22, 3)
 
         # Process floor height and contacts
         floor_height, contacts = self.motion_processor.process_floor_and_contacts(
             joints, self.joint_indices
         )
+        # import ipdb; ipdb.set_trace()
 
         # Adjust heights
         trans[:, 2] -= floor_height
@@ -190,9 +191,9 @@ class AMASSProcessor:
             'fps': fps,
             'joints': joints,
             'contacts': contacts,
-            'hand_pose': hand_pose.cpu().numpy(),
+            'pose_hand': hand_pose.cpu().numpy(),
             'root_orient': root_orient.cpu().numpy(),
-            'body_pose': body_pose.cpu().numpy(),
+            'pose_body': body_pose.cpu().numpy(),
         }
 
         if velocities is not None:

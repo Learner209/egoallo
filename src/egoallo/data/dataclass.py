@@ -98,17 +98,29 @@ class EgoTrainingData(TensorDataclass):
         raw_fields = {
             k: torch.from_numpy(v.astype(np.float32) if v.dtype == np.float64 else v)
             for k, v in np.load(path, allow_pickle=True).items()
-            if v.dtype in (np.float32, np.float64)
+            if v.dtype in (np.float32, np.float64, bool)
         }
 
+        import ipdb; ipdb.set_trace()
         timesteps = raw_fields["root_orient"].shape[0]
+        # preprocessing 
+        # 1. remove the first joint (root) from contacts.
+        if raw_fields['contacts'].shape == (timesteps, 52) or raw_fields['contacts'].shape == (timesteps, 22):
+            raw_fields['contacts'] = raw_fields['contacts'][:, 1:]
+
         betas = raw_fields["betas"] if raw_fields["betas"].ndim == 2 else raw_fields["betas"][None]
+        # If betas is 10-dimensional, pad with zeros to make it 16-dimensional
+        if betas.shape[-1] == 10:
+            padding = torch.zeros(*betas.shape[:-1], 6, dtype=betas.dtype)
+            betas = torch.cat([betas, padding], dim=-1)
+        assert betas.shape == (1, 16), f"Expected betas shape (1, 16), got {betas.shape}"
+
         assert raw_fields["root_orient"].shape == (timesteps, 3)
-        assert raw_fields["body_pose"].shape == (timesteps, 63)
-        assert raw_fields["hand_pose"].shape == (timesteps, 90)
+        assert raw_fields["pose_body"].shape == (timesteps, 63)
+        assert raw_fields["pose_hand"].shape == (timesteps, 90)
         assert raw_fields["joints"].shape == (timesteps, 22, 3) or raw_fields["joints"].shape == (timesteps, 52, 3)
         assert betas.shape == (1, 16)
-        assert raw_fields['contacts'].shape == (timesteps, 21)
+        assert raw_fields['contacts'].shape == (timesteps, 21) or raw_fields['contacts'].shape == (timesteps, 51)
 
         T_world_root = torch.cat(
             [
@@ -117,8 +129,8 @@ class EgoTrainingData(TensorDataclass):
             ],
             dim=-1,
         )
-        body_quats = tf.SO3.exp(raw_fields["body_pose"].reshape(timesteps, 21, 3)).wxyz
-        hand_quats = tf.SO3.exp(raw_fields["hand_pose"].reshape(timesteps, 30, 3)).wxyz
+        body_quats = tf.SO3.exp(raw_fields["pose_body"].reshape(timesteps, 21, 3)).wxyz
+        hand_quats = tf.SO3.exp(raw_fields["pose_hand"].reshape(timesteps, 30, 3)).wxyz
 
         device = body_model.weights.device
         shaped = body_model.with_shape(betas.to(device))
