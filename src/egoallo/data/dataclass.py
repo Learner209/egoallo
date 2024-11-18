@@ -101,7 +101,7 @@ class EgoTrainingData(TensorDataclass):
             if v.dtype in (np.float32, np.float64, bool)
         }
 
-        import ipdb; ipdb.set_trace()
+        # import ipdb; ipdb.set_trace()
         timesteps = raw_fields["root_orient"].shape[0]
         # preprocessing 
         # 1. remove the first joint (root) from contacts.

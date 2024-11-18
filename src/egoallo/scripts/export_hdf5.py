@@ -102,14 +102,14 @@ def main(
             for i in range(num_workers)
         ]
         
-        # for w in workers:
-        #     w.start()
-        # for w in workers:
-        #     w.join()
+        for w in workers:
+            w.start()
+        for w in workers:
+            w.join()
 
-        # Single threaded version
-        device_idx = 0 # Use first GPU
-        worker(device_idx)
+        # # Single threaded version
+        # device_idx = 0 # Use first GPU
+        # worker(device_idx)
 
         if output_list_file:
             output_list_file.write_text("\n".join(sorted(file_list)))

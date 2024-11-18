@@ -22,6 +22,7 @@ class RICHPreprocessConfig:
     # Dataset paths and options
     rich_data_dir: Path = Path("./third_party/rich_toolkit")
     smplh_model_dir: Path = Path("./assets/smpl_based_model/smplh/")
+    smplx_model_dir: Path = Path("./third_party/rich_toolkit/body_models/smplx")
     output_dir: Path = Path("./data/rich/processed")
     output_list_file: Path = Path("./data/rich/rich_dataset_files.txt")
     
@@ -84,6 +85,7 @@ def main(config: RICHPreprocessConfig) -> None:
     processor = RICHDataProcessor(
         rich_data_dir=str(config.rich_data_dir),
         smplh_model_dir=str(config.smplh_model_dir),
+        smplx_model_dir=str(config.smplx_model_dir),
         output_dir=str(config.output_dir),
         fps=config.target_fps,
         include_contact=config.include_contact,

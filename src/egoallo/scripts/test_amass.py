@@ -8,9 +8,9 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from egoallo import fncsmpl, fncsmpl_extensions
-from egoallo.data.amass_dataset_dynamic import EgoAmassHdf5DatasetDynamic
+from egoallo.data.amass_dataset import EgoAmassHdf5Dataset
 from egoallo.data.dataclass import collate_dataclass
-from egoallo.network import EgoDenoiseTraj
+from egoallo.network import EgoDenoiser
 from egoallo.training_utils import ipdb_safety_net
 from egoallo.config.test_config import TestConfig
 from egoallo.evaluation.body_evaluator import BodyEvaluator
@@ -31,7 +31,7 @@ def main(config: TestConfig):
     body_model = fncsmpl.SmplhModel.load(config.smplh_npz_path).to(device)
     
     # Initialize test dataset
-    test_dataset = EgoAmassHdf5DatasetDynamic(config)
+    test_dataset = EgoAmassHdf5Dataset(config)
     test_dataloader = DataLoader(
         test_dataset,
         batch_size=config.batch_size,
