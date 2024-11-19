@@ -69,10 +69,17 @@ class RICHDataProcessor:
         
         # Joint indices mapping
         self.joint_indices = {
-            "left_toe": 10,
-            "right_toe": 11,
-            "left_ankle": 8,
-            "right_ankle": 9
+            # TODO: change thoes joints indices with reference to mapping.py.
+            "left_knee":  4,
+            "right_knee": 5,
+            "left_ankle": 7,
+            "right_ankle": 8,
+            "left_foot": 10,
+            "right_foot": 11,
+            "left_elbow": 18,
+            "right_elbow": 19,
+            "left_wrist": 20,
+            "right_wrist": 21,
         }
 
         # Load camera-to-world transforms
@@ -111,7 +118,8 @@ class RICHDataProcessor:
         scaled_points = scale * points
         
         # Apply SE3 transform
-        world_points = transform.apply(scaled_points)
+        world_points = scaled_points @ transform.rotation().as_matrix() + transform.translation()
+        # world_points = transform.apply(scaled_points)
         
         return world_points
 
@@ -303,20 +311,20 @@ class RICHDataProcessor:
         trans = trans.numpy(force=True)
         joints = joints.numpy(force=True)
 
+        # import ipdb; ipdb.set_trace()
+
         # Detect floor height using foot joints
         floor_height = self.motion_processor.detect_floor_height(
             joints,
-            [self.joint_indices["left_toe"], self.joint_indices["right_toe"]]
+            list(self.joint_indices.values())
         )
         # import ipdb; ipdb.set_trace()
-        floor_height = -0.5
+        # floor_height = -0.5
         
 
         # Adjust heights
         trans[:, 2] -= floor_height
         joints[..., 2] -= floor_height
-
-        # import ipdb; ipdb.set_trace()
 
         # Rest of processing (velocities, alignment, etc.)
         dt = 1.0 / self.fps
