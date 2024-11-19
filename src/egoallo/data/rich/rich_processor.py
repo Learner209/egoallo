@@ -14,6 +14,7 @@ from egoallo.data.motion_processing import MotionProcessor
 from egoallo.fncsmpl import SmplhModel, SmplhShaped, SmplhShapedAndPosed
 from egoallo.transforms import SE3, SO3
 import pickle
+from smplx import SMPLX
 
 logger = setup_logger(output="logs/rich_processor", name=__name__)
 
@@ -24,6 +25,7 @@ class RICHDataProcessor:
         self,
         rich_data_dir: str,
         smplh_model_dir: str,
+        smplx_model_dir: str,
         output_dir: str,
         fps: int = 30,
         include_contact: bool = True,
@@ -31,6 +33,7 @@ class RICHDataProcessor:
     ) -> None:
         self.rich_data_dir = Path(rich_data_dir)
         self.smplh_model_dir = Path(smplh_model_dir)
+        self.smplx_model_dir = Path(smplx_model_dir)
         self.output_dir = Path(output_dir)
         self.fps = fps
         self.include_contact = include_contact
@@ -50,16 +53,148 @@ class RICHDataProcessor:
             model_path = self.smplh_model_dir / f"SMPLH_{gender.upper()}.pkl"
             self.body_models[gender] = SmplhModel.load(model_path).to(self.device)
 
+        # Initialize SMPLX models for each gender
+        self.smplx_models = {}
+        for gender in ["male", "female", "neutral"]:
+            self.smplx_models[gender] = SMPLX(
+                self.smplx_model_dir,
+                gender=gender,
+                flat_hand_mean=False,
+                use_pca=True,
+                num_pca_comps=12,
+            ).to(self.device)
+
         # Initialize motion processor
         self.motion_processor = MotionProcessor()
         
         # Joint indices mapping
         self.joint_indices = {
-            "left_toe": 10,
-            "right_toe": 11,
-            "left_ankle": 8,
-            "right_ankle": 9
+            # TODO: change thoes joints indices with reference to mapping.py.
+            "left_knee":  4,
+            "right_knee": 5,
+            "left_ankle": 7,
+            "right_ankle": 8,
+            "left_foot": 10,
+            "right_foot": 11,
+            "left_elbow": 18,
+            "right_elbow": 19,
+            "left_wrist": 20,
+            "right_wrist": 21,
         }
+
+        # Load camera-to-world transforms
+        self.camera_transforms = {}
+
+    def _load_camera_transform(self, scene_name: str) -> SE3:
+        """Load camera-to-world transform for a scene."""
+        if scene_name not in self.camera_transforms:
+            transform_path = self.rich_data_dir / "data/multicam2world" / f"{scene_name}_multicam2world.json"
+            with open(transform_path, 'r') as f:
+                cam2world = json.load(f)
+            
+            # Convert rotation matrix and translation to SE3
+            R = torch.tensor(cam2world['R'], device=self.device, dtype=torch.float32)
+            t = torch.tensor(cam2world['t'], device=self.device, dtype=torch.float32)
+            scale = torch.tensor(cam2world['c'], device=self.device, dtype=torch.float32)
+            
+            # Create SE3 transform
+            rotation = SO3.from_matrix(R)
+            self.camera_transforms[scene_name] = {
+                'transform': SE3.from_rotation_and_translation(rotation, t),
+                'scale': scale
+            }
+        return self.camera_transforms[scene_name]
+
+    def _transform_to_world(
+        self,
+        points: Tensor,  # (..., 3)
+        scene_name: str
+    ) -> Tensor:
+        """Transform points from camera to world coordinates using SE3."""
+        transform_data = self._load_camera_transform(scene_name)
+        transform, scale = transform_data['transform'], transform_data['scale']
+        
+        # Apply scale first
+        scaled_points = scale * points
+        
+        # Apply SE3 transform
+        world_points = scaled_points @ transform.rotation().as_matrix() + transform.translation()
+        # world_points = transform.apply(scaled_points)
+        
+        return world_points
+
+    def process_frame_data(
+        self, split: str, seq_name: str, frame_id: int
+    ) -> Tuple[Dict[str, Union[np.ndarray, torch.Tensor]], Optional[np.ndarray], Dict[str, Any]]:
+        """Process frame data using SMPLX for reference joints.
+        
+        NOTE: This is an ugly but feasible workaround that uses SMPLX to get reference joints
+        before SMPLH processing. While not optimal, it currently provides the best solution
+        for preprocessing the RICH dataset by ensuring accurate joint positions and
+        transformations.
+        """
+        scene_name, sub_id, _ = seq_name.split("_")
+        gender = self.gender_mapping[f'{int(sub_id)}']
+        
+        # Load SMPL-X parameters
+        params_path = (
+            self.rich_data_dir / "data/bodies" / split / seq_name / 
+            f"{frame_id:05d}" / f"{sub_id}.pkl"
+        )
+        with open(params_path, "rb") as f:
+            body_params = pickle.load(f)
+        
+        # Convert to tensors
+        body_params_tensor = {
+            k: torch.from_numpy(v).float().to(self.device)
+            for k, v in body_params.items()
+        }
+
+        # Get reference joints from SMPLX
+        smplx_model = self.smplx_models[gender]
+        model_output = smplx_model(
+            return_verts=True,
+            body_pose=body_params_tensor['body_pose'],
+            global_orient=body_params_tensor['global_orient'],
+            transl=body_params_tensor['transl'],
+            left_hand_pose=body_params_tensor['left_hand_pose'],
+            right_hand_pose=body_params_tensor['right_hand_pose'],
+            return_full_pose=True
+        )
+        
+        ref_joints = model_output.joints.detach().squeeze()
+        pelvis_pos = ref_joints[0]  # Get pelvis position
+
+        body_params_tensor['transl'] = pelvis_pos.unsqueeze(0)
+        
+        # Transform global orientation
+        # transform_data = self._load_camera_transform(scene_name)
+        # R_world_cam = transform_data['transform'].rotation()
+        # global_orient_so3 = SO3.exp(body_params_tensor['global_orient'])
+        # world_orient_so3 = R_world_cam @ global_orient_so3
+        # body_params_tensor['global_orient'] = world_orient_so3.log()
+
+        # Load HSC parameters
+        hsc_path = (
+            self.rich_data_dir / "data/human_scene_contact" / split / seq_name /
+            f"{frame_id:05d}" / f"{sub_id}.pkl"
+        )
+        with open(hsc_path, "rb") as f:
+            hsc_params = pickle.load(f)
+        
+        # Transform contact displacement vectors to world coordinates if they exist
+        if 's2m_dist_id' in hsc_params:
+            displacement = torch.from_numpy(hsc_params['s2m_dist_id']).float().to(self.device)
+            world_displacement = self._transform_to_world(displacement, scene_name)
+            hsc_params['s2m_dist_id'] = world_displacement.cpu().numpy()
+
+        contact_data = {
+            'vertex_contacts': hsc_params['contact'],
+            'displacement_vectors': hsc_params['s2m_dist_id'],
+            'closest_faces': hsc_params['closest_triangles_id']
+        }
+
+        return body_params_tensor, None, contact_data
 
     def _convert_rotations(
         self,
@@ -88,42 +223,6 @@ class RICHDataProcessor:
 
         return T_world_root, body_quats, left_hand_quats, right_hand_quats
 
-    def process_frame_data(
-        self, split: str, seq_name: str, frame_id: int
-    ) -> Tuple[Dict[str, Union[np.ndarray, torch.Tensor]], Optional[np.ndarray], Dict[str, Any]]:
-        """Process a single frame of RICH data."""
-        scene_name, sub_id, _ = seq_name.split("_")
-        
-        # Load SMPL-X parameters
-        params_path = (
-            self.rich_data_dir / "data/bodies" / split / seq_name / 
-            f"{frame_id:05d}" / f"{sub_id}.pkl"
-        )
-        with open(params_path, "rb") as f:
-            body_params = np.load(f, allow_pickle=True)
-            
-        # Convert parameters to tensors
-        body_params_tensor = {
-            k: torch.from_numpy(v).float().to(self.device)
-            for k, v in body_params.items()
-        }
-
-        # Load HSC parameters
-        hsc_path = (
-            self.rich_data_dir / "data/human_scene_contact" / split / seq_name /
-            f"{frame_id:05d}" / f"{sub_id}.pkl"
-        )
-        with open(hsc_path, "rb") as f:
-            hsc_params = pickle.load(f)
-        
-        # Extract contact information
-        contact_data = {
-            'vertex_contacts': hsc_params['contact'],  # (6890,) vertex contact labels
-            'displacement_vectors': hsc_params['s2m_dist_id'],  # (10475,3) displacement vectors
-            'closest_faces': hsc_params['closest_triangles_id']  # (10475,3,3) closest scene triangles
-        }
-
-        return body_params_tensor, None, contact_data
 
     def process_sequence(self, split: str, seq_name: str, output_path: Path) -> Optional[Dict[str, Any]]:
         """Process a complete sequence."""
@@ -152,82 +251,125 @@ class RICHDataProcessor:
         frame_ids = sorted(set(frame_ids) & set(frame_ids_context))
         
         # Process each frame
-        joints_sequence = []
-        processed_frames = []
-        contact_data_sequence = []
+        all_poses = []
+        all_trans = []
+        all_joints = []
+        all_contacts = []
         
         for frame_id in frame_ids:
-            # Load and process frame data
+            # import ipdb; ipdb.set_trace()
             body_params, _, contact_data = self.process_frame_data(split, seq_name, frame_id)
             
-            # Convert rotations to required format
-            
-            # Convert PCA coefficients to axis-angle format
-            # import ipdb; ipdb.set_trace()
+            # Convert hand PCA to axis-angle
             left_hand_pose, right_hand_pose = body_model.convert_hand_poses(
-                left_hand_pca=body_params['left_hand_pose'],  # (..., num_pca)
-                right_hand_pca=body_params['right_hand_pose']  # (..., num_pca)
+                left_hand_pca=body_params['left_hand_pose'],
+                right_hand_pca=body_params['right_hand_pose']
             )
 
+            # Combine poses in AMASS format (156 = 3 + 63 + 90)
+            poses = torch.cat([
+                body_params['global_orient'].reshape(-1),  # (3,)
+                body_params['body_pose'].reshape(-1),      # (63,)
+                left_hand_pose.reshape(-1),    # (45,)
+                right_hand_pose.reshape(-1)    # (45,)
+            ], dim=-1)
+            
+            all_poses.append(poses)
+            all_trans.append(body_params['transl'])
+
+            # Process joints and contacts similar to AMASS
             T_world_root, body_quats, left_hand_quats, right_hand_quats = self._convert_rotations(
-                body_params['global_orient'],  # (..., 3)
-                body_params['body_pose'],  # (..., 63)
-                left_hand_pose,  # (..., 15, 3)
-                right_hand_pose,  # (..., 15, 3)
-                body_params['transl']  # (..., 3)
-            )  # Returns (..., 7), (..., 21, 4), (..., 15, 4), (..., 15, 4)
-
-            # Process through SMPL-H pipeline
-            shaped: SmplhShaped = body_model.with_shape(body_params['betas'])  # (..., num_betas)
-            posed: SmplhShapedAndPosed = shaped.with_pose_decomposed(
-                T_world_root=T_world_root,  # (..., 7)
-                body_quats=body_quats,  # (..., 21, 4)
-                left_hand_quats=left_hand_quats,  # (..., 15, 4)
-                right_hand_quats=right_hand_quats  # (..., 15, 4)
+                body_params['global_orient'],
+                body_params['body_pose'],
+                left_hand_pose,
+                right_hand_pose,
+                body_params['transl']
             )
-            # mesh: SmplMesh = posed.lbs()
-            
-            # Store joints for floor height detection
-            joints = torch.cat([posed.T_world_root[..., None, :], posed.Ts_world_joint], dim=-2)
-            joints = joints.detach().cpu().numpy()  # (..., num_verts, 3)
-            joints_sequence.append(joints)
-            
-            # Convert per-vertex contacts to per-joint contacts using posed mesh
-            vertex_contacts = torch.from_numpy(contact_data['vertex_contacts']).float().to(self.device)  # (6890,)
-            # Use weighted average of nearby vertex contacts for joint contacts
-            joint_contacts = posed.compute_joint_contacts(vertex_contacts.unsqueeze(0)).squeeze(0)  # (num_joints,)
-            
-            # Store processed data
-            processed_frames.append(body_params)
-            contact_data_sequence.append({
-                'vertex_contacts': contact_data['vertex_contacts'],
-                'displacement_vectors': contact_data['displacement_vectors'],
-                'closest_faces': contact_data['closest_faces'],
-                'joint_contacts': joint_contacts.cpu().numpy()
-            })
-        
-        # Process floor height only (removed contact detection)
+
+            shaped = body_model.with_shape(body_params['betas'])
+            posed = shaped.with_pose_decomposed(
+                T_world_root=T_world_root,
+                body_quats=body_quats,
+                left_hand_quats=left_hand_quats,
+                right_hand_quats=right_hand_quats
+            )
+
+            # Extract joint positions
+            joints = torch.cat([
+                posed.T_world_root[..., None, 4:7],
+                posed.Ts_world_joint[..., 4:7]
+            ], dim=-2).detach().cpu().numpy()
+            all_joints.append(joints)
+
+            # Process contacts
+            joint_contacts = posed.compute_joint_contacts(
+                torch.from_numpy(contact_data['vertex_contacts']).float().to(self.device).unsqueeze(0)
+            ).squeeze(0).cpu().numpy()
+            all_contacts.append(joint_contacts)
+
+        # Stack sequences first
+        poses = torch.stack(all_poses).cpu().numpy()  # (N, 156)
+        trans = torch.cat(all_trans, dim=0).cpu().numpy()  # (N, 3)
+        joints = np.concatenate(all_joints, axis=0)  # (N, 22, 3)
+        contacts = np.stack(all_contacts)  # (N, num_joints)
+
+        # Transform the trans, joints to world coordinates.
+        trans = self._transform_to_world(torch.from_numpy(trans).to(self.device), scene_name)
+        joints = self._transform_to_world(torch.from_numpy(joints).to(self.device), scene_name)
+
+        trans = trans.numpy(force=True)
+        joints = joints.numpy(force=True)
+
         # import ipdb; ipdb.set_trace()
-        joints_sequence = np.concatenate([j[None] if j.ndim == 2 else j for j in joints_sequence], axis=0)
-        floor_height = self.motion_processor.detect_floor_height(joints_sequence, [
-            self.joint_indices["left_toe"], self.joint_indices["right_toe"]
-        ])
+
+        # Detect floor height using foot joints
+        floor_height = self.motion_processor.detect_floor_height(
+            joints,
+            list(self.joint_indices.values())
+        )
+        # import ipdb; ipdb.set_trace()
+        # floor_height = -0.5
         
+
         # Adjust heights
-        for frame_data in processed_frames:
-            if 'transl' in frame_data:
-                frame_data['transl'][:, 2] -= floor_height
-        
-        # Prepare sequence data
+        trans[:, 2] -= floor_height
+        joints[..., 2] -= floor_height
+
+        # Rest of processing (velocities, alignment, etc.)
+        dt = 1.0 / self.fps
+        velocities = {
+            'joints': np.stack([
+                self.motion_processor.compute_joint_velocity(joints[:, i])
+                for i in range(joints.shape[1])
+            ], axis=1),
+            'trans': self.motion_processor.compute_joint_velocity(trans),
+            'root_orient': self.motion_processor.compute_angular_velocity(
+                SO3.exp(torch.from_numpy(poses[:, :3])).as_matrix().numpy(),
+                dt
+            )
+        }
+
+        # Compute alignment rotation
+        forward_dir = joints[:, 1] - joints[:, 0]  # Pelvis to spine
+        forward_dir = forward_dir / np.linalg.norm(forward_dir, axis=-1, keepdims=True)
+        align_rot = self.motion_processor.compute_alignment_rotation(forward_dir)
+
+        # Prepare sequence data in AMASS format
         sequence_data = {
-            'body_params': processed_frames,
-            'frame_ids': frame_ids,
+            'poses': poses,  # (N, 156)
+            'trans': trans,  # (N, 3)
+            'betas': body_params['betas'].cpu().numpy(),  # (16,)
             'gender': gender,
             'fps': self.fps,
-            'floor_height': floor_height,
-            'contact_data': contact_data_sequence
+            'joints': joints,  # (N, 22, 3)
+            'contacts': contacts,
+            'pose_hand': poses[:, 66:],  # (N, 90)
+            'root_orient': poses[:, :3],  # (N, 3)
+            'pose_body': poses[:, 3:66],  # (N, 63)
+            'velocities': velocities,
+            'align_rot': align_rot
         }
-            
+
         return sequence_data
 
     def save_sequence(self, sequence_data: Dict[str, Any], output_path: Path) -> None:
@@ -237,38 +379,5 @@ class RICHDataProcessor:
             sequence_data: Dictionary containing processed sequence data
             output_path: Path to save the NPZ file
         """
-        # Convert tensors to numpy arrays
-        save_data = {
-            "body_params": [
-                {k: v.cpu().numpy() for k, v in params.items()}
-                for params in sequence_data["body_params"]
-            ],
-            "frame_ids": np.array(sequence_data["frame_ids"]),
-            "gender": sequence_data["gender"],
-            "fps": sequence_data["fps"]
-        }
-        
-        # Add contact data if included
-        if self.include_contact:
-            # Stack all contact data from sequence
-            save_data.update({
-                'contacts': np.stack([
-                    frame_data['joint_contacts'] 
-                    for frame_data in sequence_data['contact_data']
-                ]),
-                'vertex_contacts': np.stack([
-                    frame_data['vertex_contacts']
-                    for frame_data in sequence_data['contact_data']
-                ]),
-                'displacement_vectors': np.stack([
-                    frame_data['displacement_vectors']
-                    for frame_data in sequence_data['contact_data']
-                ]),
-                'closest_faces': np.stack([
-                    frame_data['closest_faces']
-                    for frame_data in sequence_data['contact_data']
-                ])
-            })
-        # Save compressed NPZ file
-        np.savez_compressed(output_path, **save_data)
-        logger.info(f"Saved processed sequence to {output_path}") 
+        np.savez_compressed(output_path, **sequence_data)
+        logger.info(f"Saved processed sequence to {output_path}")

@@ -119,6 +119,10 @@ def main(config: AMASSDatasetConfig) -> None:
     for w in workers:
         w.join()
     
+    # Single-threaded for debugging
+    # device_idx = 0
+    # worker(device_idx)
+
     # Save file list
     config.output_list_file.write_text("\n".join(sorted(processed_files)))
     

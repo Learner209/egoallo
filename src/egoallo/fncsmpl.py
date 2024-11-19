@@ -96,6 +96,7 @@ class SmplhModel(TensorDataclass):
         )
 
         # Extract parent indices
+        # import ipdb; ipdb.set_trace()
         parent_indices = tuple(
             int(index) for index in params_numpy.pop("kintree_table")[0][1:] - 1
         )

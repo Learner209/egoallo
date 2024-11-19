@@ -42,6 +42,8 @@ from egoallo.setup_logger import setup_logger
 from egoallo.fncsmpl import SmplhModel, SmplhShaped, SmplhShapedAndPosed, SmplMesh
 from egoallo import fncsmpl, transforms
 from egoallo.network import EgoDenoiseTraj
+from egoallo.viz import visualize_ego_training_data as viz_ego_data
+
 logger = setup_logger(output=None, name=__name__)
 
 @jaxtyped(typechecker=typeguard.typechecked)
@@ -133,17 +135,30 @@ class EgoTrainingData(TensorDataclass):
         """Load a single trajectory from a (processed_30fps) npz file."""
         raw_fields = {
             k: torch.from_numpy(v.astype(np.float32) if v.dtype == np.float64 else v)
-            for k, v in np.load(path).items()
-            if v.dtype in (np.float32, np.float64)
+            for k, v in np.load(path, allow_pickle=True).items()
+            if v.dtype in (np.float32, np.float64, bool)
         }
 
+        # import ipdb; ipdb.set_trace()
         timesteps = raw_fields["root_orient"].shape[0]
+        # preprocessing 
+        # 1. remove the first joint (root) from contacts.
+        if raw_fields['contacts'].shape == (timesteps, 52) or raw_fields['contacts'].shape == (timesteps, 22):
+            raw_fields['contacts'] = raw_fields['contacts'][:, 1:]
+
+        betas = raw_fields["betas"] if raw_fields["betas"].ndim == 2 else raw_fields["betas"][None]
+        # If betas is 10-dimensional, pad with zeros to make it 16-dimensional
+        if betas.shape[-1] == 10:
+            padding = torch.zeros(*betas.shape[:-1], 6, dtype=betas.dtype)
+            betas = torch.cat([betas, padding], dim=-1)
+        assert betas.shape == (1, 16), f"Expected betas shape (1, 16), got {betas.shape}"
+
         assert raw_fields["root_orient"].shape == (timesteps, 3)
         assert raw_fields["pose_body"].shape == (timesteps, 63)
         assert raw_fields["pose_hand"].shape == (timesteps, 90)
-        assert raw_fields["joints"].shape == (timesteps, 22, 3)
-        assert raw_fields["betas"].shape == (1, 16)
-        assert raw_fields['contacts'].shape == (timesteps, 21)
+        assert raw_fields["joints"].shape == (timesteps, 22, 3) or raw_fields["joints"].shape == (timesteps, 52, 3)
+        assert betas.shape == (1, 16)
+        assert raw_fields['contacts'].shape == (timesteps, 21) or raw_fields['contacts'].shape == (timesteps, 51)
 
         T_world_root = torch.cat(
             [
@@ -156,13 +171,13 @@ class EgoTrainingData(TensorDataclass):
         hand_quats = tf.SO3.exp(raw_fields["pose_hand"].reshape(timesteps, 30, 3)).wxyz
 
         device = body_model.weights.device
-        shaped = body_model.with_shape(raw_fields["betas"][None].to(device))
+        shaped = body_model.with_shape(betas.to(device))
 
         # Batch the SMPL body model operations, this can be pretty memory-intensive...
         posed = shaped.with_pose_decomposed(
             T_world_root=T_world_root.to(device), body_quats=body_quats.to(device)
         )
-        smplh_mesh = posed.lbs()
+        # smplh_mesh = posed.lbs()
 
         T_world_cpf = (
             tf.SE3(posed.Ts_world_joint[:, 14, :])  # T_world_head
@@ -175,7 +190,7 @@ class EgoTrainingData(TensorDataclass):
         ego_data = EgoTrainingData(
             T_world_root=T_world_root[1:].cpu(),
             contacts=raw_fields["contacts"][1:, 1:].cpu(),  # Root is no longer a joint.
-            betas=raw_fields["betas"][None].cpu(),
+            betas=betas.cpu(),
             # joints_wrt_world=raw_fields["joints"][
             #     1:, 1:
             # ].cpu(),  # Root is no longer a joint.
@@ -227,15 +242,19 @@ class EgoTrainingData(TensorDataclass):
     @staticmethod
     def visualize_ego_training_data(
             ego_data: EgoTrainingData, 
-            body_model: fncsmpl.SmplhModel
+            body_model: fncsmpl.SmplhModel,
+            output_path: str = "output.mp4"
         ):
         """
-        Visualize EgoTrainingData using the blendify API and SMPL model.
+        Visualize EgoTrainingData using the cloudrender API and SMPL model.
 
-        :param ego_data: EgoTrainingData instance containing the pose and transformation data.
-        :param smpl_path: Path to the SMPL model files.
+        Args:
+            ego_data: EgoTrainingData instance containing the pose and transformation data.
+            body_model: SMPL body model instance.
+            output_path: Path where the output video will be saved.
         """
-        raise NotImplementedError
+        # Simply delegate to the new implementation
+        viz_ego_data(ego_data, body_model, output_path)
 
 T = TypeVar("T")
 

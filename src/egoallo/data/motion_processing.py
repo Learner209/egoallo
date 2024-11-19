@@ -89,7 +89,7 @@ class MotionProcessor:
         Returns:
             Estimated floor height
         """
-        MAX_SAMPLES = int(3e5)  # Maximum number of frames to process
+        MAX_SAMPLES = int(4e5)  # Maximum number of frames to process
         # import ipdb; ipdb.set_trace()
         
         # Get foot joint velocities

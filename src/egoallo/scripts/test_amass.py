@@ -33,7 +33,7 @@ def main(config: TestConfig):
     ).to(device)
     
     # Initialize test dataset
-    test_dataset = EgoAmassHdf5DatasetDynamic(config)
+    test_dataset = EgoAmassHdf5Dataset(config)
     test_dataloader = DataLoader(
         test_dataset,
         batch_size=config.batch_size,

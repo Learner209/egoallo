@@ -22,9 +22,9 @@ wandb/
 
 test_results/
 logs/
-/assets/
+/assets
 
-datasets/
+/datasets
 myenv/
 assets
 wandb/

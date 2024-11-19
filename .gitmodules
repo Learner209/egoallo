@@ -10,9 +10,6 @@
 [submodule "third_party/hps_toolkit"]
 	path = third_party/hps_toolkit
 	url = git@github.com:Learner209/hps_toolkit.git
-[submodule "third_party/slowfast"]
-	path = third_party/slowfast
-	url = git@github.com:Learner209/SlowFast.git
 [submodule "third_party/cloudrender"]
 	path = third_party/cloudrender
 	url = git@github.com:Learner209/cloudrender.git
