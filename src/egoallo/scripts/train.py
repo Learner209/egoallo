@@ -62,9 +62,6 @@ class MotionPriorTrainer:
         self.lr_scheduler = self._setup_lr_scheduler()
         self.ema = self._setup_ema() if config.use_ema else None
 
-        # Add gradient scaler for mixed precision training
-        self.scaler = GradScaler()
-        
         # Prepare components including scaler
         self.model, self.train_loader, self.optimizer, self.lr_scheduler, self.scaler = \
             self.accelerator.prepare(
@@ -177,6 +174,12 @@ class MotionPriorTrainer:
 
     def train(self) -> None:
         """Execute the training loop."""
+        self.accelerator.register_for_checkpointing(self.lr_scheduler)
+
+        # Restore an existing model checkpoint.
+        if self.prev_checkpoint_path is not None:
+            self.accelerator.load_state(str(self.prev_checkpoint_path))
+
         self._save_initial_state()
         self.accelerator.save_state(str(self.experiment_dir / f"checkpoints_{self.step}"))
 
