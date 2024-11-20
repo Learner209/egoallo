@@ -49,8 +49,8 @@ class MotionPriorTrainer:
         self.device = self.accelerator.device
                         
         # Calculate effective batch size and learning rate
-        self.total_batch_size = self._calculate_total_batch_size()
-        self.learning_rate = self._calculate_scaled_learning_rate()
+        self.batch_size = config.batch_size
+        self.learning_rate = config.learning_rate
         self.step = 0
         
         # Initialize pipeline components and move to device
@@ -79,6 +79,7 @@ class MotionPriorTrainer:
             self.optimizer,
             self.lr_scheduler,
         )
+        self.accelerator.register_for_checkpointing(self.lr_scheduler)
 
         self.loop_metrics_gen = training_utils.loop_metric_generator(counter_init=self.step)
         self.prev_checkpoint_path = None
@@ -280,7 +281,7 @@ class MotionPriorTrainer:
 
     def _handle_checkpointing(self):
         """Handle model checkpointing."""
-        if self.step % 5000 == 0:
+        if self.step % 10000 == 0:
             checkpoint_path = self.experiment_dir / f"checkpoints_{self.step}"
             self.accelerator.save_state(str(checkpoint_path))
             logger.info(f"Saved checkpoint to {checkpoint_path}")
@@ -288,39 +289,6 @@ class MotionPriorTrainer:
             if self.prev_checkpoint_path is not None:
                 shutil.rmtree(self.prev_checkpoint_path)
             self.prev_checkpoint_path = None if self.step % 100_000 == 0 else checkpoint_path
-
-    def _calculate_total_batch_size(self) -> int:
-        """Calculate the total effective batch size across all GPUs."""
-        return (
-            self.config.batch_size *  # per-GPU batch size
-            torch.cuda.device_count() *  # number of GPUs
-            self.gradient_accumulation_steps  # gradient accumulation
-        )
-
-    def _calculate_scaled_learning_rate(self) -> float:
-        """Calculate the scaled learning rate based on total batch size."""
-        batch_size_ratio = self.total_batch_size / self.config.base_batch_size
-        
-        if self.config.learning_rate_scaling == "sqrt":
-            # Square root scaling (recommended for most cases)
-            scale_factor = math.sqrt(batch_size_ratio)
-        elif self.config.learning_rate_scaling == "linear":
-            # Linear scaling (used in some cases, especially with very large batches)
-            scale_factor = batch_size_ratio
-        else:  # "none"
-            # No scaling
-            scale_factor = 1.0
-        
-        scaled_lr = self.config.base_learning_rate * scale_factor
-        
-        if self.accelerator.is_main_process:
-            logger.info(f"Base learning rate: {self.config.base_learning_rate}")
-            logger.info(f"Total batch size: {self.total_batch_size}")
-            logger.info(f"Batch size ratio: {batch_size_ratio}")
-            logger.info(f"Learning rate scale factor: {scale_factor}")
-            logger.info(f"Scaled learning rate: {scaled_lr}")
-            
-        return scaled_lr
 
 
 def train_motion_prior(

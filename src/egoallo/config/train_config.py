@@ -23,9 +23,8 @@ class EgoAlloTrainConfig(EgoAlloBaseConfig):
     max_grad_norm: float = 1.0
     
     # Learning rate settings
-    base_batch_size: int = 256
-    base_learning_rate: float = 1e-4
-    learning_rate_scaling: Literal["sqrt", "linear", "none"] = "sqrt"
+    batch_size: int = 256
+    learning_rate: float = 4e-5
 
     # Max steps
     max_steps: int = 100000
