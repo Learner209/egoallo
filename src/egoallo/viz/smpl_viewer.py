@@ -77,7 +77,7 @@ class BaseRenderer:
         # Test OpenGL context
 
         version = gl.glGetString(gl.GL_VERSION)
-        logger.info(f"OpenGL version: {version}")
+        # logger.info(f"OpenGL version: {version}")
 
     def _setup_buffers(self):
         """Set up OpenGL frame and render buffers."""
@@ -185,7 +185,7 @@ class SMPLViewer(BaseRenderer):
         pointcloud = trimesh_load_from_zip(str(self.scene_path), "*/pointcloud.ply")
         self.pointcloud.set_buffers(pointcloud)
         self.scene.add_object(self.pointcloud)
-        logger.info(f"Loaded scene mesh from {self.scene_path}")
+        # logger.info(f"Loaded scene mesh from {self.scene_path}")
 
     def _setup_lighting(self) -> None:
         """Set up scene lighting with shadows."""
@@ -251,16 +251,11 @@ class SMPLViewer(BaseRenderer):
         self.smpl_renderer.set_material(0.3, 1, 0, 0)
         self.scene.add_object(self.smpl_renderer)
 
-        # Camera looks from behind and slightly above
-        camera_offset = SE3.from_rotation_and_translation(
-            rotation=SO3.from_rpy_radians(
-                roll=torch.tensor(0.0),
-                pitch=torch.tensor(-0.3),  # Look down more
-                yaw=torch.tensor(0.0)
-            ),
-            translation=torch.tensor([0.0, 0.3, 2.5])  # Further back, slightly higher
-        )
-
+        # Camera configuration
+        CAMERA_HEIGHT = 3.0  # Fixed height above ground
+        CAMERA_PITCH = -0.6  # Look down angle in radians
+        MIN_DISTANCE = 4.0   # Minimum distance from subject
+        
         # Render frames
         with VideoWriter(
             output_path, 
@@ -268,9 +263,27 @@ class SMPLViewer(BaseRenderer):
             fps=self.config.fps
         ) as vw, AsyncPBOCapture(self.config.resolution, queue_size=100) as capturing:
             for i in tqdm(range(ego_data.T_world_root.shape[0]-1), desc="Rendering frames"):
-                # Get current camera pose from ego_data
-                T_world_cpf = SE3(wxyz_xyz=ego_data.T_world_cpf[i])
-                T_world_cam = T_world_cpf @ camera_offset
+                # Get current human position
+                human_pos = ego_data.T_world_root[i, 4:7].cpu().numpy()
+                
+                # Calculate camera position
+                camera_pos = np.array([
+                    human_pos[0],  # Follow x position
+                    human_pos[1] - MIN_DISTANCE,  # Stay behind in y
+                    CAMERA_HEIGHT  # Fixed height
+                ])
+                
+                # Create camera transform
+                camera_rotation = SO3.from_rpy_radians(
+                    roll=torch.tensor(0.0),
+                    pitch=torch.tensor(CAMERA_PITCH),
+                    yaw=torch.tensor(0.0)
+                )
+                
+                T_world_cam = SE3.from_rotation_and_translation(
+                    rotation=camera_rotation,
+                    translation=torch.from_numpy(camera_pos).to(device)
+                )
                 
                 # Update camera and render frame
                 self._render_frame(
@@ -331,7 +344,7 @@ class SMPLViewer(BaseRenderer):
     ) -> None:
         """Flush any remaining frames in the capture queue."""
         # Flush the remaining frames
-        logger.info("Flushing PBO queue")
+        # logger.info("Flushing PBO queue")
         color = capture.get_first_requested_color()
         while color is not None:
             video_writer.write(color)
