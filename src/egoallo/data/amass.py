@@ -8,6 +8,7 @@ import torch.utils
 import torch.utils.data
 
 from .dataclass import EgoTrainingData
+from ..network import EgoDenoiserConfig
 
 AMASS_SPLITS = {
     "train": [
@@ -75,6 +76,7 @@ class EgoAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         min_subseq_len: int | None = None,
         random_variable_len_proportion: float = 0.3,
         random_variable_len_min: int = 16,
+        config: EgoDenoiserConfig,
     ) -> None:
         datasets = []
         for split in set(splits):
@@ -86,6 +88,7 @@ class EgoAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         self._random_variable_len_proportion = random_variable_len_proportion
         self._random_variable_len_min = random_variable_len_min
         self._hdf5_path = hdf5_path
+        self.config = config
 
         with h5py.File(self._hdf5_path, "r") as hdf5_file:
             self._groups = [
@@ -217,6 +220,33 @@ class EgoAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         # Older versions of the processed dataset don't have hands.
         if "hand_quats" not in kwargs:
             kwargs["hand_quats"] = None
+
+        # Generate MAE-style masking
+        batch_size = kwargs["joints_3d"].shape[0]
+        num_joints = 21
+        device = kwargs["joints_3d"].device
+
+        # Generate random mask for each sequence in batch
+        num_masked = int(num_joints * self.config.mask_ratio)
+        visible_joints_mask = torch.ones((batch_size, self._subseq_len, num_joints), dtype=torch.bool, device=device)
+        
+        # For each sequence in the batch
+        for b in range(batch_size):
+            # Randomly select joints to mask for this sequence
+            rand_indices = torch.randperm(num_joints)
+            masked_indices = rand_indices[:num_masked]
+            visible_joints_mask[b, :, masked_indices] = False
+
+        # Get original joints_3d
+        joints_3d = kwargs["joints_3d"]  # shape: [batch, time, 21, 3]
+        
+        # Create visible_joints tensor containing only unmasked joints
+        visible_joints = joints_3d[visible_joints_mask].reshape(batch_size, -1, num_joints - num_masked, 3)
+
+        # Update kwargs with new MAE-style masking tensors
+        kwargs["visible_joints"] = visible_joints
+        kwargs["visible_joints_mask"] = visible_joints_mask
+        kwargs["joints_3d"] = joints_3d  # Keep original joints for computing loss
 
         # Close the file if we opened it.
         if hdf5_file is not None:

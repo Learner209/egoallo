@@ -120,6 +120,7 @@ def run_training(
             cache_files=True,
             slice_strategy=config.dataset_slice_strategy,
             random_variable_len_proportion=config.dataset_slice_random_variable_len_proportion,
+            config=config.model,
         ),
         batch_size=config.batch_size,
         shuffle=True,

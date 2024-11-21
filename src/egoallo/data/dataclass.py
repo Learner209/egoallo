@@ -12,7 +12,9 @@ from torch import Tensor
 from .. import fncsmpl, fncsmpl_extensions
 from .. import transforms as tf
 from ..tensor_dataclass import TensorDataclass
+from typing import Optional
 
+from ..network import EgoDenoiserConfig
 
 @jaxtyped(typechecker=typeguard.typechecked)
 class EgoTrainingData(TensorDataclass):
@@ -56,11 +58,18 @@ class EgoTrainingData(TensorDataclass):
     hand_quats: Float[Tensor, "*#batch timesteps 30 4"] | None
     """Local orientations for each hand joint."""
 
+    visible_joints_mask: Bool[Tensor, "*#batch timesteps 21"]
+    """Boolean mask indicating which joints are visible (not masked)"""
+    
+    joints_3d: Float[Tensor, "*#batch timesteps 21 3"]
+    """3D joint positions in world coordinates"""
+
     @staticmethod
     def load_from_npz(
         body_model: fncsmpl.SmplhModel,
         path: Path,
         include_hands: bool,
+        config: EgoDenoiserConfig,
     ) -> EgoTrainingData:
         """Load a single trajectory from a (processed_30fps) npz file."""
         raw_fields = {
@@ -99,6 +108,15 @@ class EgoTrainingData(TensorDataclass):
         assert T_world_cpf.shape == (timesteps, 7)
 
         # Construct the training data elements that we want to keep.
+        batch_size = raw_fields["joints"].shape[0] - 1  # -1 for removing first frame
+        num_joints = 21
+        
+        # Generate random mask
+        num_masked = int(num_joints * config.mask_ratio)
+        rand_indices = torch.randperm(num_joints)
+        mask = torch.ones((batch_size, num_joints), dtype=torch.bool)
+        mask[:, rand_indices[:num_masked]] = False
+
         return EgoTrainingData(
             T_world_root=T_world_root[1:].cpu(),
             contacts=raw_fields["contacts"][1:, 1:].cpu(),  # Root is no longer a joint.
@@ -123,6 +141,8 @@ class EgoTrainingData(TensorDataclass):
             ).cpu(),
             mask=torch.ones((timesteps - 1,), dtype=torch.bool),
             hand_quats=hand_quats[1:].cpu() if include_hands else None,
+            visible_joints_mask=mask.cpu(),
+            joints_3d=raw_fields["joints"][1:, 1:].cpu(),  # Skip first frame and root joint
         )
 
 

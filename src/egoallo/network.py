@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import cache, cached_property
-from typing import Literal, assert_never
+from typing import Literal, assert_never, Optional
 
 import numpy as np
 import torch
@@ -26,8 +26,7 @@ def project_rotmats_via_svd(
 
 
 class EgoDenoiseTraj(TensorDataclass):
-    """Data structure for denoising. Contains tensors that we are denoising, as
-    well as utilities for packing + unpacking them."""
+    """Data structure for denoising with MAE-style masking."""
 
     betas: Float[Tensor, "*#batch timesteps 16"]
     """Body shape parameters. We don't really need the timesteps axis here,
@@ -41,6 +40,9 @@ class EgoDenoiseTraj(TensorDataclass):
 
     hand_rotmats: Float[Tensor, "*#batch timesteps 30 3 3"] | None
     """Local orientations for each body joint."""
+
+    visible_joints_mask: Bool[Tensor, "*#batch timesteps 21"]
+    """Mask indicating which joints were visible during training"""
 
     @staticmethod
     def get_packed_dim(include_hands: bool) -> int:
@@ -70,7 +72,7 @@ class EgoDenoiseTraj(TensorDataclass):
             [
                 x.reshape((*batch, time, -1))
                 for x in vars(self).values()
-                if x is not None
+                if x is not None and x is not self.visible_joints_mask  # Don't pack the mask
             ],
             dim=-1,
         )
@@ -81,6 +83,7 @@ class EgoDenoiseTraj(TensorDataclass):
         x: Float[Tensor, "*#batch timesteps d_state"],
         include_hands: bool,
         project_rotmats: bool = False,
+        visible_joints_mask: Optional[torch.Tensor] = None,
     ) -> EgoDenoiseTraj:
         """Unpack trajectory from a single flattened vector.
 
@@ -115,11 +118,13 @@ class EgoDenoiseTraj(TensorDataclass):
             body_rotmats=body_rotmats,
             contacts=contacts,
             hand_rotmats=hand_rotmats,
+            visible_joints_mask=visible_joints_mask,
         )
 
 
 @dataclass(frozen=True)
 class EgoDenoiserConfig:
+    # Basic parameters
     max_t: int = 1000
     fourier_enc_freqs: int = 3
     d_latent: int = 512
@@ -129,178 +134,115 @@ class EgoDenoiserConfig:
     encoder_layers: int = 6
     decoder_layers: int = 6
     dropout_p: float = 0.0
+    
+    # MAE parameters
+    mask_ratio: float = 0.75  # Ratio of joints to mask during training
+    include_hands: bool = True
+    
+    # Model settings
     activation: Literal["gelu", "relu"] = "gelu"
-
     positional_encoding: Literal["transformer", "rope"] = "rope"
     noise_conditioning: Literal["token", "film"] = "token"
-
     xattn_mode: Literal["kv_from_cond_q_from_x", "kv_from_x_q_from_cond"] = (
         "kv_from_cond_q_from_x"
     )
 
-    include_canonicalized_cpf_rotation_in_cond: bool = True
-    include_hands: bool = True
-    """Whether to include hand joints (+15 per hand) in the denoised state."""
-
-    cond_param: Literal[
-        "ours", "canonicalized", "absolute", "absrel", "absrel_global_deltas"
-    ] = "ours"
-    """Which conditioning parameterization to use.
-
-    "ours" is the default, we try to be clever and design something with nice
-        equivariance properties.
-    "canonicalized" contains a transformation that's canonicalized to aligned
-        to the first frame.
-    "absolute" is the naive case, where we just pass in transformations
-        directly.
-    """
-
-    include_hand_positions_cond: bool = False
-    """Whether to include hand positions in the conditioning information."""
+    # Joint position conditioning settings
+    joint_cond_mode: Literal["absolute", "canonicalized", "absrel", "absrel_global_deltas"] = "absrel_global_deltas"
 
     @cached_property
     def d_cond(self) -> int:
         """Dimensionality of conditioning vector."""
+        # Calculate number of visible joints based on mask ratio
+        num_visible_joints = int((1 - self.mask_ratio) * 21)  # 21 total joints
+        # Base dimension for joint position (3) + joint index embedding (16)
+        d_per_joint = 3 + 16
 
-        if self.cond_param == "ours":
-            d_cond = 0
-            d_cond += 12  # Relative CPF pose, flattened 3x4 matrix.
-            d_cond += 1  # Floor height.
-            if self.include_canonicalized_cpf_rotation_in_cond:
-                d_cond += 9  # Canonicalized CPF rotation, flattened 3x3 matrix.
-        elif self.cond_param == "canonicalized":
-            d_cond = 12
-        elif self.cond_param == "absolute":
-            d_cond = 12
-        elif self.cond_param == "absrel":
-            # Both absolute and relative!
-            d_cond = 24
-        elif self.cond_param == "absrel_global_deltas":
-            # Both absolute and relative!
-            d_cond = 24
+        if self.joint_cond_mode == "absolute":
+            d_cond = d_per_joint * num_visible_joints  # Position + index embedding per visible joint
+        elif self.joint_cond_mode == "canonicalized":
+            d_cond = d_per_joint * num_visible_joints  # Canonicalized position + index embedding
+        elif self.joint_cond_mode == "absrel":
+            d_cond = d_per_joint * num_visible_joints * 2  # Both absolute and relative positions + index embeddings
+        elif self.joint_cond_mode == "absrel_global_deltas":
+            d_cond = (d_per_joint * num_visible_joints) + 9 + 3  # Visible joint positions + indices + global rotation + translation
         else:
-            assert_never(self.cond_param)
-
-        # Add two 3D positions to the conditioning dimension if we're including
-        # hand conditioning.
-        if self.include_hand_positions_cond:
-            d_cond = d_cond + 6
-
-        d_cond = d_cond + d_cond * self.fourier_enc_freqs * 2  # Fourier encoding.
+            assert_never(self.joint_cond_mode)
+            
+        d_cond = d_cond + d_cond * self.fourier_enc_freqs * 2  # Fourier encoding
         return d_cond
 
     def make_cond(
         self,
-        T_cpf_tm1_cpf_t: Float[Tensor, "batch time 7"],
-        T_world_cpf: Float[Tensor, "batch time 7"],
-        hand_positions_wrt_cpf: Float[Tensor, "batch time 6"] | None,
+        visible_joints: Float[Tensor, "batch time num_visible_joints 3"],
+        visible_joints_mask: Bool[Tensor, "batch time 21"],
     ) -> Float[Tensor, "batch time d_cond"]:
-        """Construct conditioning information from CPF pose."""
+        """Construct conditioning using only visible joints and their indices."""
+        batch, time = visible_joints_mask.shape[:2]
+        device = visible_joints.device
+        dtype = visible_joints.dtype
 
-        (batch, time, _) = T_cpf_tm1_cpf_t.shape
+        # Get indices of visible joints
+        visible_indices = visible_joints_mask.nonzero(as_tuple=True)[-1]  # Get joint indices
+        
+        # Create learnable joint index embeddings
+        joint_embeddings = nn.Embedding(21, 16).to(device)  # 21 joints, 16-dim embedding
+        index_embeddings = joint_embeddings(visible_indices)
 
-        # Construct device pose conditioning.
-        if self.cond_param == "ours":
-            # Compute conditioning terms. +Z is up in the world frame. We want
-            # the translation to be invariant to translations in the world X/Y
-            # directions.
-            height_from_floor = T_world_cpf[..., 6:7]
-
-            cond_parts = [
-                SE3(T_cpf_tm1_cpf_t).as_matrix()[..., :3, :].reshape((batch, time, 12)),
-                height_from_floor,
-            ]
-            if self.include_canonicalized_cpf_rotation_in_cond:
-                # We want the rotation to be invariant to rotations around the
-                # world Z axis. Visualization of what's happening here:
-                #
-                # https://gist.github.com/brentyi/9226d082d2707132af39dea92b8609f6
-                #
-                # (The coordinate frame may differ by some axis-swapping
-                # compared to the exact equations in the paper. But to the
-                # network these will all look the same.)
-                R_world_cpf = SE3(T_world_cpf).rotation().wxyz
-                forward_cpf = R_world_cpf.new_tensor([0.0, 0.0, 1.0])
-                forward_world = SO3(R_world_cpf) @ forward_cpf
-                assert forward_world.shape == (batch, time, 3)
-                R_canonical_world = SO3.from_z_radians(
-                    -torch.arctan2(forward_world[..., 1], forward_world[..., 0])
-                ).wxyz
-                assert R_canonical_world.shape == (batch, time, 4)
-                cond_parts.append(
-                    (SO3(R_canonical_world) @ SO3(R_world_cpf))
-                    .as_matrix()
-                    .reshape((batch, time, 9)),
-                )
-            cond = torch.cat(cond_parts, dim=-1)
-        elif self.cond_param == "canonicalized":
-            # Align the first timestep.
-            # Put poses so start is at origin, facing forward.
-            R_world_cpf = SE3(T_world_cpf[:, 0:1, :]).rotation().wxyz
-            forward_cpf = R_world_cpf.new_tensor([0.0, 0.0, 1.0])
-            forward_world = SO3(R_world_cpf) @ forward_cpf
-            assert forward_world.shape == (batch, 1, 3)
-            R_canonical_world = SO3.from_z_radians(
-                -torch.arctan2(forward_world[..., 1], forward_world[..., 0])
-            ).wxyz
-            assert R_canonical_world.shape == (batch, 1, 4)
-
-            R_canonical_cpf = SO3(R_canonical_world) @ SE3(T_world_cpf).rotation()
-            t_canonical_cpf = SO3(R_canonical_world) @ SE3(T_world_cpf).translation()
-            t_canonical_cpf = t_canonical_cpf - t_canonical_cpf[:, 0:1, :]
-
-            cond = (
-                SE3.from_rotation_and_translation(R_canonical_cpf, t_canonical_cpf)
-                .as_matrix()[..., :3, :4]
-                .reshape((batch, time, 12))
-            )
-        elif self.cond_param == "absolute":
-            cond = SE3(T_world_cpf).as_matrix()[..., :3, :4].reshape((batch, time, 12))
-        elif self.cond_param == "absrel":
-            cond = torch.concatenate(
-                [
-                    SE3(T_world_cpf)
-                    .as_matrix()[..., :3, :4]
-                    .reshape((batch, time, 12)),
-                    SE3(T_cpf_tm1_cpf_t)
-                    .as_matrix()[..., :3, :4]
-                    .reshape((batch, time, 12)),
-                ],
-                dim=-1,
-            )
-        elif self.cond_param == "absrel_global_deltas":
-            cond = torch.concatenate(
-                [
-                    SE3(T_world_cpf)
-                    .as_matrix()[..., :3, :4]
-                    .reshape((batch, time, 12)),
-                    SE3(T_cpf_tm1_cpf_t)
-                    .rotation()
-                    .as_matrix()
-                    .reshape((batch, time, 9)),
-                    (
-                        SE3(T_world_cpf).rotation()
-                        @ SE3(T_cpf_tm1_cpf_t).inverse().translation()
-                    ).reshape((batch, time, 3)),
-                ],
-                dim=-1,
-            )
+        if self.joint_cond_mode == "absolute":
+            # Concatenate positions with their index embeddings
+            cond = torch.cat([visible_joints, index_embeddings], dim=-1)
+            
+        elif self.joint_cond_mode == "canonicalized":
+            # Align to first frame using visible joints
+            first_frame = visible_joints[:, 0:1]
+            center = first_frame.mean(dim=1, keepdim=True)
+            # Use the first visible joint as reference for forward direction
+            forward = first_frame[:, 0] - center.squeeze(1)
+            R = SO3.from_z_radians(-torch.arctan2(forward[..., 1], forward[..., 0])).as_matrix()
+            
+            # Apply canonicalization to visible joints
+            canonical_joints = (visible_joints - center) @ R.transpose(-1, -2)
+            cond = torch.cat([canonical_joints, index_embeddings], dim=-1)
+            
+        elif self.joint_cond_mode == "absrel":
+            # Both absolute positions and frame-to-frame motion for visible joints
+            abs_pos = visible_joints
+            rel_pos = torch.zeros_like(visible_joints)
+            rel_pos[:, 1:] = visible_joints[:, 1:] - visible_joints[:, :-1]
+            
+            cond = torch.cat([
+                abs_pos,
+                rel_pos,
+                index_embeddings.repeat(1, 1, 2)  # Repeat embeddings for abs and rel
+            ], dim=-1)
+            
+        elif self.joint_cond_mode == "absrel_global_deltas":
+            # Compute global transformation using visible joints
+            first_frame = visible_joints[:, 0:1]
+            current_frames = visible_joints
+            
+            # Compute relative transformation using visible joints
+            center_first = first_frame.mean(dim=1, keepdim=True)
+            center_current = current_frames.mean(dim=1, keepdim=True)
+            
+            # Estimate rotation using Kabsch algorithm on visible joints
+            H = (first_frame - center_first).transpose(-2, -1) @ (current_frames - center_current)
+            U, _, Vh = torch.linalg.svd(H)
+            R = Vh.transpose(-2, -1) @ U.transpose(-2, -1)
+            t = center_current - (R @ center_first.transpose(-2, -1)).transpose(-2, -1)
+            
+            cond = torch.cat([
+                visible_joints,  # Positions of visible joints
+                index_embeddings,  # Joint index embeddings
+                R.reshape(batch, time, 9),  # Global rotation
+                t.reshape(batch, time, 3),  # Global translation
+            ], dim=-1)
+        
         else:
-            assert_never(self.cond_param)
+            assert_never(self.joint_cond_mode)
 
-        # Condition on hand poses as well.
-        # We didn't use this for the paper.
-        if self.include_hand_positions_cond:
-            if hand_positions_wrt_cpf is None:
-                logger.warning(
-                    "Model is looking for hand conditioning but none was provided. Passing in zeros."
-                )
-                hand_positions_wrt_cpf = torch.zeros(
-                    (batch, time, 6), device=T_world_cpf.device
-                )
-            assert hand_positions_wrt_cpf.shape == (batch, time, 6)
-            cond = torch.cat([cond, hand_positions_wrt_cpf], dim=-1)
-
+        # Apply Fourier encoding
         cond = fourier_encode(cond, freqs=self.fourier_enc_freqs)
         assert cond.shape == (batch, time, self.d_cond)
         return cond
@@ -421,18 +363,13 @@ class EgoDenoiser(nn.Module):
         x_t_packed: Float[Tensor, "batch time state_dim"],
         t: Float[Tensor, "batch"],
         *,
-        T_world_cpf: Float[Tensor, "batch time 7"],
-        T_cpf_tm1_cpf_t: Float[Tensor, "batch time 7"],
         project_output_rotmats: bool,
-        # Observed hand positions, relative to the CPF.
-        hand_positions_wrt_cpf: Float[Tensor, "batch time 6"] | None,
-        # Attention mask for using shorter sequences.
+        visible_joints: Float[Tensor, "batch time num_visible_joints 3"],
+        visible_joints_mask: Bool[Tensor, "batch time 21"],
         mask: Bool[Tensor, "batch time"] | None,
-        # Mask for when to drop out / keep conditioning information.
         cond_dropout_keep_mask: Bool[Tensor, "batch"] | None = None,
     ) -> Float[Tensor, "batch time state_dim"]:
-        """Predict a denoised trajectory. Note that `t` refers to a noise
-        level, not a timestep."""
+        """Forward pass with MAE-style masking."""
         config = self.config
 
         x_t = EgoDenoiseTraj.unpack(x_t_packed, include_hands=self.config.include_hands)
@@ -457,11 +394,10 @@ class EgoDenoiser(nn.Module):
         noise_emb = self.noise_emb(t - 1)
         assert noise_emb.shape == (batch, config.d_noise_emb)
 
-        # Prepare conditioning information.
+        # Create conditioning from visible joints only
         cond = config.make_cond(
-            T_cpf_tm1_cpf_t,
-            T_world_cpf=T_world_cpf,
-            hand_positions_wrt_cpf=hand_positions_wrt_cpf,
+            visible_joints=visible_joints,
+            visible_joints_mask=visible_joints_mask,
         )
 
         # Randomly drop out conditioning information; this serves as a
