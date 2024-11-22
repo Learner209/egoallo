@@ -20,6 +20,7 @@ from .transforms import SE3
 from .data.dataclass import EgoTrainingData
 from .network import EgoDenoiseTraj
 from . import transforms as tf
+from . import fncsmpl
 
 
 def load_denoiser(checkpoint_dir: Path) -> EgoDenoiser:
@@ -180,7 +181,7 @@ def create_masked_training_data(
         mask_ratio: Ratio of joints to mask (default: 0.3)
     """
     device = posed.local_quats.device
-    timesteps = posed.local_quats.shape[0]
+    batch_size, timesteps = posed.local_quats.shape[:2]
     num_joints = 21  # Number of body joints
     
     # Get joint positions in world frame
@@ -188,12 +189,12 @@ def create_masked_training_data(
     
     # Generate random mask for sequence
     num_masked = int(num_joints * mask_ratio)
-    visible_joints_mask = torch.ones((timesteps, num_joints), dtype=torch.bool, device=device)
+    visible_joints_mask = torch.ones((batch_size, timesteps, num_joints), dtype=torch.bool, device=device)
     
     # Randomly select joints to mask
     rand_indices = torch.randperm(num_joints)
     masked_indices = rand_indices[:num_masked]
-    visible_joints_mask[:, masked_indices] = False
+    visible_joints_mask[:, :, masked_indices] = False
     
     # Get joints in CPF frame
     joints_wrt_cpf = (
@@ -202,7 +203,7 @@ def create_masked_training_data(
     )
     
     # Create visible_joints tensor containing only unmasked joints
-    visible_joints = joints_wrt_world[visible_joints_mask].reshape(timesteps, num_joints - num_masked, 3)
+    visible_joints = joints_wrt_world[visible_joints_mask].reshape(batch_size, timesteps, num_joints - num_masked, 3)
 
     return EgoTrainingData(
         T_world_root=tf.SE3(posed.T_world_root).parameters(),
@@ -216,7 +217,7 @@ def create_masked_training_data(
             tf.SE3(Ts_world_cpf[:-1, :]).inverse() @ tf.SE3(Ts_world_cpf[1:, :])
         ).parameters(),
         joints_wrt_cpf=joints_wrt_cpf,
-        mask=torch.ones((timesteps,), dtype=torch.bool, device=device),
+        mask=torch.ones((batch_size, timesteps), dtype=torch.bool, device=device),
         hand_quats=posed.local_quats[..., 21:51, :],
         visible_joints_mask=visible_joints_mask,
         visible_joints=visible_joints

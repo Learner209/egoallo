@@ -28,7 +28,7 @@ from egoallo.vis_helpers import visualize_traj_and_hand_detections
 
 @dataclasses.dataclass
 class Args:
-    traj_root: Path
+    traj_root: Path = Path("/mnt/homes/minghao/src/robotflow/egoallo/egoallo_example_trajectories/coffeemachine")
     """Search directory for trajectories. This should generally be laid out as something like:
 
     traj_dir/
@@ -59,7 +59,7 @@ class Args:
     """Whether to apply guidance optimizer after diffusion sampling."""
     save_traj: bool = True
     """Whether to save the output trajectory, which will be placed under `traj_dir/egoallo_outputs/some_name.npz`."""
-    visualize_traj: bool = False
+    visualize_traj: bool = True
     """Whether to visualize the trajectory after sampling."""
 
 
