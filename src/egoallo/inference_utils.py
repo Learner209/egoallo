@@ -17,6 +17,10 @@ from torch import Tensor
 from .network import EgoDenoiser, EgoDenoiserConfig
 from .tensor_dataclass import TensorDataclass
 from .transforms import SE3
+from .data.dataclass import EgoTrainingData
+from .network import EgoDenoiseTraj
+from . import transforms as tf
+from . import fncsmpl
 
 
 def load_denoiser(checkpoint_dir: Path) -> EgoDenoiser:
@@ -158,3 +162,63 @@ class InferenceInputTransforms(TensorDataclass):
             .to(torch.float32),
             pose_timesteps=tuple(out_timestamps_secs),
         )
+
+
+def create_masked_training_data(
+    posed: fncsmpl.SmplhShapedAndPosed,
+    Ts_world_cpf: Float[Tensor, "timesteps 7"],
+    contacts: Float[Tensor, "timesteps 21"],
+    betas: Float[Tensor, "1 16"],
+    mask_ratio: float = 0.3,
+) -> EgoTrainingData:
+    """Create EgoTrainingData with MAE-style masking from posed SMPL-H model.
+    
+    Args:
+        posed: Posed SMPL-H model
+        Ts_world_cpf: World to CPF transforms
+        contacts: Contact states for each joint
+        betas: Body shape parameters
+        mask_ratio: Ratio of joints to mask (default: 0.3)
+    """
+    device = posed.local_quats.device
+    batch_size, timesteps = posed.local_quats.shape[:2]
+    num_joints = 21  # Number of body joints
+    
+    # Get joint positions in world frame
+    joints_wrt_world = posed.Ts_world_joint[..., :num_joints, 4:7]
+    
+    # Generate random mask for sequence
+    num_masked = int(num_joints * mask_ratio)
+    visible_joints_mask = torch.ones((batch_size, timesteps, num_joints), dtype=torch.bool, device=device)
+    
+    # Randomly select joints to mask
+    rand_indices = torch.randperm(num_joints)
+    masked_indices = rand_indices[:num_masked]
+    visible_joints_mask[:, :, masked_indices] = False
+    
+    # Get joints in CPF frame
+    joints_wrt_cpf = (
+        tf.SE3(Ts_world_cpf[..., None, :]).inverse() 
+        @ joints_wrt_world
+    )
+    
+    # Create visible_joints tensor containing only unmasked joints
+    visible_joints = joints_wrt_world[visible_joints_mask].reshape(batch_size, timesteps, num_joints - num_masked, 3)
+
+    return EgoTrainingData(
+        T_world_root=tf.SE3(posed.T_world_root).parameters(),
+        contacts=contacts,
+        betas=betas,
+        joints_wrt_world=joints_wrt_world,
+        body_quats=posed.local_quats[..., :21, :],
+        T_world_cpf=Ts_world_cpf,
+        height_from_floor=Ts_world_cpf[..., 6:7],
+        T_cpf_tm1_cpf_t=(
+            tf.SE3(Ts_world_cpf[:-1, :]).inverse() @ tf.SE3(Ts_world_cpf[1:, :])
+        ).parameters(),
+        joints_wrt_cpf=joints_wrt_cpf,
+        mask=torch.ones((batch_size, timesteps), dtype=torch.bool, device=device),
+        hand_quats=posed.local_quats[..., 21:51, :],
+        visible_joints_mask=visible_joints_mask,
+        visible_joints=visible_joints
+    )
