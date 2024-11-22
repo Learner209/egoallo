@@ -193,8 +193,8 @@ class EgoDenoiserConfig:
         directly.
     """
 
-    include_hand_positions_cond: bool = False
-    """Whether to include hand positions in the conditioning information."""
+    include_hands: bool = False
+    """Whether to include hand joints (+15 per hand) in the denoised state."""
 
     @cached_property
     def d_cond(self) -> int:
@@ -221,7 +221,7 @@ class EgoDenoiserConfig:
 
         # Add two 3D positions to the conditioning dimension if we're including
         # hand conditioning.
-        if self.include_hand_positions_cond:
+        if self.include_hands:
             d_cond = d_cond + 6
 
         d_cond = d_cond + d_cond * self.fourier_enc_freqs * 2  # Fourier encoding.
@@ -318,7 +318,7 @@ class EgoDenoiserConfig:
 
         # Condition on hand poses as well.
         # We didn't use this for the paper.
-        if self.include_hand_positions_cond:
+        if self.include_hands:
             if hand_positions_wrt_cpf is None:
                 logger.warning(
                     "Model is looking for hand conditioning but none was provided. Passing in zeros."

@@ -198,7 +198,7 @@ class TrainingLossComputer:
         )
 
         hand_positions_wrt_cpf: Tensor | None = None
-        if unwrapped_model.config.include_hand_positions_cond:
+        if unwrapped_model.config.include_hands:
             # Joints 19 and 20 are the hand positions.
             hand_positions_wrt_cpf = train_batch.joints_wrt_cpf[:, :, 19:21, :].reshape(
                 (batch, time, 6)
