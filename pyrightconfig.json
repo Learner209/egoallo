@@ -1,0 +1,23 @@
+{
+    "exclude": [
+        "**/node_modules",
+        "**/__pycache__",
+        "**/.git",
+        "**/dist",
+        "**/build",
+        "**/venv",
+        "**/env",
+        "**/assets",
+        "**/data",
+        "**/datasets",
+        "**/third_party",
+        "**/docs",
+        "**/wandb",
+        "**/logs",
+        "**/myenv",
+        "**/test",
+        "**/tests",
+        "**/notebooks"
+
+    ]
+}

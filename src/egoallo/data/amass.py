@@ -76,7 +76,7 @@ class EgoAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         min_subseq_len: int | None = None,
         random_variable_len_proportion: float = 0.3,
         random_variable_len_min: int = 16,
-        config: EgoDenoiserConfig,
+        config: EgoDenoiserConfig = EgoDenoiserConfig(),
     ) -> None:
         datasets = []
         for split in set(splits):
@@ -188,8 +188,8 @@ class EgoAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         kwargs: dict[str, Any] = {}
         for k in npz_group.keys():
             # Possibly saved in the hdf5 file, but we don't need/want to read them.
-            if k == "joints_wrt_world":
-                continue
+            # if k == "joints_wrt_world":
+            #     continue
 
             v = npz_group[k]
             assert isinstance(k, str)
@@ -222,31 +222,29 @@ class EgoAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
             kwargs["hand_quats"] = None
 
         # Generate MAE-style masking
-        batch_size = kwargs["joints_3d"].shape[0]
         num_joints = 21
-        device = kwargs["joints_3d"].device
+        device = kwargs["joints_wrt_world"].device
 
-        # Generate random mask for each sequence in batch
+        # Generate random mask for sequence
         num_masked = int(num_joints * self.config.mask_ratio)
-        visible_joints_mask = torch.ones((batch_size, self._subseq_len, num_joints), dtype=torch.bool, device=device)
+        visible_joints_mask = torch.ones((self._subseq_len, num_joints), dtype=torch.bool, device=device)
         
-        # For each sequence in the batch
-        for b in range(batch_size):
-            # Randomly select joints to mask for this sequence
-            rand_indices = torch.randperm(num_joints)
-            masked_indices = rand_indices[:num_masked]
-            visible_joints_mask[b, :, masked_indices] = False
+        # * Randomly select joints to mask, all data within a timestep is masked together, across batch is different.
+        rand_indices = torch.randperm(num_joints)
+        masked_indices = rand_indices[:num_masked]
+        visible_joints_mask[:, masked_indices] = False
 
-        # Get original joints_3d
-        joints_3d = kwargs["joints_3d"]  # shape: [batch, time, 21, 3]
+        # Get original joints_wrt_world
+        joints_wrt_world = kwargs["joints_wrt_world"]  # shape: [time, 21, 3]
+        assert joints_wrt_world.shape == (self._subseq_len, num_joints, 3)
         
         # Create visible_joints tensor containing only unmasked joints
-        visible_joints = joints_3d[visible_joints_mask].reshape(batch_size, -1, num_joints - num_masked, 3)
+        visible_joints = joints_wrt_world[visible_joints_mask].reshape(self._subseq_len, num_joints - num_masked, 3)
 
         # Update kwargs with new MAE-style masking tensors
         kwargs["visible_joints"] = visible_joints
         kwargs["visible_joints_mask"] = visible_joints_mask
-        kwargs["joints_3d"] = joints_3d  # Keep original joints for computing loss
+        kwargs["joints_wrt_world"] = joints_wrt_world  # Keep original joints for computing loss
 
         # Close the file if we opened it.
         if hdf5_file is not None:

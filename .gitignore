@@ -18,14 +18,16 @@ outputs/
 experiments/
 blendify_assets/
 wandb/
+/assets
+/datasets
+/data
+/wandb
 
 test_results/
 logs/
 
-datasets/
 myenv/
 
-/data
 egoallo_checkpoint_*
 egoallo_example_*
 

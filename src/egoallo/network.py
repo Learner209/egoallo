@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import cache, cached_property
+from math import ceil
 from typing import Literal, assert_never, Optional
 
 import numpy as np
@@ -41,8 +42,6 @@ class EgoDenoiseTraj(TensorDataclass):
     hand_rotmats: Float[Tensor, "*#batch timesteps 30 3 3"] | None
     """Local orientations for each body joint."""
 
-    visible_joints_mask: Bool[Tensor, "*#batch timesteps 21"]
-    """Mask indicating which joints were visible during training"""
 
     @staticmethod
     def get_packed_dim(include_hands: bool) -> int:
@@ -72,7 +71,7 @@ class EgoDenoiseTraj(TensorDataclass):
             [
                 x.reshape((*batch, time, -1))
                 for x in vars(self).values()
-                if x is not None and x is not self.visible_joints_mask  # Don't pack the mask
+                if x is not None
             ],
             dim=-1,
         )
@@ -83,7 +82,6 @@ class EgoDenoiseTraj(TensorDataclass):
         x: Float[Tensor, "*#batch timesteps d_state"],
         include_hands: bool,
         project_rotmats: bool = False,
-        visible_joints_mask: Optional[torch.Tensor] = None,
     ) -> EgoDenoiseTraj:
         """Unpack trajectory from a single flattened vector.
 
@@ -118,7 +116,6 @@ class EgoDenoiseTraj(TensorDataclass):
             body_rotmats=body_rotmats,
             contacts=contacts,
             hand_rotmats=hand_rotmats,
-            visible_joints_mask=visible_joints_mask,
         )
 
 
@@ -148,13 +145,13 @@ class EgoDenoiserConfig:
     )
 
     # Joint position conditioning settings
-    joint_cond_mode: Literal["absolute", "canonicalized", "absrel", "absrel_global_deltas"] = "absrel_global_deltas"
+    joint_cond_mode: Literal["absolute", "canonicalized", "absrel", "absrel_global_deltas"] = "absolute"
 
     @cached_property
     def d_cond(self) -> int:
         """Dimensionality of conditioning vector."""
         # Calculate number of visible joints based on mask ratio
-        num_visible_joints = int((1 - self.mask_ratio) * 21)  # 21 total joints
+        num_visible_joints = ceil((1 - self.mask_ratio) * 21)  # 21 total joints
         # Base dimension for joint position (3) + joint index embedding (16)
         d_per_joint = 3 + 16
 
@@ -187,11 +184,17 @@ class EgoDenoiserConfig:
         
         # Create learnable joint index embeddings
         joint_embeddings = nn.Embedding(21, 16).to(device)  # 21 joints, 16-dim embedding
-        index_embeddings = joint_embeddings(visible_indices)
+        
+        # visible_joints shape is (batch, time, num_visible_joints, 3)
+        # visible_indices shape is (num_visible_total,) where num_visible_total = batch * time * num_visible_per_frame
+        # Need to reshape visible_indices to match visible_joints
+        num_visible_per_frame = visible_joints.shape[2]
+        index_embeddings = joint_embeddings(visible_indices).reshape(batch, time, num_visible_per_frame, 16)
 
         if self.joint_cond_mode == "absolute":
             # Concatenate positions with their index embeddings
-            cond = torch.cat([visible_joints, index_embeddings], dim=-1)
+            # Now both have shape (batch, time, num_visible_joints, D) where D is 3 or 16
+            cond = torch.cat([visible_joints, index_embeddings], dim=-1).reshape(batch, time, -1) # shape: (batch, time, num_visible_joints * D)
             
         elif self.joint_cond_mode == "canonicalized":
             # Align to first frame using visible joints
@@ -227,6 +230,7 @@ class EgoDenoiserConfig:
             center_current = current_frames.mean(dim=1, keepdim=True)
             
             # Estimate rotation using Kabsch algorithm on visible joints
+            # TODO: check whether this makes sense for global deltas
             H = (first_frame - center_first).transpose(-2, -1) @ (current_frames - center_current)
             U, _, Vh = torch.linalg.svd(H)
             R = Vh.transpose(-2, -1) @ U.transpose(-2, -1)
@@ -236,7 +240,7 @@ class EgoDenoiserConfig:
                 visible_joints,  # Positions of visible joints
                 index_embeddings,  # Joint index embeddings
                 R.reshape(batch, time, 9),  # Global rotation
-                t.reshape(batch, time, 3),  # Global translation
+                t.reshape(batch, time, -1),  # Global translation
             ], dim=-1)
         
         else:
@@ -512,15 +516,15 @@ def fourier_encode(
 ) -> Float[Tensor, "*#batch channels+2*freqs*channels"]:
     """Apply Fourier encoding to a tensor."""
     *batch_axes, x_dim = x.shape
-    coeffs = 2.0 ** torch.arange(freqs, device=x.device)
-    scaled = (x[..., None] * coeffs).reshape((*batch_axes, x_dim * freqs))
+    coeffs = 2.0 ** torch.arange(freqs, device=x.device) # shape: (freqs,)
+    scaled = (x[..., None] * coeffs).reshape((*batch_axes, x_dim * freqs)) # shape: (*batch_axes, x_dim * freqs)
     return torch.cat(
         [
             x,
             torch.sin(torch.cat([scaled, scaled + torch.pi / 2.0], dim=-1)),
         ],
         dim=-1,
-    )
+    ) # shape: (*batch_axes, x_dim + 2 * freqs * x_dim)
 
 
 @dataclass(frozen=True)

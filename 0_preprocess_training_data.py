@@ -12,17 +12,22 @@ import tyro
 
 from egoallo import fncsmpl
 from egoallo.data.amass import EgoTrainingData
+from egoallo import training_utils
+import faulthandler
+
+# faulthandler.enable()
 
 
 def main(
-    smplh_npz_path: Path = Path("./data/smplh/neutral/model.npz"),
-    data_npz_dir: Path = Path("./data/processed_30fps_no_skating/"),
-    output_file: Path = Path("./data/egoalgo_no_skating_dataset.hdf5"),
-    output_list_file: Path = Path("./data/egoalgo_no_skating_dataset_files.txt"),
+    smplh_npz_path: Path = Path("./assets/smpl_based_model/smplh/neutral/model.npz"),
+    data_npz_dir: Path = Path("data/amass.bak/processed"),
+    output_file: Path = Path("data/amass.bak/processed.hdf5"),
+    output_list_file: Path = Path("data/amass.bak/processed.txt"),
     include_hands: bool = True,
 ) -> None:
     body_model = fncsmpl.SmplhModel.load(smplh_npz_path)
 
+    # training_utils.ipdb_safety_net()
     assert torch.cuda.is_available()
 
     task_queue = queue.Queue[Path]()
@@ -49,8 +54,8 @@ def main(
                 device_body_model, npz_path, include_hands=include_hands
             )
 
-            assert "neutral" in str(npz_path)
-            group_name = str(npz_path).rpartition("neutral/")[2]
+            assert "processed" in str(npz_path), npz_path
+            group_name = str(npz_path).rpartition("processed/")[2]
             print(f"Writing to group {group_name} on {device_idx}...")
             group = output_hdf5.create_group(group_name)
             file_list.append(group_name)
@@ -60,9 +65,11 @@ def main(
                 # load from the npz file!
                 if k == "mask":
                     continue
+                if v is None:
+                    continue
 
                 # Chunk into 32 timesteps at a time.
-                assert v.dtype == torch.float32
+                assert v.dtype == torch.float32, f"{k} {v.dtype}"
                 if v.shape[0] == train_data.T_world_cpf.shape[0]:
                     chunks = (min(32, v.shape[0]),) + v.shape[1:]
                 else:
@@ -77,13 +84,17 @@ def main(
             )
 
     workers = [
-        threading.Thread(target=worker, args=(i,))
-        for i in range(torch.cuda.device_count())
+        threading.Thread(target=worker, args=(0,))
+        # for i in range(torch.cuda.device_count())
+        for i in range(25)
     ]
     for w in workers:
         w.start()
     for w in workers:
         w.join()
+
+    # Single-threaded version
+    # worker(0)
     output_list_file.write_text("\n".join(file_list))
 
 

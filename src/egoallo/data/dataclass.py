@@ -30,11 +30,11 @@ class EgoTrainingData(TensorDataclass):
     """Body shape parameters."""
 
     # Excluded because not needed.
-    # joints_wrt_world: Float[Tensor, "*#batch timesteps 21 3"]
-    # """Joint positions relative to the world frame."""
-    @property
-    def joints_wrt_world(self) -> Tensor:
-        return tf.SE3(self.T_world_cpf[..., None, :]) @ self.joints_wrt_cpf
+    joints_wrt_world: Float[Tensor, "*#batch timesteps 21 3"]
+    """Joint positions relative to the world frame."""
+    # @property
+    # def joints_wrt_world(self) -> Tensor:
+    #     return tf.SE3(self.T_world_cpf[..., None, :]) @ self.joints_wrt_cpf
 
     body_quats: Float[Tensor, "*#batch timesteps 21 4"]
     """Local orientations for each body joint."""
@@ -58,18 +58,17 @@ class EgoTrainingData(TensorDataclass):
     hand_quats: Float[Tensor, "*#batch timesteps 30 4"] | None
     """Local orientations for each hand joint."""
 
-    visible_joints_mask: Bool[Tensor, "*#batch timesteps 21"]
+    visible_joints_mask: Bool[Tensor, "*#batch timesteps 21"] | None
     """Boolean mask indicating which joints are visible (not masked)"""
-    
-    joints_3d: Float[Tensor, "*#batch timesteps 21 3"]
-    """3D joint positions in world coordinates"""
 
+    visible_joints: Float[Tensor, "*#batch timesteps 21 3"] | None
+    """Joint positions relative to the central pupil frame for visible joints."""
+    
     @staticmethod
     def load_from_npz(
         body_model: fncsmpl.SmplhModel,
         path: Path,
         include_hands: bool,
-        config: EgoDenoiserConfig,
     ) -> EgoTrainingData:
         """Load a single trajectory from a (processed_30fps) npz file."""
         raw_fields = {
@@ -95,7 +94,8 @@ class EgoTrainingData(TensorDataclass):
         hand_quats = tf.SO3.exp(raw_fields["pose_hand"].reshape(timesteps, 30, 3)).wxyz
 
         device = body_model.weights.device
-        shaped = body_model.with_shape(raw_fields["betas"][0:1, :].to(device))
+        # import ipdb; ipdb.set_trace()
+        shaped = body_model.with_shape(raw_fields["betas"].unsqueeze(0).to(device))
 
         # Batch the SMPL body model operations, this can be pretty memory-intensive...
         posed = shaped.with_pose_decomposed(
@@ -107,23 +107,13 @@ class EgoTrainingData(TensorDataclass):
         ).parameters()
         assert T_world_cpf.shape == (timesteps, 7)
 
-        # Construct the training data elements that we want to keep.
-        batch_size = raw_fields["joints"].shape[0] - 1  # -1 for removing first frame
-        num_joints = 21
-        
-        # Generate random mask
-        num_masked = int(num_joints * config.mask_ratio)
-        rand_indices = torch.randperm(num_joints)
-        mask = torch.ones((batch_size, num_joints), dtype=torch.bool)
-        mask[:, rand_indices[:num_masked]] = False
-
         return EgoTrainingData(
             T_world_root=T_world_root[1:].cpu(),
             contacts=raw_fields["contacts"][1:, 1:].cpu(),  # Root is no longer a joint.
-            betas=raw_fields["betas"][0:1, :].cpu(),
-            # joints_wrt_world=raw_fields["joints"][
-            #     1:, 1:
-            # ].cpu(),  # Root is no longer a joint.
+            betas=raw_fields["betas"].unsqueeze(0).cpu(),
+            joints_wrt_world=raw_fields["joints"][
+                1:, 1:
+            ].cpu(),  # Root is no longer a joint.
             body_quats=body_quats[1:].cpu(),
             # CPF frame stuff.
             T_world_cpf=T_world_cpf[1:].cpu(),
@@ -141,8 +131,8 @@ class EgoTrainingData(TensorDataclass):
             ).cpu(),
             mask=torch.ones((timesteps - 1,), dtype=torch.bool),
             hand_quats=hand_quats[1:].cpu() if include_hands else None,
-            visible_joints_mask=mask.cpu(),
-            joints_3d=raw_fields["joints"][1:, 1:].cpu(),  # Skip first frame and root joint
+            visible_joints_mask=None,
+            visible_joints=None,
         )
 
 

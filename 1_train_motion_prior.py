@@ -87,7 +87,7 @@ def run_training(
 
     # Initialize experiment.
     if accelerator.is_main_process:
-        training_utils.pdb_safety_net()
+        training_utils.ipdb_safety_net()
 
         # Save various things that might be useful.
         experiment_dir.mkdir(exist_ok=True, parents=True)

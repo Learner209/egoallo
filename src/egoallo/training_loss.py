@@ -108,7 +108,7 @@ class TrainingLossComputer:
         )
 
         hand_positions_wrt_cpf: Tensor | None = None
-        if unwrapped_model.config.include_hand_positions_cond:
+        if unwrapped_model.config.include_hands:
             # Joints 19 and 20 are the hand positions.
             hand_positions_wrt_cpf = train_batch.joints_wrt_cpf[:, :, 19:21, :].reshape(
                 (batch, time, 6)
@@ -131,9 +131,8 @@ class TrainingLossComputer:
         x_0_packed_pred = model.forward(
             x_t_packed=x_t_packed,
             t=t,
-            T_world_cpf=train_batch.T_world_cpf,
-            T_cpf_tm1_cpf_t=train_batch.T_cpf_tm1_cpf_t,
-            hand_positions_wrt_cpf=hand_positions_wrt_cpf,
+            visible_joints=train_batch.visible_joints,
+            visible_joints_mask=train_batch.visible_joints_mask,
             project_output_rotmats=False,
             mask=train_batch.mask,
             cond_dropout_keep_mask=torch.rand((batch,), device=device)

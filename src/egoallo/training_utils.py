@@ -1,7 +1,7 @@
 """Utilities for writing training scripts."""
 
 import dataclasses
-import pdb
+import ipdb
 import signal
 import subprocess
 import sys
@@ -51,7 +51,7 @@ def flattened_hparam_dict_from_dataclass(
         return {f"{prefix}.{k}": v for k, v in output.items()}
 
 
-def pdb_safety_net():
+def ipdb_safety_net():
     """Attaches a "safety net" for unexpected errors in a Python script.
 
     When called, PDB will be automatically opened when either (a) the user hits Ctrl+C
@@ -61,14 +61,14 @@ def pdb_safety_net():
 
     # Open PDB on Ctrl+C
     def handler(sig, frame):
-        pdb.set_trace()
+        ipdb.set_trace()
 
     signal.signal(signal.SIGINT, handler)
 
     # Open PDB when we encounter an uncaught exception
     def excepthook(type_, value, traceback):  # pragma: no cover (impossible to test)
         tb.print_exception(type_, value, traceback, limit=100)
-        pdb.post_mortem(traceback)
+        ipdb.post_mortem(traceback)
 
     sys.excepthook = excepthook
 
