@@ -59,11 +59,11 @@ class EgoTrainingData(TensorDataclass):
     """Body shape parameters."""
 
     # Excluded because not needed.
-    # joints_wrt_world: Float[Tensor, "*#batch timesteps 21 3"]
-    # """Joint positions relative to the world frame."""
-    @property
-    def joints_wrt_world(self) -> Tensor:
-        return tf.SE3(self.T_world_cpf[..., None, :]) @ self.joints_wrt_cpf
+    joints_wrt_world: Float[Tensor, "*#batch timesteps 21 3"]
+    """Joint positions relative to the world frame."""
+    # @property
+    # def joints_wrt_world(self) -> Tensor:
+    #     return tf.SE3(self.T_world_cpf[..., None, :]) @ self.joints_wrt_cpf
 
     body_quats: Float[Tensor, "*#batch timesteps 21 4"]
     """Local orientations for each body joint."""
@@ -153,9 +153,9 @@ class EgoTrainingData(TensorDataclass):
             T_world_root=T_world_root[1:].cpu(),
             contacts=raw_fields["contacts"][1:, 1:].cpu(),  # Root is no longer a joint.
             betas=betas.cpu(),
-            # joints_wrt_world=raw_fields["joints"][
-            #     1:, 1:
-            # ].cpu(),  # Root is no longer a joint.
+            joints_wrt_world=raw_fields["joints"][
+                1:, 1:
+            ].cpu(),  # Root is no longer a joint.
             body_quats=body_quats[1:].cpu(),
             # CPF frame stuff.
             T_world_cpf=T_world_cpf[1:].cpu(),
