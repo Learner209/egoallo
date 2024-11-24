@@ -24,8 +24,8 @@ class TrainingLossConfig:
             "betas": 0.1,
             "body_rotmats": 1.0,
             "contacts": 0.1,
-            # We don't have many hands in the AMASS dataset...
             "hand_rotmats": 0.01,
+            "T_world_root": 1.0,
         }.copy
     )
     weight_loss_by_t: Literal["emulate_eps_pred"] = "emulate_eps_pred"
@@ -56,6 +56,29 @@ class TrainingLossComputer:
         padding = 0.01
         self.weight_t = weight_t / weight_t[1] * (1.0 - padding) + padding
 
+    def compute_geodesic_distance(self, R1: Float[Tensor, "... 3 3"], R2: Float[Tensor, "... 3 3"]) -> Float[Tensor, "..."]:
+        """Compute geodesic distance between rotation matrices.
+        
+        Args:
+            R1: First rotation matrix
+            R2: Second rotation matrix
+            
+        Returns:
+            Geodesic distance in radians
+        """
+        # Compute R1 @ R2.T
+        R_diff = R1 @ R2.transpose(-2, -1)
+        
+        # Get trace of the difference matrix
+        trace = R_diff.diagonal(dim1=-2, dim2=-1).sum(-1)
+        
+        # Clamp for numerical stability
+        cos_theta = (trace - 1) / 2
+        cos_theta = torch.clamp(cos_theta, -1 + 1e-7, 1 - 1e-7)
+        
+        # Return geodesic distance
+        return torch.acos(cos_theta)
+
     def compute_denoising_loss(
         self,
         model: network.EgoDenoiser | DistributedDataParallel | OptimizedModule,
@@ -78,6 +101,7 @@ class TrainingLossComputer:
                 body_rotmats=SO3(train_batch.body_quats).as_matrix(),
                 contacts=train_batch.contacts,
                 hand_rotmats=SO3(train_batch.hand_quats).as_matrix(),
+                T_world_root=train_batch.T_world_root,
             )
         else:
             x_0 = network.EgoDenoiseTraj(
@@ -85,6 +109,7 @@ class TrainingLossComputer:
                 body_rotmats=SO3(train_batch.body_quats).as_matrix(),
                 contacts=train_batch.contacts,
                 hand_rotmats=None,
+                T_world_root=train_batch.T_world_root,
             )
         x_0_packed = x_0.pack()
         device = x_0_packed.device
@@ -181,13 +206,16 @@ class TrainingLossComputer:
                 * x_0.betas.new_tensor(self.config.beta_coeff_weights),
             ),
             "body_rotmats": weight_and_mask_loss(
-                # (b, t, 21 * 3 * 3)
-                (x_0_pred.body_rotmats - x_0.body_rotmats).reshape(
-                    (batch, time, 21 * 3 * 3)
-                )
-                ** 2,
+                # Reshape inputs to (batch, time, 21, 3, 3)
+                self.compute_geodesic_distance(
+                    x_0_pred.body_rotmats.reshape(batch, time, 21, 3, 3),
+                    x_0.body_rotmats.reshape(batch, time, 21, 3, 3)
+                ).reshape(batch, time, 21)
             ),
             "contacts": weight_and_mask_loss((x_0_pred.contacts - x_0.contacts) ** 2),
+            "T_world_root": weight_and_mask_loss(
+                (x_0_pred.T_world_root - x_0.T_world_root) ** 2
+            ),
         }
 
         # Include hand objective.

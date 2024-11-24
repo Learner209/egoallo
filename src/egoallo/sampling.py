@@ -85,11 +85,12 @@ def run_sampling_with_stitching(
         (num_samples, Ts_world_cpf.shape[0] - 1, denoiser_network.get_d_state()),
         device=device,
     )
-    x_t_list = [
-        network.EgoDenoiseTraj.unpack(
-            x_t_packed, include_hands=denoiser_network.config.include_hands
-        )
-    ]
+    x_t = network.EgoDenoiseTraj.unpack(
+        x_t_packed, 
+        include_hands=denoiser_network.config.include_hands
+    )
+    x_t.T_world_root = Ts_world_cpf[1:]  # Use the transformed poses
+    x_t_list = [x_t]
     ts = quadratic_ts()
 
     seq_len = x_t_packed.shape[1]

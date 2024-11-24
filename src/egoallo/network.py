@@ -42,23 +42,34 @@ class EgoDenoiseTraj(TensorDataclass):
     hand_rotmats: Float[Tensor, "*#batch timesteps 30 3 3"] | None
     """Local orientations for each body joint."""
 
-    T_world_root: Float[Tensor, "*#batch timesteps 3"]
-    """Global translation of the root joint."""
+    T_world_root: Float[Tensor, "*#batch timesteps 7"]
+    """Global wxyz_xyz of the root joint."""
 
     @staticmethod
     def get_packed_dim(include_hands: bool) -> int:
-        packed_dim = 16 + 21 * 9 + 21
+        """Get dimension of packed state vector.
+        
+        Args:
+            include_hands: Whether to include hand rotations in packed dimension.
+        
+        Returns:
+            Total dimension of packed state vector.
+        """
+        # 16 (betas) + 21*9 (body_rotmats) + 21 (contacts) + 7 (T_world_root)
+        packed_dim = 16 + 21 * 9 + 21 + 7
         if include_hands:
-            packed_dim += 30 * 9
+            packed_dim += 30 * 9  # hand_rotmats
         return packed_dim
 
     def apply_to_body(self, body_model: SmplhModel) -> SmplhShapedAndPosed:
+        """Apply the trajectory data to a SMPL-H body model."""
         device = self.betas.device
         dtype = self.betas.dtype
         assert self.hand_rotmats is not None
+        
         shaped = body_model.with_shape(self.betas)
         posed = shaped.with_pose(
-            T_world_root=SE3.identity(device=device, dtype=dtype).parameters(),
+            T_world_root=self.T_world_root,  # Use the actual T_world_root
             local_quats=SO3.from_matrix(
                 torch.cat([self.body_rotmats, self.hand_rotmats], dim=-3)
             ).wxyz,
@@ -69,14 +80,19 @@ class EgoDenoiseTraj(TensorDataclass):
         """Pack trajectory into a single flattened vector."""
         (*batch, time, num_joints, _, _) = self.body_rotmats.shape
         assert num_joints == 21
-        return torch.cat(
-            [
-                x.reshape((*batch, time, -1))
-                for x in vars(self).values()
-                if x is not None
-            ],
-            dim=-1,
-        )
+        
+        # Create list of tensors to pack
+        tensors_to_pack = [
+            self.betas.reshape((*batch, time, -1)),
+            self.body_rotmats.reshape((*batch, time, -1)),
+            self.contacts.reshape((*batch, time, -1)),
+            self.T_world_root.reshape((*batch, time, -1))
+        ]
+        
+        if self.hand_rotmats is not None:
+            tensors_to_pack.append(self.hand_rotmats.reshape((*batch, time, -1)))
+        
+        return torch.cat(tensors_to_pack, dim=-1)
 
     @classmethod
     def unpack(
@@ -85,39 +101,34 @@ class EgoDenoiseTraj(TensorDataclass):
         include_hands: bool,
         project_rotmats: bool = False,
     ) -> EgoDenoiseTraj:
-        """Unpack trajectory from a single flattened vector.
-
-        Args:
-            x: Packed trajectory.
-            project_rotmats: If True, project the rotation matrices to SO(3) via SVD.
-        """
+        """Unpack trajectory from a single flattened vector."""
         (*batch, time, d_state) = x.shape
         assert d_state == cls.get_packed_dim(include_hands)
 
         if include_hands:
-            betas, body_rotmats_flat, contacts, hand_rotmats_flat = torch.split(
-                x, [16, 21 * 9, 21, 30 * 9], dim=-1
+            betas, body_rotmats_flat, contacts, T_world_root, hand_rotmats_flat = torch.split(
+                x, [16, 21 * 9, 21, 7, 30 * 9], dim=-1
             )
             body_rotmats = body_rotmats_flat.reshape((*batch, time, 21, 3, 3))
             hand_rotmats = hand_rotmats_flat.reshape((*batch, time, 30, 3, 3))
-            assert betas.shape == (*batch, time, 16)
         else:
-            betas, body_rotmats_flat, contacts = torch.split(
-                x, [16, 21 * 9, 21], dim=-1
+            betas, body_rotmats_flat, contacts, T_world_root = torch.split(
+                x, [16, 21 * 9, 21, 7], dim=-1
             )
             body_rotmats = body_rotmats_flat.reshape((*batch, time, 21, 3, 3))
             hand_rotmats = None
-            assert betas.shape == (*batch, time, 16)
 
         if project_rotmats:
-            # We might want to handle the -1 determinant case as well.
             body_rotmats = project_rotmats_via_svd(body_rotmats)
+            if hand_rotmats is not None:
+                hand_rotmats = project_rotmats_via_svd(hand_rotmats)
 
-        return EgoDenoiseTraj(
+        return cls(
             betas=betas,
             body_rotmats=body_rotmats,
             contacts=contacts,
             hand_rotmats=hand_rotmats,
+            T_world_root=T_world_root,
         )
 
 
@@ -292,6 +303,7 @@ class EgoDenoiser(nn.Module):
             "betas": 16,
             "body_rotmats": 21 * 9,
             "contacts": 21,
+            "T_world_root": 7,
         }
         if config.include_hands:
             modality_dims["hand_rotmats"] = 30 * 9
@@ -665,11 +677,6 @@ class TransformerBlock(nn.Module):
             k = self.rotary_emb.rotate_queries_or_keys(k, seq_dim=-2)
         x = torch.nn.functional.scaled_dot_product_attention(
             q, k, v, dropout_p=config.dropout_p, attn_mask=attn_mask
-        )
-        x = self.dropout(x)
-        x = rearrange(x, "b nh t dh -> b t (nh dh)", nh=config.n_heads)
-        x = torch.nn.functional.scaled_dot_product_attention(
-            q, k, v, dropout_p=config.dropout_p
         )
         x = self.dropout(x)
         x = rearrange(x, "b nh t dh -> b t (nh dh)", nh=config.n_heads)
