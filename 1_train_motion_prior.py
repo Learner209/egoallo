@@ -1,5 +1,12 @@
 """Training script for EgoAllo diffusion model using HuggingFace accelerate."""
 
+import os
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
+
 import dataclasses
 import shutil
 from pathlib import Path
@@ -19,13 +26,16 @@ from egoallo.data.amass import EgoAmassHdf5Dataset
 from egoallo.data.dataclass import collate_dataclass
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass
 class EgoAlloTrainConfig:
     experiment_name: str = "motion_prior"
     dataset_hdf5_path: Path = Path("data/egoalgo_no_skating_dataset.hdf5")
     dataset_files_path: Path = Path("data/egoalgo_no_skating_dataset_files.txt")
+    mask_ratio: float = 0.75
 
-    model: network.EgoDenoiserConfig = network.EgoDenoiserConfig()
+    model: network.EgoDenoiserConfig = dataclasses.field(
+        default_factory=lambda: network.EgoDenoiserConfig(mask_ratio=0.75)
+    )
     loss: training_loss.TrainingLossConfig = training_loss.TrainingLossConfig()
 
     # Dataset arguments.
@@ -201,7 +211,16 @@ def run_training(
                 mem_free, mem_total = torch.cuda.mem_get_info()
                 logger.info(
                     f"step: {step} ({loop_metrics.iterations_per_sec:.2f} it/sec)"
-                    f" mem: {(mem_total-mem_free)/1024**3:.2f}/{mem_total/1024**3:.2f}G"
+                    f" time: {loop_metrics.time_elapsed:.1f}s"
+                    f" batch: {loop_metrics.batch_time*1000:.1f}ms"
+                    f" fwd: {loop_metrics.forward_time*1000:.1f}ms"
+                    f" bwd: {loop_metrics.backward_time*1000:.1f}ms"
+                    f" opt: {loop_metrics.optimizer_time*1000:.1f}ms"
+                    f" gpus: {loop_metrics.num_gpus}"
+                    f" batch/gpu: {loop_metrics.per_gpu_batch_size}"
+                    f" total_batch: {loop_metrics.total_batch_size}"
+                    f" gpu_util: {[f'{u:.1f}%' for u in loop_metrics.gpu_utilization]}"
+                    f" gpu_mem: {[f'{m:.1f}GB' for m in loop_metrics.gpu_memory_used]}"
                     f" lr: {scheduler.get_last_lr()[0]:.7f}"
                     f" loss: {loss.item():.6f}"
                 )

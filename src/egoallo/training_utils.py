@@ -17,7 +17,9 @@ from typing import (
     Sized,
     get_type_hints,
     overload,
+    Optional,
 )
+from accelerate import Accelerator
 
 import torch
 
@@ -86,6 +88,15 @@ class LoopMetrics:
     counter: int
     iterations_per_sec: float
     time_elapsed: float
+    batch_time: float = 0.0
+    gpu_memory_used: list[float] = dataclasses.field(default_factory=list)
+    gpu_utilization: list[float] = dataclasses.field(default_factory=list)
+    forward_time: float = 0.0
+    backward_time: float = 0.0
+    optimizer_time: float = 0.0
+    num_gpus: int = 1
+    per_gpu_batch_size: int = 0
+    total_batch_size: int = 0
 
 
 @overload
@@ -121,40 +132,87 @@ class _RangeWithMetrics:
         return len(range(*self.args))
 
 
-def loop_metric_generator(counter_init: int = 0) -> Generator[LoopMetrics, None, None]:
-    """Generator for computing loop metrics.
-
-    Note that the first `iteration_per_sec` metric will be 0.0.
-
-    Example usage:
-    ```
-    # Note that this is an infinite loop.
-    for metric in loop_metric_generator():
-        time.sleep(1.0)
-        print(metric)
-    ```
-
-    or:
-    ```
-    loop_metrics = loop_metric_generator()
-    while True:
-        time.sleep(1.0)
-        print(next(loop_metrics).iterations_per_sec)
-    ```
+def loop_metric_generator(
+    counter_init: int = 0,
+    accelerator: Optional[Accelerator] = None,
+) -> Generator[LoopMetrics, None, None]:
+    """Enhanced generator for computing detailed training loop metrics.
+    
+    Args:
+        counter_init: Initial counter value
+        accelerator: HuggingFace Accelerator instance for multi-GPU info
     """
-
     counter = counter_init
-    del counter_init
     time_start = time.time()
     time_prev = time_start
+    
+    # Track timing for different training phases
+    phase_start = time.time()
+    forward_time = 0.0
+    backward_time = 0.0
+    optimizer_time = 0.0
+
     while True:
         time_now = time.time()
-        yield LoopMetrics(
+        batch_time = time_now - time_prev
+
+        # Get GPU metrics if available
+        gpu_memory = []
+        gpu_util = []
+        num_gpus = 1
+        
+        if torch.cuda.is_available():
+            num_gpus = torch.cuda.device_count()
+            for i in range(num_gpus):
+                memory_used, memory_total = torch.cuda.mem_get_info(i)
+                gpu_memory.append((memory_total - memory_used) / 1024**3)  # Convert to GB
+                
+                # Note: This requires nvidia-smi
+                try:
+                    gpu_util.append(
+                        float(
+                            subprocess.check_output(
+                                [
+                                    "nvidia-smi",
+                                    "--query-gpu=utilization.gpu",
+                                    "--format=csv,noheader,nounits",
+                                    "-i",
+                                    str(i),
+                                ]
+                            )
+                        )
+                    )
+                except:
+                    gpu_util.append(0.0)
+
+        # Calculate effective batch sizes
+        if accelerator is not None:
+            per_gpu_batch = accelerator.gradient_accumulation_steps
+            total_batch = per_gpu_batch * accelerator.num_processes
+        else:
+            per_gpu_batch = 0
+            total_batch = 0
+
+        metrics = LoopMetrics(
             counter=counter,
-            iterations_per_sec=1.0 / (time_now - time_prev) if counter > 0 else 0.0,
+            iterations_per_sec=1.0 / batch_time if counter > 0 else 0.0,
             time_elapsed=time_now - time_start,
+            batch_time=batch_time,
+            gpu_memory_used=gpu_memory,
+            gpu_utilization=gpu_util,
+            forward_time=forward_time,
+            backward_time=backward_time, 
+            optimizer_time=optimizer_time,
+            num_gpus=num_gpus,
+            per_gpu_batch_size=per_gpu_batch,
+            total_batch_size=total_batch
         )
+        
+        yield metrics
+
+        # Reset timing trackers
         time_prev = time_now
+        phase_start = time_now
         counter += 1
 
 

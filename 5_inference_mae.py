@@ -41,7 +41,7 @@ import dataclasses
 class Args:
     npz_path: Path = Path("./egoallo_example_trajectories/coffeemachine/egoallo_outputs/20240929-011937_10-522.npz")
     """Path to the input trajectory."""
-    checkpoint_dir: Path = Path("/home/minghao/src/robotflow/egoallo/experiments/too_late_first_attempt/v4/checkpoints_60000")
+    checkpoint_dir: Path = Path("/mnt/homes/minghao/src/robotflow/egoallo/experiments/predict_T_world_root/v7/checkpoints_10000")
     """Path to the checkpoint directory."""
     smplh_npz_path: Path = Path("./data/smplh/neutral/model.npz")
     """Path to the SMPLH model."""
@@ -204,7 +204,7 @@ def run_sampling_with_masked_data(
 def main(
     args: Args,
     device: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu"),
-) -> EgoDenoiseTraj:
+) -> network.EgoDenoiseTraj:
 
     # Load data and models
     traj_data = np.load(args.npz_path)
@@ -297,7 +297,7 @@ def main(
         assert server is not None
         loop_cb = visualize_traj_and_hand_detections(
             server,
-            Ts_world_cpf,
+            denoised_traj.T_world_root.squeeze(),
             denoised_traj,
             body_model,
             hamer_detections=None,

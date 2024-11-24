@@ -130,7 +130,7 @@ def add_splat_to_viser(
 
 def visualize_traj_and_hand_detections(
     server: viser.ViserServer,
-    Ts_world_cpf: Float[Tensor, "timesteps 7"],
+    T_world_root: Float[Tensor, "timesteps 7"],
     traj: network.EgoDenoiseTraj | None,
     body_model: fncsmpl.SmplhModel,
     hamer_detections: CorrespondedHamerDetections | None = None,
@@ -141,10 +141,10 @@ def visualize_traj_and_hand_detections(
     show_joints: bool = False,
     get_ego_video: Callable[[int, int, float], bytes] | None = None,
 ) -> Callable[[], int]:
-    """Chaotic mega-function for visualization. Returns a callback that should
-    be called repeatedly in a loop."""
+    """Visualization function for trajectories and hand detections.
+    Returns a callback that should be called repeatedly in a loop."""
 
-    timesteps = Ts_world_cpf.shape[0]
+    timesteps = T_world_root.shape[0]
 
     server.scene.add_grid(
         "/ground",
@@ -194,23 +194,12 @@ def visualize_traj_and_hand_detections(
             right_hand_quats = None
 
         shaped = body_model.with_shape(torch.mean(betas, dim=1, keepdim=True))
-        fk_outputs = shaped.with_pose_decomposed(
-            T_world_root=SE3.identity(
-                device=device, dtype=body_quats.dtype
-            ).parameters(),
+        fk_outputs: fncsmpl.SmplhShapedAndPosed = shaped.with_pose_decomposed(
+            T_world_root=T_world_root[None, ...],
             body_quats=body_quats,
             left_hand_quats=left_hand_quats,
             right_hand_quats=right_hand_quats,
         )
-
-        assert Ts_world_cpf.shape == (timesteps, 7)
-        T_world_root = fncsmpl_extensions.get_T_world_root_from_cpf_pose(
-            # Batch axes of fk_outputs are (num_samples, time).
-            # Batch axes of Ts_world_cpf are (time,).
-            fk_outputs,
-            Ts_world_cpf[None, ...],
-        )
-        fk_outputs = fk_outputs.with_new_T_world_root(T_world_root)
     else:
         shaped = None
         fk_outputs = None
@@ -236,7 +225,7 @@ def visualize_traj_and_hand_detections(
     timestep_handles: list[viser.FrameHandle] = []
     hamer_handles: list[viser.MeshHandle | viser.PointCloudHandle] = []
     aria_handles: list[viser.SceneNodeHandle] = []
-    for t in range(Ts_world_cpf.shape[0]):
+    for t in range(T_world_root.shape[0]):
         timestep_handles.append(
             server.scene.add_frame(f"/timesteps/{t}", show_axes=False)
         )
@@ -262,7 +251,7 @@ def visualize_traj_and_hand_detections(
 
         # Visualize HaMeR outputs.
         if hamer_detections is not None:
-            T_world_cam = SE3(Ts_world_cpf[t]) @ SE3(hamer_detections.T_cpf_cam)
+            T_world_cam = SE3(T_world_root[t]) @ SE3(hamer_detections.T_cpf_cam)
             server.scene.add_frame(
                 f"/timesteps/{t}/cpf/cam",
                 show_axes=True,
@@ -491,12 +480,12 @@ def visualize_traj_and_hand_detections(
     def _(_) -> None:
         gui_framerate.value = int(gui_framerate_options.value)
 
-    Ts_world_cpf_numpy = Ts_world_cpf.numpy(force=True)
+    T_world_root_numpy = T_world_root.numpy(force=True)
 
     def do_update() -> None:
         t = gui_timestep.value
-        cpf_handle.wxyz = Ts_world_cpf_numpy[t, :4]
-        cpf_handle.position = Ts_world_cpf_numpy[t, 4:7]
+        cpf_handle.wxyz = T_world_root_numpy[t, :4]
+        cpf_handle.position = T_world_root_numpy[t, 4:7]
 
         if gui_attach.value:
             for client in server.get_clients().values():
@@ -516,7 +505,12 @@ def visualize_traj_and_hand_detections(
                         bone_transform = fk_outputs.Ts_world_joint[i, t, b - 1].numpy(
                             force=True
                         )
+                    # Check if the destination array is writable
+                    if not bone_handle.wxyz.flags["WRITEABLE"]:
+                        bone_handle.wxyz.setflags(write=True)  # Make it writable
                     bone_handle.wxyz = bone_transform[:4]
+                    if not bone_handle.position.flags["WRITEABLE"]:
+                        bone_handle.position.setflags(write=True)  # Make it writable
                     bone_handle.position = bone_transform[4:7]
 
         for ii, timestep_frame in enumerate(timestep_handles):

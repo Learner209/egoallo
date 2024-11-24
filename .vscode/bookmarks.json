@@ -19,6 +19,16 @@
 					"label": "make_cond"
 				}
 			]
+		},
+		{
+			"path": "src/egoallo/vis_helpers.py",
+			"bookmarks": [
+				{
+					"line": 340,
+					"column": 21,
+					"label": "MeshSkinnedBoneHandle_viser_body_handles"
+				}
+			]
 		}
 	]
 }

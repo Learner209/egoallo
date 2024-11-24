@@ -132,7 +132,7 @@ class EgoDenoiseTraj(TensorDataclass):
         )
 
 
-@dataclass(frozen=True)
+@dataclass
 class EgoDenoiserConfig:
     # Basic parameters
     max_t: int = 1000
@@ -419,6 +419,7 @@ class EgoDenoiser(nn.Module):
             self.encoders["betas"](x_t.betas.reshape((batch, time, -1)))
             + self.encoders["body_rotmats"](x_t.body_rotmats.reshape((batch, time, -1)))
             + self.encoders["contacts"](x_t.contacts)
+            + self.encoders["T_world_root"](x_t.T_world_root)
         )
         if self.config.include_hands:
             assert x_t.hand_rotmats is not None
@@ -590,7 +591,10 @@ class TransformerBlock(nn.Module):
 
         assert config.d_latent % config.n_heads == 0
         self.rotary_emb = (
-            RotaryEmbedding(config.d_latent // config.n_heads)
+            RotaryEmbedding(
+                config.d_latent // config.n_heads,
+                learned_freq=False,
+            )
             if config.use_rope_embedding
             else None
         )
