@@ -1,3 +1,10 @@
 {
-	"python.languageServer": "None"
+	"python.languageServer": "None",
+	"terminal.integrated.profiles.linux": {
+    "tmux": {
+				"path": "bash",
+				"args": ["-c", "tmux new-session -A -s ${PWD##*/} 'exec zsh'"],
+				"icon": "terminal-tmux"
+			},
+	}
 }

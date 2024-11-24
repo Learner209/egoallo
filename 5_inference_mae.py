@@ -1,8 +1,10 @@
 from __future__ import annotations
+
 import numpy as np
 import viser
 import torch
 from pathlib import Path
+
 from egoallo.data.dataclass import EgoTrainingData
 from egoallo.inference_utils import (
     create_masked_training_data,
@@ -30,15 +32,16 @@ from egoallo.hand_detection_structs import (
     CorrespondedHamerDetections,
 )
 from egoallo.tensor_dataclass import TensorDataclass
-from egoallo.transforms import SE3
+from egoallo.transforms import SE3, SO3
 from egoallo.training_utils import ipdb_safety_net
 import dataclasses
 
+
 @dataclasses.dataclass
 class Args:
-    npz_path: Path = Path("/mnt/homes/minghao/src/robotflow/egoallo/egoallo_example_trajectories/coffeemachine/egoallo_outputs/20241027-161510_0-1624.npz")
+    npz_path: Path = Path("./egoallo_example_trajectories/coffeemachine/egoallo_outputs/20240929-011937_10-522.npz")
     """Path to the input trajectory."""
-    checkpoint_dir: Path = Path("/mnt/homes/minghao/src/robotflow/egoallo/experiments/too_late_first_attempt/v4/checkpoints_10000")
+    checkpoint_dir: Path = Path("/home/minghao/src/robotflow/egoallo/experiments/too_late_first_attempt/v4/checkpoints_60000")
     """Path to the checkpoint directory."""
     smplh_npz_path: Path = Path("./data/smplh/neutral/model.npz")
     """Path to the SMPLH model."""
@@ -67,24 +70,21 @@ def run_sampling_with_masked_data(
     guidance_mode: GuidanceMode,
     guidance_post: bool,
     guidance_inner: bool,
-    Ts_world_cpf: Float[Tensor, "time 7"],
     floor_z: float,
     hamer_detections: None | CorrespondedHamerDetections,
     aria_detections: None | CorrespondedAriaHandWristPoseDetections,
     num_samples: int,
     device: torch.device,
 ) -> network.EgoDenoiseTraj:
-    # Offset the T_world_cpf transform to place the floor at z=0
-    Ts_world_cpf_shifted = Ts_world_cpf.clone()
-    Ts_world_cpf_shifted[..., 6] -= floor_z
 
     noise_constants = CosineNoiseScheduleConstants.compute(timesteps=1000).to(device=device)
     alpha_bar_t = noise_constants.alpha_bar_t
     alpha_t = noise_constants.alpha_t
 
     # Initialize noise with proper shape
+    # import ipdb; ipdb.set_trace()
     x_t_packed = torch.randn(
-        (num_samples, Ts_world_cpf.shape[0] - 1, denoiser_network.get_d_state()),
+        (num_samples, masked_data.visible_joints.shape[1], denoiser_network.get_d_state()),
         device=device,
     )
     x_t_list = [
@@ -205,12 +205,15 @@ def main(
     args: Args,
     device: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu"),
 ) -> EgoDenoiseTraj:
+
     # Load data and models
     traj_data = np.load(args.npz_path)
     body_model = fncsmpl.SmplhModel.load(args.smplh_npz_path).to(device)
     denoiser_network = load_denoiser(args.checkpoint_dir).to(device)
 
     # Prepare input tensors
+    # import ipdb; ipdb.set_trace()
+
     Ts_world_cpf = torch.from_numpy(traj_data['Ts_world_cpf']).to(device)
     Ts_world_root = torch.from_numpy(traj_data['Ts_world_root']).to(device)
     body_quats = torch.from_numpy(traj_data['body_quats']).to(device)
@@ -241,7 +244,6 @@ def main(
         guidance_mode="no_hands",
         guidance_post=False,
         guidance_inner=False,
-        Ts_world_cpf=Ts_world_cpf,
         floor_z=0.0,
         hamer_detections=None,
         aria_detections=None,
@@ -295,7 +297,7 @@ def main(
         assert server is not None
         loop_cb = visualize_traj_and_hand_detections(
             server,
-            Ts_world_cpf[1:],
+            Ts_world_cpf,
             denoised_traj,
             body_model,
             hamer_detections=None,
@@ -313,4 +315,3 @@ if __name__ == "__main__":
 
     ipdb_safety_net()
     main(tyro.cli(Args))
-

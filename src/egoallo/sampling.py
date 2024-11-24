@@ -66,18 +66,11 @@ def run_sampling_with_stitching(
     guidance_post: bool,
     guidance_inner: bool,
     Ts_world_cpf: Float[Tensor, "time 7"],
-    floor_z: float,
     hamer_detections: None | CorrespondedHamerDetections,
     aria_detections: None | CorrespondedAriaHandWristPoseDetections,
     num_samples: int,
     device: torch.device,
 ) -> network.EgoDenoiseTraj:
-    # Offset the T_world_cpf transform to place the floor at z=0 for the
-    # denoiser network. All of the network outputs are local, so we don't need to
-    # unoffset when returning.
-    Ts_world_cpf_shifted = Ts_world_cpf.clone()
-    Ts_world_cpf_shifted[..., 6] -= floor_z
-
     noise_constants = CosineNoiseScheduleConstants.compute(timesteps=1000).to(
         device=device
     )
@@ -147,7 +140,7 @@ def run_sampling_with_stitching(
                         T_cpf_tm1_cpf_t=T_cpf_tm1_cpf_t[None, start_t:end_t, :].repeat(
                             (num_samples, 1, 1)
                         ),
-                        T_world_cpf=Ts_world_cpf_shifted[
+                        T_world_cpf=Ts_world_cpf[
                             None, start_t + 1 : end_t + 1, :
                         ].repeat((num_samples, 1, 1)),
                         project_output_rotmats=False,

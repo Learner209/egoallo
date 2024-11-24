@@ -23,7 +23,6 @@ class TensorDataclass:
             A new dataclass.
         """
         return self.map(lambda x: x.to(device))
-
     def as_nested_dict(self, numpy: bool) -> dict[str, Any]:
         """Convert the dataclass to a nested dictionary.
 

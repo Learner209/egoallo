@@ -42,6 +42,8 @@ class EgoDenoiseTraj(TensorDataclass):
     hand_rotmats: Float[Tensor, "*#batch timesteps 30 3 3"] | None
     """Local orientations for each body joint."""
 
+    T_world_root: Float[Tensor, "*#batch timesteps 3"]
+    """Global translation of the root joint."""
 
     @staticmethod
     def get_packed_dim(include_hands: bool) -> int:
@@ -145,7 +147,7 @@ class EgoDenoiserConfig:
     )
 
     # Joint position conditioning settings
-    joint_cond_mode: Literal["absolute", "canonicalized", "absrel", "absrel_global_deltas"] = "absolute"
+    joint_cond_mode: Literal["absolute", "canonicalized", "absrel", "absrel_global_deltas"] = "absrel_global_deltas"
 
     @cached_property
     def d_cond(self) -> int:
@@ -221,26 +223,46 @@ class EgoDenoiserConfig:
             ], dim=-1)
             
         elif self.joint_cond_mode == "absrel_global_deltas":
-            # Compute global transformation using visible joints
-            first_frame = visible_joints[:, 0:1]
-            current_frames = visible_joints
+            # import ipdb; ipdb.set_trace()
+            # Compute global transformation between each frame and first frame
+            # Using Kabsch algorithm on visible joints
+            first_frame = visible_joints[:, 0] # shape: (batch, num_visible_joints, 3)
+            current_frames = visible_joints # shape: (batch, time, num_visible_joints, 3)
             
-            # Compute relative transformation using visible joints
-            center_first = first_frame.mean(dim=1, keepdim=True)
-            center_current = current_frames.mean(dim=1, keepdim=True)
+            # Compute centroids for each frame
+            first_centroid = first_frame.mean(dim=1, keepdim=True) # (batch, 1, 3)
+            current_centroids = current_frames.mean(dim=2, keepdim=True) # (batch, time, 1, 3)
             
-            # Estimate rotation using Kabsch algorithm on visible joints
-            # TODO: check whether this makes sense for global deltas
-            H = (first_frame - center_first).transpose(-2, -1) @ (current_frames - center_current)
-            U, _, Vh = torch.linalg.svd(H)
-            R = Vh.transpose(-2, -1) @ U.transpose(-2, -1)
-            t = center_current - (R @ center_first.transpose(-2, -1)).transpose(-2, -1)
+            # Center the point clouds
+            first_centered = first_frame - first_centroid # (batch, num_visible_joints, 3)
+            current_centered = current_frames - current_centroids # (batch, time, num_visible_joints, 3)
+            
+            # Compute correlation matrix H for each frame relative to first frame
+            # Expand first_centered to match current_centered dimensions
+            first_centered_exp = first_centered.unsqueeze(1).expand(-1, time, -1, -1)
+            H = first_centered_exp.transpose(-2, -1) @ current_centered
+            
+            # Compute optimal rotation using SVD
+            U, _, Vh = torch.linalg.svd(H) # shape: (batch, time, 3, 3)
+            r_mat = Vh.transpose(-2, -1) @ U.transpose(-2, -1) # shape: (batch, time, 3, 3)
+            
+            # Handle reflection case
+            det = torch.linalg.det(r_mat) # shape: (batch, time)
+            reflection_fix = torch.eye(3, device=r_mat.device).unsqueeze(0).unsqueeze(0).expand(batch, time, -1, -1).clone() # shape: (batch, time, 3, 3) 
+            reflection_fix[..., 2, 2] = det # shape: (batch, time, 3, 3)
+            r_mat = r_mat @ reflection_fix # shape: (batch, time, 3, 3)
+            
+            # Compute translation
+            # how much the current frame differs from the first frame rotated trajectory.
+            t = current_centroids.squeeze(2) - torch.einsum('btij,bkj->bti', r_mat, first_centroid) # shape: (batch, time, 3)
             
             cond = torch.cat([
-                visible_joints,  # Positions of visible joints
-                index_embeddings,  # Joint index embeddings
-                R.reshape(batch, time, 9),  # Global rotation
-                t.reshape(batch, time, -1),  # Global translation
+                torch.cat([
+                    visible_joints,  # shape: (batch, time, num_visible_joints, 3)
+                    index_embeddings  # shape: (batch, time, num_visible_joints, 16)
+                ], dim=-1).reshape(batch, time, -1),  # shape: (batch, time, num_visible_joints * (3 + 16))
+                r_mat.reshape(batch, time, 9),  # Global rotation matrices
+                t.reshape(batch, time, 3),  # Global translations
             ], dim=-1)
         
         else:

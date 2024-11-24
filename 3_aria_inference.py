@@ -28,7 +28,7 @@ from egoallo.vis_helpers import visualize_traj_and_hand_detections
 
 @dataclasses.dataclass
 class Args:
-    traj_root: Path = Path("/mnt/homes/minghao/src/robotflow/egoallo/egoallo_example_trajectories/coffeemachine")
+    traj_root: Path = Path("./egoallo_example_trajectories/coffeemachine")
     """Search directory for trajectories. This should generally be laid out as something like:
 
     traj_dir/
@@ -131,6 +131,8 @@ def main(args: Args) -> None:
     denoiser_network = load_denoiser(args.checkpoint_dir).to(device)
     body_model = fncsmpl.SmplhModel.load(args.smplh_npz_path).to(device)
 
+    Ts_world_cpf[..., 6] -= floor_z
+
     traj = run_sampling_with_stitching(
         denoiser_network,
         body_model=body_model,
@@ -142,7 +144,6 @@ def main(args: Args) -> None:
         aria_detections=aria_detections,
         num_samples=args.num_samples,
         device=device,
-        floor_z=floor_z,
     )
 
     # Save outputs in case we want to visualize later.
