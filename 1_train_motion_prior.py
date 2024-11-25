@@ -33,9 +33,7 @@ class EgoAlloTrainConfig:
     dataset_files_path: Path = Path("data/egoalgo_no_skating_dataset_files.txt")
     mask_ratio: float = 0.75
 
-    model: network.EgoDenoiserConfig = dataclasses.field(
-        default_factory=lambda self: network.EgoDenoiserConfig(mask_ratio=self.mask_ratio)
-    )
+    model: network.EgoDenoiserConfig = dataclasses.field(init=False)
     loss: training_loss.TrainingLossConfig = training_loss.TrainingLossConfig()
 
     # Dataset arguments.
@@ -58,6 +56,9 @@ class EgoAlloTrainConfig:
     weight_decay: float = 1e-4
     warmup_steps: int = 1000
     max_grad_norm: float = 1.0
+
+    def __post_init__(self):
+        self.model = network.EgoDenoiserConfig(mask_ratio=self.mask_ratio)
 
 
 def get_experiment_dir(experiment_name: str, version: int = 0) -> Path:
