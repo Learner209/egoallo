@@ -34,7 +34,7 @@ class EgoAlloTrainConfig:
     mask_ratio: float = 0.75
 
     model: network.EgoDenoiserConfig = dataclasses.field(
-        default_factory=lambda: network.EgoDenoiserConfig(mask_ratio=0.75)
+        default_factory=lambda self: network.EgoDenoiserConfig(mask_ratio=self.mask_ratio)
     )
     loss: training_loss.TrainingLossConfig = training_loss.TrainingLossConfig()
 
