@@ -41,7 +41,7 @@ import dataclasses
 class Args:
     npz_path: Path = Path("./egoallo_example_trajectories/coffeemachine/egoallo_outputs/20240929-011937_10-522.npz")
     """Path to the input trajectory."""
-    checkpoint_dir: Path = Path("/mnt/homes/minghao/src/robotflow/egoallo/experiments/predict_T_world_root/v7/checkpoints_10000")
+    checkpoint_dir: Path = Path("/mnt/homes/minghao/src/robotflow/egoallo/experiments/predict_T_world_root/v7/checkpoints_15000")
     """Path to the checkpoint directory."""
     smplh_npz_path: Path = Path("./data/smplh/neutral/model.npz")
     """Path to the SMPLH model."""
@@ -57,7 +57,7 @@ class Args:
     up debugging/experiments, or if we only care about foot skating losses."""
     guidance_post: bool = True
     """Whether to apply guidance optimizer after diffusion sampling."""
-    visualize_traj: bool = True
+    visualize_traj: bool = False
     """Whether to visualize the trajectory after sampling."""
     mask_ratio: float = 0.75
     """Ratio of joints to mask."""
@@ -201,6 +201,65 @@ def run_sampling_with_masked_data(
     else:
         return x_t_list[-1]
 
+def calculate_metrics(
+    original_posed: fncsmpl.SmplhShapedAndPosed,
+    denoised_traj: network.EgoDenoiseTraj,
+    masked_data: EgoTrainingData,
+    body_model: fncsmpl.SmplhModel,
+) -> dict[str, float]:
+    """Calculate metrics between original and inferred trajectories.
+    
+    Args:
+        original_posed: Original posed SMPL-H model
+        denoised_traj: Inferred trajectory from denoising
+        masked_data: Training data with masking information
+        body_model: SMPL-H body model
+        
+    Returns:
+        Dictionary containing computed metrics
+    """
+    # Get inferred posed model
+    inferred_posed = denoised_traj.apply_to_body(body_model)
+    
+    # 1. T_world_root error
+    # Translation error
+    trans_error = torch.norm(
+        original_posed.T_world_root[..., 4:7] - 
+        inferred_posed.T_world_root[..., 4:7],
+        dim=-1
+    ).mean().item()
+    
+    # Rotation error (geodesic distance)
+    R1 = original_posed.T_world_root[..., :4]  # quaternions
+    R2 = inferred_posed.T_world_root[..., :4]
+    rot_error = torch.arccos(
+        torch.abs(torch.sum(R1 * R2, dim=-1)).clamp(-1, 1)
+    ).mean().item() * 2.0  # multiply by 2 for full rotation distance
+    
+    # 2. Joint position errors
+    # Get original and inferred joint positions
+    orig_joints = original_posed.Ts_world_joint[..., :21, 4:7]  # Only body joints
+    infer_joints = inferred_posed.Ts_world_joint[..., :21, 4:7]
+    
+    # Calculate per-joint errors
+    joint_errors = torch.norm(orig_joints - infer_joints, dim=-1)  # [B, T, J]
+    
+    # Separate masked and unmasked errors using visible_joints_mask
+    visible_mask = masked_data.visible_joints_mask
+    
+    # Unmasked joints error
+    unmasked_mpjpe = joint_errors[visible_mask].mean().item() * 1000  # Convert to mm
+    
+    # Masked joints error  
+    masked_mpjpe = joint_errors[~visible_mask].mean().item() * 1000  # Convert to mm
+    
+    return {
+        "translation_error_meters": trans_error,
+        "rotation_error_radians": rot_error,
+        "unmasked_mpjpe_mm": unmasked_mpjpe,
+        "masked_mpjpe_mm": masked_mpjpe
+    }
+
 def main(
     args: Args,
     device: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu"),
@@ -251,6 +310,23 @@ def main(
         device=device,
     )
 
+    # Calculate metrics between original and inferred trajectories
+    metrics = calculate_metrics(
+        original_posed=posed,
+        denoised_traj=denoised_traj,
+        masked_data=masked_data,
+        body_model=body_model
+    )
+
+    # Print metrics
+    print("\nTrajectory Metrics:")
+    print(f"Translation Error: {metrics['translation_error_meters']:.3f} meters")
+    print(f"Rotation Error: {metrics['rotation_error_radians']:.3f} radians")
+    print(f"Unmasked Joints MPJPE: {metrics['unmasked_mpjpe_mm']:.1f} mm")
+    print(f"Masked Joints MPJPE: {metrics['masked_mpjpe_mm']:.1f} mm")
+
+    import ipdb; ipdb.set_trace()
+    
     # Save outputs in case we want to visualize later.
     # if args.save_traj:
     #     save_name = (
@@ -308,6 +384,8 @@ def main(
         )
         while True:
             loop_cb()
+
+    return
 
 
 if __name__ == "__main__":
