@@ -21,11 +21,11 @@ class TrainingLossConfig:
     beta_coeff_weights: tuple[float, ...] = tuple(1 / (i + 1) for i in range(16))
     loss_weights: dict[str, float] = dataclasses.field(
         default_factory={
-            "betas": 0.1,
+            "betas": 0.05,
             "body_rotmats": 1.0,
-            "contacts": 0.1,
+            "contacts": 0.05,
             "hand_rotmats": 0.01,
-            "T_world_root": 1.0,
+            "T_world_root": 0.2,
         }.copy
     )
     weight_loss_by_t: Literal["emulate_eps_pred"] = "emulate_eps_pred"
