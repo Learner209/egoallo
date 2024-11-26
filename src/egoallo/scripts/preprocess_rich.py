@@ -97,6 +97,7 @@ def main(config: RICHPreprocessConfig) -> None:
     processed_files: list[str] = []
     
     # Collect all sequences to process
+    config.splits = ["train"]
     for split in config.splits:
         split_dir = config.output_dir / split
         split_dir.mkdir(exist_ok=True)
@@ -104,6 +105,7 @@ def main(config: RICHPreprocessConfig) -> None:
         sequences = [d.name for d in (config.rich_data_dir / 'data/bodies' / split).iterdir() if d.is_dir()]
         
         for seq_name in sequences:
+            seq_name = "ParkingLot1_005_burpeejump2"
             output_path = split_dir / f"{seq_name}.npz"
             # No need to check existence here since it's handled in process_sequence
             task_queue.put_nowait((processor, split, seq_name, output_path))

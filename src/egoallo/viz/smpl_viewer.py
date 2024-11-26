@@ -146,7 +146,7 @@ class SMPLViewer(BaseRenderer):
         
         # Initialize scene components
         self.scene = Scene()
-        self.scene_path = scene_path or Path("./third_party/cloudrender/assets/test_assets/MPI_Etage6.zip")
+        self.scene_path = scene_path or Path("./assets/cloudrender/test_assets/MPI_Etage6.zip")
         
         # Initialize instance variables
         self.camera: Optional[PerspectiveCameraModel] = None

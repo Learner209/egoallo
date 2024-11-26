@@ -85,53 +85,101 @@ class RICHDataProcessor:
         # Load camera-to-world transforms
         self.camera_transforms = {}
 
-    def _load_camera_transform(self, scene_name: str) -> SE3:
-        """Load camera-to-world transform for a scene."""
+    def _load_camera_transform(self, scene_name: str) -> Dict[str, torch.Tensor]:
+        """Load camera-to-world transform parameters."""
         if scene_name not in self.camera_transforms:
             transform_path = self.rich_data_dir / "data/multicam2world" / f"{scene_name}_multicam2world.json"
             with open(transform_path, 'r') as f:
-                cam2world = json.load(f)
+                cam2scan = json.load(f)
             
-            # Convert rotation matrix and translation to SE3
-            R = torch.tensor(cam2world['R'], device=self.device, dtype=torch.float32)
-            t = torch.tensor(cam2world['t'], device=self.device, dtype=torch.float32)
-            scale = torch.tensor(cam2world['c'], device=self.device, dtype=torch.float32)
+            # Convert parameters to tensors
+            R_cam_world = SO3.from_matrix(
+                torch.from_numpy(np.array(cam2scan['R'])).float().to(self.device)
+            )
+            t_cam_world = torch.from_numpy(np.array(cam2scan['t'])).float().to(self.device)
+            s_world_cam = cam2scan['c']
             
-            # Create SE3 transform
-            rotation = SO3.from_matrix(R)
             self.camera_transforms[scene_name] = {
-                'transform': SE3.from_rotation_and_translation(rotation, t),
-                'scale': scale
+                'R_cam_world': R_cam_world,
+                't_cam_world': t_cam_world,
+                's_world_cam': s_world_cam
             }
         return self.camera_transforms[scene_name]
 
     def _transform_to_world(
         self,
-        points: Tensor,  # (..., 3)
+        points: torch.Tensor,  # (..., 3)
         scene_name: str
-    ) -> Tensor:
-        """Transform points from camera to world coordinates using SE3."""
+    ) -> torch.Tensor:
+        """Transform points from camera to world coordinates.
+        
+        Following the transformation pipeline from multicam2world.py:
+        1. Scale the points by s_world_cam
+        2. Rotate points using R_cam_world
+        3. Translate by t_cam_world
+        """
         transform_data = self._load_camera_transform(scene_name)
-        transform, scale = transform_data['transform'], transform_data['scale']
+        R_cam_world: SO3 = transform_data['R_cam_world']
+        t_cam_world: torch.Tensor = transform_data['t_cam_world']
+        s_world_cam: float = transform_data['s_world_cam']
         
-        # Apply scale first
-        scaled_points = scale * points
-        
-        # Apply SE3 transform
-        world_points = scaled_points @ transform.rotation().as_matrix() + transform.translation()
-        # world_points = transform.apply(scaled_points)
+        # Apply transformation: scale -> rotate -> translate
+        world_points = (
+            s_world_cam * 
+            points @ 
+            R_cam_world.as_matrix() + 
+            t_cam_world
+        )
         
         return world_points
+
+    def _calculate_world_transform(
+        self,
+        global_orient: torch.Tensor,
+        transl: torch.Tensor,
+        scene_name: str
+    ) -> SE3:
+        """Calculate world transform from model output.
+        
+        Args:
+            global_orient: Global orientation in axis-angle format
+            transl: Translation vector in camera space
+            scene_name: Name of the scene for camera parameters
+        """
+        transform_data = self._load_camera_transform(scene_name)
+        R_cam_world: SO3 = transform_data['R_cam_world']
+        t_cam_world: torch.Tensor = transform_data['t_cam_world']
+        s_world_cam: float = transform_data['s_world_cam']
+        
+        # Convert global orientation to rotation matrix
+        R_cam_root = SO3.exp(global_orient)
+        
+        # Calculate world rotation
+        R_world_root = R_cam_world.inverse().multiply(R_cam_root)
+        
+        # Calculate world translation
+        t_world_root = (
+            s_world_cam * 
+            transl @ 
+            R_cam_world.as_matrix() + 
+            t_cam_world
+        )
+        
+        return SE3.from_rotation_and_translation(
+            rotation=R_world_root,
+            translation=t_world_root,
+        )
 
     def process_frame_data(
         self, split: str, seq_name: str, frame_id: int
     ) -> Tuple[Dict[str, Union[np.ndarray, torch.Tensor]], Optional[np.ndarray], Dict[str, Any]]:
-        """Process frame data using SMPLX for reference joints.
+        """Process frame data using SMPLX for reference joints and transform to world coordinates.
         
-        NOTE: This is an ugly but feasible workaround that uses SMPLX to get reference joints
-        before SMPLH processing. While not optimal, it currently provides the best solution
-        for preprocessing the RICH dataset by ensuring accurate joint positions and
-        transformations.
+        Returns:
+            Tuple containing:
+            - body_params: Dict of SMPL parameters transformed to world coordinates
+            - None: Placeholder for future use
+            - contact_data: Dict containing contact information
         """
         scene_name, sub_id, _ = seq_name.split("_")
         gender = self.gender_mapping[f'{int(sub_id)}']
@@ -165,16 +213,23 @@ class RICHDataProcessor:
         ref_joints = model_output.joints.detach().squeeze()
         pelvis_pos = ref_joints[0]  # Get pelvis position
 
-        body_params_tensor['transl'] = pelvis_pos.unsqueeze(0)
+        # Transform global orientation and translation to world coordinates
+        T_world_root: SE3 = self._calculate_world_transform(
+            body_params_tensor['global_orient'],
+            pelvis_pos.unsqueeze(0),  # Use pelvis position from SMPLX
+            scene_name
+        )
         
-        # Transform global orientation
-        # transform_data = self._load_camera_transform(scene_name)
-        # R_world_cam = transform_data['transform'].rotation()
-        # global_orient_so3 = SO3.exp(body_params_tensor['global_orient'])
-        # world_orient_so3 = R_world_cam @ global_orient_so3
-        # body_params_tensor['global_orient'] = world_orient_so3.log()
-
-        # Load HSC parameters
+        # Update body parameters with world coordinates
+        # Get rotation and translation from SE3 transform
+        world_rotation: SO3 = T_world_root.rotation()
+        world_translation: torch.Tensor = T_world_root.translation()
+        
+        # Convert rotation to axis-angle and update parameters
+        body_params_tensor['global_orient'] = world_rotation.log()
+        body_params_tensor['transl'] = world_translation
+        
+        # Load HSC parameters and transform contact data
         hsc_path = (
             self.rich_data_dir / "data/human_scene_contact" / split / seq_name /
             f"{frame_id:05d}" / f"{sub_id}.pkl"
@@ -225,10 +280,10 @@ class RICHDataProcessor:
 
 
     def process_sequence(self, split: str, seq_name: str, output_path: Path) -> Optional[Dict[str, Any]]:
-        """Process a complete sequence."""
-        if output_path.exists():
-            logger.info(f"Skipping {seq_name} - already processed")
-            return None
+        """Process a complete sequence with world coordinates."""
+        # if output_path.exists():
+        #     logger.info(f"Skipping {seq_name} - already processed")
+        #     return None
             
         scene_name, sub_id, _ = seq_name.split('_')
         gender = self.gender_mapping[f'{int(sub_id)}']
@@ -248,7 +303,6 @@ class RICHDataProcessor:
         all_contacts = []
         
         for frame_id in frame_ids:
-            # import ipdb; ipdb.set_trace()
             body_params, _, contact_data = self.process_frame_data(split, seq_name, frame_id)
             
             # Convert hand PCA to axis-angle
@@ -268,24 +322,22 @@ class RICHDataProcessor:
             all_poses.append(poses)
             all_trans.append(body_params['transl'])
 
-            # Process joints and contacts similar to AMASS
-            T_world_root, body_quats, left_hand_quats, right_hand_quats = self._convert_rotations(
-                body_params['global_orient'],
-                body_params['body_pose'],
-                left_hand_pose,
-                right_hand_pose,
-                body_params['transl']
-            )
+            # Process joints and contacts
+            T_world_root: SE3 = SE3.from_rotation_and_translation(
+                rotation=SO3.exp(body_params['global_orient']),
+                translation=body_params['transl'],
+            ).parameters()
+            # import ipdb; ipdb.set_trace()
 
             shaped = body_model.with_shape(body_params['betas'])
             posed = shaped.with_pose_decomposed(
                 T_world_root=T_world_root,
-                body_quats=body_quats,
-                left_hand_quats=left_hand_quats,
-                right_hand_quats=right_hand_quats
+                body_quats=SO3.exp(body_params['body_pose'].reshape(-1, 3)).wxyz,
+                left_hand_quats=SO3.exp(left_hand_pose.reshape(-1, 3)).wxyz,
+                right_hand_quats=SO3.exp(right_hand_pose.reshape(-1, 3)).wxyz
             )
 
-            # Extract joint positions
+            # Extract joint positions (already in world coordinates)
             joints = torch.cat([
                 posed.T_world_root[..., None, 4:7],
                 posed.Ts_world_joint[..., 4:7]
@@ -298,35 +350,22 @@ class RICHDataProcessor:
             ).squeeze(0).cpu().numpy()
             all_contacts.append(joint_contacts)
 
-        # Stack sequences first
+        # Stack sequences
         poses = torch.stack(all_poses).cpu().numpy()  # (N, 156)
         trans = torch.cat(all_trans, dim=0).cpu().numpy()  # (N, 3)
         joints = np.concatenate(all_joints, axis=0)  # (N, 22, 3)
         contacts = np.stack(all_contacts)  # (N, num_joints)
 
-        # Transform the trans, joints to world coordinates.
-        trans = self._transform_to_world(torch.from_numpy(trans).to(self.device), scene_name)
-        joints = self._transform_to_world(torch.from_numpy(joints).to(self.device), scene_name)
-
-        trans = trans.numpy(force=True)
-        joints = joints.numpy(force=True)
-
-        # import ipdb; ipdb.set_trace()
-
-        # Detect floor height using foot joints
+        # Detect and adjust floor height
         floor_height = self.motion_processor.detect_floor_height(
             joints,
             list(self.joint_indices.values())
         )
-        # import ipdb; ipdb.set_trace()
-        # floor_height = -0.5
         
-
-        # Adjust heights
         trans[:, 2] -= floor_height
         joints[..., 2] -= floor_height
 
-        # Rest of processing (velocities, alignment, etc.)
+        # Calculate velocities
         dt = 1.0 / self.fps
         velocities = {
             'joints': np.stack([
@@ -345,7 +384,7 @@ class RICHDataProcessor:
         forward_dir = forward_dir / np.linalg.norm(forward_dir, axis=-1, keepdims=True)
         align_rot = self.motion_processor.compute_alignment_rotation(forward_dir)
 
-        # Prepare sequence data in AMASS format
+        # Prepare sequence data
         sequence_data = {
             'poses': poses,  # (N, 156)
             'trans': trans,  # (N, 3)
