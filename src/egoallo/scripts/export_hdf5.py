@@ -57,7 +57,7 @@ def main(
                 train_data = EgoTrainingData.load_from_npz(
                     device_body_model, npz_path, include_hands=include_hands
                 )
-                # import ipdb; ipdb.set_trace()
+                import ipdb; ipdb.set_trace()
                 EgoTrainingData.visualize_ego_training_data(
                     train_data, body_model, str(video_output_path)
                 )

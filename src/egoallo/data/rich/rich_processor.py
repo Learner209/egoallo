@@ -290,11 +290,15 @@ class RICHDataProcessor:
         body_model: SmplhModel = self.body_models[gender]
         
         # Get frame IDs
-        seq_dir = self.rich_data_dir / "data/bodies" / split / seq_name
-        frame_ids = sorted([
-            int(d.name) for d in seq_dir.iterdir() 
-            if d.is_dir() and d.name.isdigit()
-        ])
+        # Get frame IDs from both bodies and human_scene_contact folders
+        bodies_dir = self.rich_data_dir / "data/bodies" / split / seq_name
+        hsc_dir = self.rich_data_dir / "data/human_scene_contact" / split / seq_name
+        
+        bodies_frames = {int(d.name) for d in bodies_dir.iterdir() if d.is_dir() and d.name.isdigit()}
+        hsc_frames = {int(d.name) for d in hsc_dir.iterdir() if d.is_dir() and d.name.isdigit()}
+        
+        # Take intersection of valid frames from both folders
+        frame_ids = sorted(bodies_frames.intersection(hsc_frames))
         
         # Process each frame
         all_poses = []
@@ -357,7 +361,7 @@ class RICHDataProcessor:
         contacts = np.stack(all_contacts)  # (N, num_joints)
 
         # Detect and adjust floor height
-        import ipdb; ipdb.set_trace()
+        # import ipdb; ipdb.set_trace()
         floor_height = self.motion_processor.detect_floor_height(
             joints,
             list(self.joint_indices.values())

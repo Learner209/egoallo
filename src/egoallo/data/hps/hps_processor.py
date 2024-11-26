@@ -2,19 +2,19 @@
 from __future__ import annotations
 
 import json
+import pickle
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple, List
+from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 import torch
-from torch import Tensor
-from jaxtyping import Float, Bool
+from torch import Tensor, device
+from jaxtyping import Float
 
 from egoallo.setup_logger import setup_logger
 from egoallo.data.motion_processing import MotionProcessor
 from egoallo.fncsmpl import SmplhModel, SmplhShaped, SmplhShapedAndPosed
 from egoallo.transforms import SE3, SO3
-from egoallo.data.dataclass import EgoTrainingData
 
 logger = setup_logger(output="logs/hps_processor", name=__name__)
 
@@ -30,16 +30,6 @@ class HPSProcessor:
         include_hands: bool = True,
         device: str = "cuda",
     ) -> None:
-        """Initialize HPS processor.
-        
-        Args:
-            hps_dir: Path to HPS dataset root
-            smplh_dir: Path to SMPL model files
-            output_dir: Output directory for processed sequences
-            fps: Target frames per second
-            include_hands: Whether to include hand poses
-            device: Device to use for processing
-        """
         self.hps_dir = Path(hps_dir)
         self.smplh_dir = Path(smplh_dir)
         self.output_dir = Path(output_dir)
@@ -50,17 +40,25 @@ class HPSProcessor:
         # Initialize motion processor
         self.motion_processor = MotionProcessor()
         
-        # Load SMPL-H models
-        self.body_model = SmplhModel.load(
-            self.smplh_dir / "model.npz"
-        ).to(self.device)
-
+        # Load SMPL-H models for each gender
+        self.body_models = {}
+        for gender in ['male', 'female', 'neutral']:
+            model_path = self.smplh_dir / f"SMPLH_{gender.upper()}.pkl"
+            self.body_models[gender] = SmplhModel.load(model_path).to(self.device)
+            
         # Joint indices for contact detection
         self.joint_indices = {
+            # TODO: change thoes joints indices with reference to mapping.py.
+            "left_knee":  4,
+            "right_knee": 5,
             "left_ankle": 7,
             "right_ankle": 8,
-            "left_toe": 10,
-            "right_toe": 11
+            "left_foot": 10,
+            "right_foot": 11,
+            "left_elbow": 18,
+            "right_elbow": 19,
+            "left_wrist": 20,
+            "right_wrist": 21,
         }
 
     def _load_camera_trajectory(
@@ -71,7 +69,6 @@ class HPSProcessor:
         with open(camera_path, 'r') as f:
             trajectory_data = json.load(f)
         
-        # Convert timestamps to frame indices
         trajectory_data = {
             int(k): {**v, "time": float(k)/self.fps} 
             for k, v in trajectory_data.items() 
@@ -89,10 +86,9 @@ class HPSProcessor:
         self,
         root_orient: Float[Tensor, "... 3"],
         body_pose: Float[Tensor, "... 63"],
-        hand_pose: Float[Tensor, "... 90"],
         trans: Float[Tensor, "... 3"]
-    ) -> tuple[Float[Tensor, "... 7"], Float[Tensor, "... 21 4"], Float[Tensor, "... 30 4"]]:
-        """Convert rotation representations to EgoTrainingData format."""
+    ) -> tuple[Float[Tensor, "... 7"], Float[Tensor, "... 21 4"], Float[Tensor, "... 15 4"], Float[Tensor, "... 15 4"]]:
+        """Convert rotation representations."""
         # Convert root orientation and translation to SE(3)
         T_world_root = SE3.from_rotation_and_translation(
             rotation=SO3.exp(root_orient),
@@ -103,113 +99,116 @@ class HPSProcessor:
         body_rots = body_pose.reshape(*body_pose.shape[:-1], 21, 3)
         body_quats = SO3.exp(body_rots).wxyz  # (..., 21, 4)
 
-        # Convert hand poses to quaternions (30 joints total)
-        hand_rots = hand_pose.reshape(*hand_pose.shape[:-1], 30, 3)
-        hand_quats = SO3.exp(hand_rots).wxyz  # (..., 30, 4)
 
-        return T_world_root, body_quats, hand_quats
+        return T_world_root, body_quats
+
+    def validate_sequence(self, sequence_name: str) -> bool:
+        """Validate that all required files exist for a sequence."""
+        # HPS dataset has a few sequences starting with "Double" that may interfere with the subject name.
+        if sequence_name.startswith("Double"):
+            subject = sequence_name.split("_")[1]
+        else:
+            subject = sequence_name.split('_')[0]
+        paths = [
+            self.hps_dir / 'hps_smpl' / f"{sequence_name}.pkl",
+            self.hps_dir / 'hps_betas' / f"{subject}.json",
+            self.hps_dir / 'head_camera_localizations' / f"{sequence_name}.json"
+        ]
+        return all(p.exists() for p in paths)
 
     def process_sequence(
         self, sequence_name: str, min_frames: int = 30
-    ) -> Optional[EgoTrainingData]:
-        """Process a single HPS sequence into EgoTrainingData format."""
+    ) -> Optional[Dict[str, Any]]:
+        """Process a single HPS sequence."""
+        if not self.validate_sequence(sequence_name):
+            logger.warning(f"Invalid sequence: {sequence_name}")
+            return None
+        
         # Load sequence data
-        seq_path = self.hps_dir / "hps_smpl" / f"{sequence_name}.pkl"
+        seq_path = self.hps_dir / 'hps_smpl' / f"{sequence_name}.pkl"
         with open(seq_path, "rb") as f:
-            seq_data = np.load(f, allow_pickle=True)
+            seq_data = pickle.load(f)
         
         # Load subject betas
-        subject = sequence_name.split("_")[0]
-        with open(self.hps_dir / "hps_betas" / f"{subject}.json", "r") as f:
-            betas_data = json.load(f)
-        betas = torch.tensor(betas_data, device=self.device)
+        if sequence_name.startswith("Double"):
+            subject = sequence_name.split("_")[1]
+        else:
+            subject = sequence_name.split('_')[0]
+        betas = torch.from_numpy(np.array(json.load(open(self.hps_dir / 'hps_betas' / f"{subject}.json"))['betas'])).float().to(self.device)
 
         # Convert sequence data to tensors
-        poses = torch.from_numpy(seq_data["poses"]).float().to(self.device)
-        trans = torch.from_numpy(seq_data["trans"]).float().to(self.device)
+        poses = torch.from_numpy(seq_data['poses']).float().to(self.device)
+        trans = torch.from_numpy(seq_data['transes']).float().to(self.device)
         
         num_frames = len(poses)
         if num_frames < min_frames:
             logger.warning(f"Sequence too short: {num_frames} frames")
             return None
 
-        # Split pose parameters
+        # Split pose parameters - HPS dataset only has root and body poses
         root_orient = poses[:, :3]  # (N, 3)
         body_pose = poses[:, 3:66]  # (N, 63)
-        hand_pose = poses[:, 66:]  # (N, 90)
 
         # Convert rotations to required format
-        T_world_root, body_quats, hand_quats = self._convert_rotations(
-            root_orient, body_pose, hand_pose, trans
+        T_world_root, body_quats = self._convert_rotations(
+            root_orient, body_pose, 
+            trans
         )
 
         # Process through SMPL-H pipeline
-        shaped = self.body_model.with_shape(betas[None])
+        gender = "male"  # Get from metadata if available
+        body_model = self.body_models[gender]
+        shaped = body_model.with_shape(betas[None])
         posed = shaped.with_pose_decomposed(
             T_world_root=T_world_root,
-            body_quats=body_quats
+            body_quats=body_quats,
+            left_hand_quats=None,  # No hand poses in HPS dataset
+            right_hand_quats=None  # No hand poses in HPS dataset
         )
 
-        # Get joint positions
+        # Extract joint positions
         joints = torch.cat([
-            posed.T_world_root[..., None, 4:7],  # Root position
-            posed.Ts_world_joint[..., 4:7]  # Other joint positions
-        ], dim=-2)
+            posed.T_world_root[..., None, 4:7],
+            posed.Ts_world_joint[..., 4:7]
+        ], dim=-2).detach().cpu().numpy()
 
         # Process floor height and contacts
-        floor_height = self.motion_processor.detect_floor_height(
-            joints.cpu().numpy(),
-            list(self.joint_indices.values())
+        # floor_height = self.motion_processor.detect_floor_height(
+        #     joints,
+        #     list(self.joint_indices.values())
+        # )
+        floor_height, contacts = self.motion_processor.process_floor_and_contacts(
+            joints, self.joint_indices
         )
         
         # Adjust heights
         trans[:, 2] -= floor_height
         joints[..., 2] -= floor_height
-        
-        # Get central pupil frame transforms
-        T_world_cpf = (
-            tf.SE3(posed.Ts_world_joint[:, 14, :])  # T_world_head
-            @ tf.SE3(fncsmpl_extensions.get_T_head_cpf(shaped))
-        ).parameters()
 
-        # Compute CPF frame-to-frame transform
-        T_cpf_tm1_cpf_t = (
-            tf.SE3(T_world_cpf[:-1, :]).inverse() @ tf.SE3(T_world_cpf[1:, :])
-        ).parameters()
+        # Load camera trajectory
+        camera_traj, start_time, end_time = self._load_camera_trajectory(sequence_name)
 
-        # Compute joints in CPF frame
-        joints_wrt_cpf = (
-            tf.SE3(T_world_cpf[:, None, :]).inverse()
-            @ joints
-        )
+        # Prepare sequence data
+        sequence_data = {
+            'poses': poses.cpu().numpy(),
+            'trans': trans.cpu().numpy(),
+            'betas': betas.cpu().numpy(),
+            'contacts': contacts,
+            'gender': gender,
+            'fps': self.fps,
+            'joints': joints,
+            'camera_trajectory': camera_traj,
+            'time_range': (start_time, end_time),
+            'root_orient': root_orient.cpu().numpy(),
+            'pose_body': body_pose.cpu().numpy(),
+        }
 
-        # Create EgoTrainingData instance
-        ego_data = EgoTrainingData(
-            T_world_root=T_world_root[1:],
-            contacts=torch.ones((num_frames-1, 21), dtype=torch.float32),  # Placeholder contacts
-            betas=betas[None],
-            body_quats=body_quats[1:],
-            T_cpf_tm1_cpf_t=T_cpf_tm1_cpf_t,
-            T_world_cpf=T_world_cpf[1:],
-            height_from_floor=T_world_cpf[1:, 6:7],
-            joints_wrt_cpf=joints_wrt_cpf[1:],
-            mask=torch.ones((num_frames-1,), dtype=torch.bool),
-            hand_quats=hand_quats[1:] if self.include_hands else None
-        )
-
-        return ego_data
+        return sequence_data
 
     def save_sequence(
-        self, ego_data: EgoTrainingData, output_path: Path
+        self, sequence_data: Dict[str, Any], output_path: Path
     ) -> None:
-        """Save processed sequence as NPZ file."""
+        """Save processed sequence data."""
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        
-        # Convert to numpy arrays
-        save_dict = {
-            k: v.cpu().numpy() if isinstance(v, torch.Tensor) else v
-            for k, v in vars(ego_data).items()
-        }
-        
-        np.savez_compressed(output_path, **save_dict)
+        np.savez_compressed(output_path, **sequence_data)
         logger.info(f"Saved processed sequence to {output_path}")

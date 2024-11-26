@@ -51,7 +51,7 @@ class MotionProcessor:
                 - Boolean contact labels of shape (num_frames, num_joints)
         """
         floor_height = self.detect_floor_height(joints, [
-            joint_indices["left_toe"], joint_indices["right_toe"]
+            joint_indices["left_foot"], joint_indices["right_foot"]
         ])
         
         # Initialize contact array
@@ -60,7 +60,7 @@ class MotionProcessor:
         # Process toe and ankle contacts
         for side in ["left", "right"]:
             # Toe contacts
-            toe_idx = joint_indices[f"{side}_toe"]
+            toe_idx = joint_indices[f"{side}_foot"]
             toe_vel = self.compute_joint_velocity(joints[:, toe_idx])
             contacts[:, toe_idx] = (
                 (toe_vel < self.contact_vel_thresh) & 
