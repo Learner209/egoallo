@@ -56,6 +56,7 @@ def process_sequence(args: tuple[RICHDataProcessor, str, str, Path]) -> Optional
     
     # try:
     # Process sequence with early exit check
+    logger.info(f"Processing sequence {seq_name}")
     processed_data = processor.process_sequence(split, seq_name, output_path)
     
     # If None returned, file already exists
@@ -97,7 +98,6 @@ def main(config: RICHPreprocessConfig) -> None:
     processed_files: list[str] = []
     
     # Collect all sequences to process
-    config.splits = ["train"]
     for split in config.splits:
         split_dir = config.output_dir / split
         split_dir.mkdir(exist_ok=True)
@@ -105,7 +105,6 @@ def main(config: RICHPreprocessConfig) -> None:
         sequences = [d.name for d in (config.rich_data_dir / 'data/bodies' / split).iterdir() if d.is_dir()]
         
         for seq_name in sequences:
-            seq_name = "ParkingLot1_005_burpeejump2"
             output_path = split_dir / f"{seq_name}.npz"
             # No need to check existence here since it's handled in process_sequence
             task_queue.put_nowait((processor, split, seq_name, output_path))
@@ -130,26 +129,26 @@ def main(config: RICHPreprocessConfig) -> None:
             )
     
     # Start worker threads
-    # workers = [
-    #     threading.Thread(target=worker, args=(i,))
-    #     for i in range(config.num_processes)
-    # ]
-    # for w in workers:
-    #     w.start()
-    # for w in workers:
-    #     w.join()
+    workers = [
+        threading.Thread(target=worker, args=(i,))
+        for i in range(config.num_processes)
+    ]
+    for w in workers:
+        w.start()
+    for w in workers:
+        w.join()
 
     # Single thread version
-    for i in range(total_count):
-        args = task_queue.get()
-        rel_path = process_sequence(args)
-        if rel_path is not None:
-            processed_files.append(rel_path)
+    # for i in range(total_count):
+    #     args = task_queue.get()
+    #     rel_path = process_sequence(args)
+    #     if rel_path is not None:
+    #         processed_files.append(rel_path)
             
-        logger.info(
-            f"Progress: {i+1}/{total_count} "
-            f"({(i+1)/total_count * 100:.2f}%)"
-        )
+    #     logger.info(
+    #         f"Progress: {i+1}/{total_count} "
+    #         f"({(i+1)/total_count * 100:.2f}%)"
+    #     )
     
     # Add existing npz files to processed_files list
     for split in config.splits:

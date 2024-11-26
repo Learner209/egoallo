@@ -122,7 +122,8 @@ class MotionProcessor:
             static_heights = static_heights[indices]
         
         # Cluster heights using DBSCAN
-        clustering = DBSCAN(eps=0.005, min_samples=3).fit(
+        # TODO: Make eps a parameter tailored to the dataset: AMASS, RICH, HPS.
+        clustering = DBSCAN(eps=0.00005, min_samples=3).fit(
             static_heights.reshape(-1, 1)
         )
         valid_clusters = np.unique(clustering.labels_[clustering.labels_ != -1])

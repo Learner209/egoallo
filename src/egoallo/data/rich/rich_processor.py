@@ -281,9 +281,9 @@ class RICHDataProcessor:
 
     def process_sequence(self, split: str, seq_name: str, output_path: Path) -> Optional[Dict[str, Any]]:
         """Process a complete sequence with world coordinates."""
-        # if output_path.exists():
-        #     logger.info(f"Skipping {seq_name} - already processed")
-        #     return None
+        if output_path.exists():
+            logger.info(f"Skipping {seq_name} - already processed")
+            return None
             
         scene_name, sub_id, _ = seq_name.split('_')
         gender = self.gender_mapping[f'{int(sub_id)}']
@@ -357,6 +357,7 @@ class RICHDataProcessor:
         contacts = np.stack(all_contacts)  # (N, num_joints)
 
         # Detect and adjust floor height
+        import ipdb; ipdb.set_trace()
         floor_height = self.motion_processor.detect_floor_height(
             joints,
             list(self.joint_indices.values())
