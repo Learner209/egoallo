@@ -148,6 +148,7 @@ class HPSProcessor:
         # Split pose parameters - HPS dataset only has root and body poses
         root_orient = poses[:, :3]  # (N, 3)
         body_pose = poses[:, 3:66]  # (N, 63)
+        hand_pose = torch.zeros(poses.shape[0], 90).to(self.device)
 
         # Convert rotations to required format
         T_world_root, body_quats = self._convert_rotations(
@@ -201,6 +202,7 @@ class HPSProcessor:
             'time_range': (start_time, end_time),
             'root_orient': root_orient.cpu().numpy(),
             'pose_body': body_pose.cpu().numpy(),
+            'pose_hand': hand_pose.cpu().numpy()
         }
 
         return sequence_data

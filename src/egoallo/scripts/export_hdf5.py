@@ -57,10 +57,10 @@ def main(
                 train_data = EgoTrainingData.load_from_npz(
                     device_body_model, npz_path, include_hands=include_hands
                 )
-                import ipdb; ipdb.set_trace()
-                EgoTrainingData.visualize_ego_training_data(
-                    train_data, body_model, str(video_output_path)
-                )
+                # # import ipdb; ipdb.set_trace()
+                # EgoTrainingData.visualize_ego_training_data(
+                #     train_data, body_model, str(video_output_path)
+                # )
 
                 rel_path = npz_path.relative_to(data_npz_dir)
                 group_name = str(rel_path.with_suffix(""))
@@ -103,14 +103,14 @@ def main(
             for i in range(num_workers)
         ]
         
-        for w in workers:
-            w.start()
-        for w in workers:
-            w.join()
+        # for w in workers:
+        #     w.start()
+        # for w in workers:
+        #     w.join()
 
-        # # Single threaded version
-        # device_idx = 0 # Use first GPU
-        # worker(device_idx)
+        # Single threaded version
+        device_idx = 0 # Use first GPU
+        worker(device_idx)
 
         if output_list_file:
             output_list_file.write_text("\n".join(sorted(file_list)))
