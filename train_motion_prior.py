@@ -11,6 +11,7 @@ import dataclasses
 import shutil
 from pathlib import Path
 from typing import Literal
+import time
 
 import tensorboardX
 import torch.optim.lr_scheduler
@@ -177,8 +178,13 @@ def run_training(
     loss_helper = training_loss.TrainingLossComputer(config.loss, device=device)
     loop_metrics_gen = training_utils.loop_metric_generator(counter_init=step)
     prev_checkpoint_path: Path | None = None
+    batch_start_time = time.time()
+    
     while True:
         for train_batch in train_loader:
+            # Record batch loading time
+            batch_load_time = time.time() - batch_start_time
+            
             loop_metrics = next(loop_metrics_gen)
             step = loop_metrics.counter
 
@@ -206,12 +212,13 @@ def run_training(
                 for k, v in log_outputs.items():
                     writer.add_scalar(k, v, step)
 
-            # Print status update to terminal.
-            if step % 20 == 0:
+            # Print status update to terminal with batch loading time
+            if step % 20 == 0 and accelerator.is_main_process:
                 mem_free, mem_total = torch.cuda.mem_get_info()
                 logger.info(
                     f"step: {step} ({loop_metrics.iterations_per_sec:.2f} it/sec)"
                     f" time: {loop_metrics.time_elapsed:.1f}s"
+                    f" batch_load: {batch_load_time*1000:.1f}ms"  # Added batch loading time
                     f" batch: {loop_metrics.batch_time*1000:.1f}ms"
                     f" fwd: {loop_metrics.forward_time*1000:.1f}ms"
                     f" bwd: {loop_metrics.backward_time*1000:.1f}ms"
@@ -224,6 +231,13 @@ def run_training(
                     f" lr: {scheduler.get_last_lr()[0]:.7f}"
                     f" loss: {loss.item():.6f}"
                 )
+
+                # Also log batch loading time to tensorboard
+                if writer is not None:
+                    writer.add_scalar('batch_loading_time_ms', batch_load_time * 1000, step)
+
+            # Start timing next batch load
+            batch_start_time = time.time()
 
             # Checkpointing.
             if step % 5000 == 0:
