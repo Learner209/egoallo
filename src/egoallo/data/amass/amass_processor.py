@@ -54,10 +54,17 @@ class AMASSProcessor:
         
         # Joint indices for SMPL model
         self.joint_indices = {
+            # TODO: change thoes joints indices with reference to mapping.py.
+            "left_knee":  4,
+            "right_knee": 5,
             "left_ankle": 7,
             "right_ankle": 8,
-            "left_toe": 10,
-            "right_toe": 11
+            "left_foot": 10,
+            "right_foot": 11,
+            "left_elbow": 18,
+            "right_elbow": 19,
+            "left_wrist": 20,
+            "right_wrist": 21,
         }
         
         # Load SMPL-H models for each gender

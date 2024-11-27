@@ -106,10 +106,6 @@ def main(config: RICHPreprocessConfig) -> None:
         
         for seq_name in sequences:
 
-            if seq_name =="Pavallion_003_018_tossball":
-                seq_name = "Pavallion_003_tossball"
-            if seq_name == "ParkingLot1_004_005_greetingchattingeating1":
-                seq_name = "ParkingLot1_004_greetingchattingeating1"
             output_path = split_dir / f"{seq_name}.npz"
             # No need to check existence here since it's handled in process_sequence
             task_queue.put_nowait((processor, split, seq_name, output_path))
@@ -138,22 +134,12 @@ def main(config: RICHPreprocessConfig) -> None:
         threading.Thread(target=worker, args=(i,))
         for i in range(config.num_processes)
     ]
-    for w in workers:
-        w.start()
-    for w in workers:
-        w.join()
+    # for w in workers:
+    #     w.start()
+    # for w in workers:
+    #     w.join()
 
-    # Single thread version
-    # for i in range(total_count):
-    #     args = task_queue.get()
-    #     rel_path = process_sequence(args)
-    #     if rel_path is not None:
-    #         processed_files.append(rel_path)
-            
-    #     logger.info(
-    #         f"Progress: {i+1}/{total_count} "
-    #         f"({(i+1)/total_count * 100:.2f}%)"
-    #     )
+    worker(0)
     
     # Add existing npz files to processed_files list
     for split in config.splits:

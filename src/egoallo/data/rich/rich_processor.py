@@ -85,9 +85,41 @@ class RICHDataProcessor:
         # Load camera-to-world transforms
         self.camera_transforms = {}
 
-    def _load_camera_transform(self, scene_name: str) -> Dict[str, torch.Tensor]:
-        """Load camera-to-world transform parameters."""
+    def _load_camera_transform(self, scene_name: str, seq_name: str = None) -> Dict[str, torch.Tensor]:
+        """Load camera-to-world transform parameters.
+        
+        Args:
+            scene_name: Name of the scene
+            seq_name: Optional sequence name to determine camera type for LectureHall
+        """
         if scene_name not in self.camera_transforms:
+            # For LectureHall, determine if it's chair or yoga scene from sequence name
+            if scene_name == "LectureHall":
+                if seq_name is None:
+                    raise ValueError("seq_name must be provided for LectureHall scenes")
+                
+                # Look up scan_name from meta files to determine camera type
+                scan_name = None
+                for meta_file in ["train.txt", "test.txt", "val.txt"]:
+                    meta_path = self.rich_data_dir / "resource/meta" / meta_file
+                    if meta_path.exists():
+                        with open(meta_path) as f:
+                            lines = f.readlines()
+                            for line in lines[1:]:  # Skip header
+                                fields = line.strip().split('\t')
+                                if fields[0] == seq_name:
+                                    scan_name = fields[2]
+                                    break
+                    if scan_name:
+                        break
+                
+                if "chair_scene" in scan_name:
+                    scene_name = "LectureHall_chair"
+                elif "yoga_scene" in scan_name:
+                    scene_name = "LectureHall_yoga"
+                else:
+                    raise ValueError(f"Unknown LectureHall scene type for sequence {seq_name}")
+
             transform_path = self.rich_data_dir / "data/multicam2world" / f"{scene_name}_multicam2world.json"
             with open(transform_path, 'r') as f:
                 cam2scan = json.load(f)
@@ -109,7 +141,8 @@ class RICHDataProcessor:
     def _transform_to_world(
         self,
         points: torch.Tensor,  # (..., 3)
-        scene_name: str
+        scene_name: str,
+        seq_name: str = None
     ) -> torch.Tensor:
         """Transform points from camera to world coordinates.
         
@@ -118,7 +151,7 @@ class RICHDataProcessor:
         2. Rotate points using R_cam_world
         3. Translate by t_cam_world
         """
-        transform_data = self._load_camera_transform(scene_name)
+        transform_data = self._load_camera_transform(scene_name, seq_name)
         R_cam_world: SO3 = transform_data['R_cam_world']
         t_cam_world: torch.Tensor = transform_data['t_cam_world']
         s_world_cam: float = transform_data['s_world_cam']
@@ -137,7 +170,8 @@ class RICHDataProcessor:
         self,
         global_orient: torch.Tensor,
         transl: torch.Tensor,
-        scene_name: str
+        scene_name: str,
+        seq_name: str = None
     ) -> SE3:
         """Calculate world transform from model output.
         
@@ -146,7 +180,7 @@ class RICHDataProcessor:
             transl: Translation vector in camera space
             scene_name: Name of the scene for camera parameters
         """
-        transform_data = self._load_camera_transform(scene_name)
+        transform_data = self._load_camera_transform(scene_name, seq_name)
         R_cam_world: SO3 = transform_data['R_cam_world']
         t_cam_world: torch.Tensor = transform_data['t_cam_world']
         s_world_cam: float = transform_data['s_world_cam']
@@ -171,7 +205,7 @@ class RICHDataProcessor:
         )
 
     def process_frame_data(
-        self, split: str, seq_name: str, frame_id: int
+        self, split: str, seq_name: str, frame_id: int, scene_name: str = None, sub_id: str = None
     ) -> Tuple[Dict[str, Union[np.ndarray, torch.Tensor]], Optional[np.ndarray], Dict[str, Any]]:
         """Process frame data using SMPLX for reference joints and transform to world coordinates.
         
@@ -181,7 +215,6 @@ class RICHDataProcessor:
             - None: Placeholder for future use
             - contact_data: Dict containing contact information
         """
-        scene_name, sub_id, _ = seq_name.split("_")
         gender = self.gender_mapping[f'{int(sub_id)}']
         
         # Load SMPL-X parameters
@@ -217,7 +250,8 @@ class RICHDataProcessor:
         T_world_root: SE3 = self._calculate_world_transform(
             body_params_tensor['global_orient'],
             pelvis_pos.unsqueeze(0),  # Use pelvis position from SMPLX
-            scene_name
+            scene_name,
+            seq_name
         )
         
         # Update body parameters with world coordinates
@@ -240,7 +274,7 @@ class RICHDataProcessor:
         # Transform contact displacement vectors to world coordinates if they exist
         if 's2m_dist_id' in hsc_params:
             displacement = torch.from_numpy(hsc_params['s2m_dist_id']).float().to(self.device)
-            world_displacement = self._transform_to_world(displacement, scene_name)
+            world_displacement = self._transform_to_world(displacement, scene_name, seq_name)
             hsc_params['s2m_dist_id'] = world_displacement.cpu().numpy()
 
         contact_data = {
@@ -285,7 +319,15 @@ class RICHDataProcessor:
             logger.info(f"Skipping {seq_name} - already processed")
             return None
             
-        scene_name, sub_id, _ = seq_name.split('_')
+        tmp_seq_name = seq_name
+        if seq_name == "Pavallion_003_018_tossball":
+            tmp_seq_name = "Pavallion_003_tossball"
+        if seq_name == "ParkingLot1_004_005_greetingchattingeating1":
+            tmp_seq_name = "ParkingLot1_004_greetingchattingeating1"
+        if seq_name == "LectureHall_009_021_reparingprojector1":
+            tmp_seq_name = "LectureHall_009_reparingprojector1"
+
+        scene_name, sub_id, _ = tmp_seq_name.split('_')
         gender = self.gender_mapping[f'{int(sub_id)}']
         body_model: SmplhModel = self.body_models[gender]
         
@@ -307,7 +349,7 @@ class RICHDataProcessor:
         all_contacts = []
         
         for frame_id in frame_ids:
-            body_params, _, contact_data = self.process_frame_data(split, seq_name, frame_id)
+            body_params, _, contact_data = self.process_frame_data(split, seq_name, frame_id, scene_name, sub_id)
             
             # Convert hand PCA to axis-angle
             left_hand_pose, right_hand_pose = body_model.convert_hand_poses(
