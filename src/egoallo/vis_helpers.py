@@ -186,6 +186,7 @@ def visualize_traj_and_hand_detections(
         assert body_quats.shape == (sample_count, timesteps, 21, 4)
         device = body_quats.device
 
+        traj.hand_rotmats = None
         if traj.hand_rotmats is not None:
             hand_quats = SO3.from_matrix(traj.hand_rotmats).wxyz
             left_hand_quats = hand_quats[..., :15, :]

@@ -179,7 +179,8 @@ def main(
                 x=torch.cat([betas,
                              SO3(body_quats).as_matrix().reshape(*body_quats.shape[:-2], 21 * 9),
                              contacts,
-                             Ts_world_root,
+                             SO3(Ts_world_root[..., :4]).as_matrix().reshape(*Ts_world_root.shape[:-1], 9),
+                             Ts_world_root[..., 4:7],
                              SO3(left_hand_quats).as_matrix().reshape(*left_hand_quats.shape[:-2], 15 * 9),
                              SO3(right_hand_quats).as_matrix().reshape(*right_hand_quats.shape[:-2], 15 * 9)], dim=-1),
                 include_hands=True,
@@ -193,7 +194,7 @@ def main(
             assert server is not None
             loop_cb = visualize_traj_and_hand_detections(
                 server,
-                gt_T_world_root,
+                SE3.from_rotation_and_translation(SO3.from_matrix(denoised_traj.R_world_root), denoised_traj.t_world_root).parameters().squeeze(0),
                 denoised_traj,
                 body_model,
                 hamer_detections=None,
