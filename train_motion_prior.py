@@ -48,7 +48,8 @@ class EgoAlloTrainConfig:
     dataset_slice_random_variable_len_proportion: float = 0.3
     """Only used if dataset_slice_strategy == 'random_variable_len'."""
     train_splits: tuple[Literal["train", "val", "test", "just_humaneva"], ...] = (
-        "just_humaneva",
+        "train", 
+        "val"
     )
 
     # Optimizer options.

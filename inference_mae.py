@@ -137,26 +137,27 @@ def run_sampling_with_masked_data(
             # Average overlapping regions
             x_0_packed_pred /= overlap_weights
 
-            x_0_packed_pred = network.EgoDenoiseTraj.unpack(
+            x_0_pred = network.EgoDenoiseTraj.unpack(
                 x_0_packed_pred,
                 include_hands=denoiser_network.config.include_hands,
                 project_rotmats=True,
-            ).pack()
+            )
 
         # Apply guidance if needed
         if guidance_mode != "off" and guidance_inner:
             x_0_pred, _ = do_guidance_optimization(
-                Ts_world_cpf=Ts_world_cpf[1:, :],
-                traj=network.EgoDenoiseTraj.unpack(
-                    x_0_packed_pred, include_hands=denoiser_network.config.include_hands
-                ),
+                T_world_root=SE3.from_rotation_and_translation(
+                    SO3.from_matrix(x_0_pred.R_world_root),
+                    x_0_pred.t_world_root
+                ).parameters().squeeze(0),
+                traj=x_0_pred,
                 body_model=body_model,
                 guidance_mode=guidance_mode,
                 phase="inner",
                 hamer_detections=hamer_detections,
                 aria_detections=aria_detections,
             )
-            x_0_packed_pred = x_0_pred.pack()
+        x_0_packed_pred = x_0_pred.pack()
 
         if torch.any(torch.isnan(x_0_packed_pred)):
             print("found nan", i)
@@ -171,7 +172,7 @@ def run_sampling_with_masked_data(
         )
         # Update x_t using noise schedule
         x_t_packed = (
-            torch.sqrt(alpha_bar_t[t_next]) * x_0_packed_pred
+            torch.sqrt(alpha_bar_t[t_next]) * x_0_pred
             + (
                 torch.sqrt(1 - alpha_bar_t[t_next] - sigma_t[t] ** 2)
                 * (x_t_packed - torch.sqrt(alpha_bar_t[t]) * x_0_packed_pred)
@@ -189,7 +190,10 @@ def run_sampling_with_masked_data(
     if guidance_mode != "off" and guidance_post:
         constrained_traj = x_t_list[-1]
         constrained_traj, _ = do_guidance_optimization(
-            Ts_world_cpf=Ts_world_cpf[1:, :],
+            T_world_root=SE3.from_rotation_and_translation(
+                SO3.from_matrix(constrained_traj.R_world_root),
+                constrained_traj.t_world_root
+            ).parameters(),
             traj=constrained_traj,
             body_model=body_model,
             guidance_mode=guidance_mode,

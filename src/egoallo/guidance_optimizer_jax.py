@@ -32,7 +32,7 @@ from .transforms._so3 import SO3
 
 
 def do_guidance_optimization(
-    Ts_world_cpf: Float[Tensor, "time 7"],
+    T_world_root: Float[Tensor, "time 7"],
     traj: network.EgoDenoiseTraj,
     body_model: fncsmpl.SmplhModel,
     guidance_mode: GuidanceMode,
@@ -56,14 +56,12 @@ def do_guidance_optimization(
             v_template=cast(jax.Array, body_model.v_template.numpy(force=True)),
             shapedirs=cast(jax.Array, body_model.shapedirs.numpy(force=True)),
         ),
-        Ts_world_cpf=cast(jax.Array, Ts_world_cpf.numpy(force=True)),
+        T_world_root=cast(jax.Array, T_world_root.numpy(force=True)),
         betas=cast(jax.Array, traj.betas.numpy(force=True)),
         body_rotmats=cast(jax.Array, traj.body_rotmats.numpy(force=True)),
         hand_rotmats=cast(jax.Array, traj.hand_rotmats.numpy(force=True)),
         contacts=cast(jax.Array, traj.contacts.numpy(force=True)),
         guidance_params=guidance_params,
-        # The hand detections are a torch tensors in a TensorDataclass form. We
-        # use dictionaries to convert to pytrees.
         hamer_detections=None
         if hamer_detections is None
         else hamer_detections.as_nested_dict(numpy=True),
@@ -113,7 +111,7 @@ class _SmplhSingleHandPosesVar(
 
 @jdc.jit
 def _optimize_vmapped(
-    Ts_world_cpf: jax.Array,
+    T_world_root: jax.Array,
     body: fncsmpl_jax.SmplhModel,
     betas: jax.Array,
     body_rotmats: jax.Array,
@@ -126,7 +124,7 @@ def _optimize_vmapped(
     return jax.vmap(
         partial(
             _optimize,
-            Ts_world_cpf=Ts_world_cpf,
+            T_world_root=T_world_root,
             body=body,
             guidance_params=guidance_params,
             hamer_detections=hamer_detections,
@@ -297,7 +295,7 @@ class JaxGuidanceParams:
 
 
 def _optimize(
-    Ts_world_cpf: jax.Array,
+    T_world_root: jax.Array,
     body: fncsmpl_jax.SmplhModel,
     betas: jax.Array,
     body_rotmats: jax.Array,
@@ -310,34 +308,23 @@ def _optimize(
     """Apply constraints using Levenberg-Marquardt optimizer. Returns updated
     body_rotmats and hand_rotmats matrices."""
     timesteps = body_rotmats.shape[0]
-    assert Ts_world_cpf.shape == (timesteps, 7)
     assert body_rotmats.shape == (timesteps, 21, 3, 3)
     assert hand_rotmats.shape == (timesteps, 30, 3, 3)
     assert contacts.shape == (timesteps, 21)
     assert betas.shape == (timesteps, 16)
 
     init_quats = jaxlie.SO3.from_matrix(
-        # body_rotmats
         jnp.concatenate([body_rotmats, hand_rotmats], axis=1)
     ).wxyz
     assert init_quats.shape == (timesteps, 51, 4)
 
     # Assume body shape is time-invariant.
     shaped_body = body.with_shape(jnp.mean(betas, axis=0))
-    T_head_cpf = shaped_body.get_T_head_cpf()
-    T_cpf_head = jaxlie.SE3(T_head_cpf).inverse().parameters()
-    assert T_cpf_head.shape == (7,)
-
+    
     init_posed = shaped_body.with_pose(
-        jaxlie.SE3.identity(batch_axes=(timesteps,)).wxyz_xyz, init_quats
+        T_world_root=T_world_root,
+        local_quats=init_quats
     )
-    T_world_head = jaxlie.SE3(Ts_world_cpf) @ jaxlie.SE3(T_cpf_head)
-    T_root_head = jaxlie.SE3(init_posed.Ts_world_joint[:, 14])
-    init_posed = init_posed.with_new_T_world_root(
-        (T_world_head @ T_root_head.inverse()).wxyz_xyz
-    )
-    del T_world_head
-    del T_root_head
 
     foot_joint_indices = jnp.array([6, 7, 9, 10])
     num_foot_joints = foot_joint_indices.shape[0]
@@ -374,20 +361,21 @@ def _optimize(
         output_frame: Literal["world", "root"] = "world",
     ) -> fncsmpl_jax.SmplhShapedAndPosed:
         """Helper for computing forward kinematics from variables."""
+        import ipdb; ipdb.set_trace()
         assert (left_hand is None) == (right_hand is None)
         if left_hand is None and right_hand is None:
             posed = shaped_body.with_pose(
-                T_world_root=jaxlie.SE3.identity().wxyz_xyz,
+                T_world_root=T_world_root,
                 local_quats=vals[var],
             )
         elif left_hand is not None and right_hand is None:
             posed = shaped_body.with_pose(
-                T_world_root=jaxlie.SE3.identity().wxyz_xyz,
+                T_world_root=T_world_root,
                 local_quats=jnp.concatenate([vals[var], vals[left_hand]], axis=-2),
             )
         elif left_hand is not None and right_hand is not None:
             posed = shaped_body.with_pose(
-                T_world_root=jaxlie.SE3.identity().wxyz_xyz,
+                T_world_root=T_world_root,
                 local_quats=jnp.concatenate(
                     [vals[var], vals[left_hand], vals[right_hand]], axis=-2
                 ),
@@ -396,15 +384,7 @@ def _optimize(
             assert False
 
         if output_frame == "world":
-            T_world_root = (
-                # T_world_cpf
-                jaxlie.SE3(Ts_world_cpf[var.id, :])
-                # T_cpf_head
-                @ jaxlie.SE3(T_cpf_head)
-                # T_head_root
-                @ jaxlie.SE3(posed.Ts_world_joint[14]).inverse()
-            )
-            return posed.with_new_T_world_root(T_world_root.wxyz_xyz)
+            return posed.with_new_T_world_root(T_world_root[var.id, :])
         elif output_frame == "root":
             return posed
 
