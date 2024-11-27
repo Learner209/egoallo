@@ -57,7 +57,7 @@ class Args:
     up debugging/experiments, or if we only care about foot skating losses."""
     guidance_post: bool = True
     """Whether to apply guidance optimizer after diffusion sampling."""
-    visualize_traj: bool = False
+    visualize_traj: bool = True
     """Whether to visualize the trajectory after sampling."""
     mask_ratio: float = 0.75
     """Ratio of joints to mask."""
