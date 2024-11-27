@@ -90,7 +90,7 @@ def main(
     for test_batch in test_loader:
         body_model = fncsmpl.SmplhModel.load(config.smplh_npz_path).to(device)
         denoiser_network = load_denoiser(config.checkpoint_dir).to(device)
-        traj_data = test_batch
+        traj_data: EgoTrainingData = test_batch
 
         # Prepare input tensors
         # import ipdb; ipdb.set_trace()
@@ -132,22 +132,7 @@ def main(
             device=device,
         )
 
-        # Calculate metrics between original and inferred trajectories
-        metrics = calculate_metrics(
-            original_posed=posed,
-            denoised_traj=denoised_traj,
-            masked_data=masked_data,
-            body_model=body_model
-        )
-
-        # Print metrics
-        print("\nTrajectory Metrics:")
-        print(f"Translation Error: {metrics['translation_error_meters']:.3f} meters")
-        print(f"Rotation Error: {metrics['rotation_error_radians']:.3f} radians")
-        print(f"Unmasked Joints MPJPE: {metrics['unmasked_mpjpe_mm']:.1f} mm")
-        print(f"Masked Joints MPJPE: {metrics['masked_mpjpe_mm']:.1f} mm")
-
-        import ipdb; ipdb.set_trace()
+        # import ipdb; ipdb.set_trace()
         
         # Save outputs in case we want to visualize later.
         # if args.save_traj:
@@ -190,12 +175,25 @@ def main(
 
         # Visualize.
         if config.visualize_traj:
+            gt_traj = network.EgoDenoiseTraj.unpack(
+                x=torch.cat([betas,
+                             SO3(body_quats).as_matrix().reshape(*body_quats.shape[:-2], 21 * 9),
+                             contacts,
+                             Ts_world_root,
+                             SO3(left_hand_quats).as_matrix().reshape(*left_hand_quats.shape[:-2], 15 * 9),
+                             SO3(right_hand_quats).as_matrix().reshape(*right_hand_quats.shape[:-2], 15 * 9)], dim=-1),
+                include_hands=True,
+                project_rotmats=False
+            )
+            gt_T_world_root = traj_data.T_world_root.squeeze(0).to(device)
+            # import ipdb; ipdb.set_trace()
+
             server = viser.ViserServer()
             server.gui.configure_theme(dark_mode=True)
             assert server is not None
             loop_cb = visualize_traj_and_hand_detections(
                 server,
-                denoised_traj.T_world_root.squeeze(),
+                gt_T_world_root,
                 denoised_traj,
                 body_model,
                 hamer_detections=None,

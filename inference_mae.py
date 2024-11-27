@@ -181,7 +181,7 @@ def run_sampling_with_masked_data(
         )
         x_t_list.append(
             network.EgoDenoiseTraj.unpack(
-                x_t_packed, include_hands=denoiser_network.config.include_hands
+                x_t_packed, include_hands=denoiser_network.config.include_hands, project_rotmats=True
             )
         )
 

@@ -3,7 +3,7 @@
 	"terminal.integrated.profiles.linux": {
     "tmux": {
 				"path": "bash",
-				"args": ["-c", "tmux new-session -A -s ${PWD##*/} 'exec zsh'"],
+				"args": ["-c", "tmux new-session -A -s feature/T_world_root_addition 'exec zsh'"],
 				"icon": "terminal-tmux"
 			},
 	}

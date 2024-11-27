@@ -57,6 +57,9 @@ class EgoAlloTrainConfig:
     warmup_steps: int = 1000
     max_grad_norm: float = 1.0
 
+    # debug
+    debug: bool = False
+
     def __post_init__(self):
         self.model = network.EgoDenoiserConfig(mask_ratio=self.mask_ratio)
 
@@ -95,6 +98,9 @@ def run_training(
         else None
     )
     device = accelerator.device
+
+    if config.debug:
+        import ipdb; ipdb.set_trace()
 
     # Initialize experiment.
     if accelerator.is_main_process:
@@ -230,6 +236,11 @@ def run_training(
                     f" gpu_mem: {[f'{m:.1f}GB' for m in loop_metrics.gpu_memory_used]}"
                     f" lr: {scheduler.get_last_lr()[0]:.7f}"
                     f" loss: {loss.item():.6f}"
+                    f" betas: {log_outputs['loss_term/betas'].item():.6f}"
+                    f" body_rotmats: {log_outputs['loss_term/body_rotmats'].item():.6f}"
+                    f" contacts: {log_outputs['loss_term/contacts'].item():.6f}"
+                    f" R_world_root: {log_outputs['loss_term/R_world_root'].item():.6f}"
+                    f" t_world_root: {log_outputs['loss_term/t_world_root'].item():.6f}"
                 )
 
                 # Also log batch loading time to tensorboard
@@ -240,7 +251,7 @@ def run_training(
             batch_start_time = time.time()
 
             # Checkpointing.
-            if step % 5000 == 0:
+            if step % 2000 == 0:
                 # Save checkpoint.
                 checkpoint_path = experiment_dir / f"checkpoints_{step}"
                 accelerator.save_state(str(checkpoint_path))

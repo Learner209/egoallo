@@ -177,6 +177,7 @@ def visualize_traj_and_hand_detections(
         add_splat_to_viser(splat_path, server)  # , z_offset=-floor_z)
 
     if traj is not None:
+        # import ipdb; ipdb.set_trace()
         betas = traj.betas
         timesteps = betas.shape[1]
         sample_count = betas.shape[0]
@@ -506,11 +507,11 @@ def visualize_traj_and_hand_detections(
                             force=True
                         )
                     # Check if the destination array is writable
-                    if not bone_handle.wxyz.flags["WRITEABLE"]:
-                        bone_handle.wxyz.setflags(write=True)  # Make it writable
+                    # if not bone_handle.wxyz.flags["WRITEABLE"]:
+                    #     bone_handle.wxyz.setflags(write=True)  # Make it writable
                     bone_handle.wxyz = bone_transform[:4]
-                    if not bone_handle.position.flags["WRITEABLE"]:
-                        bone_handle.position.setflags(write=True)  # Make it writable
+                    # if not bone_handle.position.flags["WRITEABLE"]:
+                    #     bone_handle.position.setflags(write=True)  # Make it writable
                     bone_handle.position = bone_transform[4:7]
 
         for ii, timestep_frame in enumerate(timestep_handles):

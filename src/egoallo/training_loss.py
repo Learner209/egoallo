@@ -25,8 +25,8 @@ class TrainingLossConfig:
             "body_rotmats": 1.0,
             "contacts": 0.05,
             "hand_rotmats": 0.01,
-            "T_world_root_trans": 0.2,
-            "T_world_root_rot": 0.2,
+            "R_world_root": 0.2,
+            "t_world_root": 0.2,
         }.copy
     )
     weight_loss_by_t: Literal["emulate_eps_pred"] = "emulate_eps_pred"
@@ -95,6 +95,9 @@ class TrainingLossComputer:
 
         batch, time, num_joints, _ = train_batch.body_quats.shape
         assert num_joints == 21
+        T_world_root = train_batch.T_world_root
+        R_world_root = SO3(T_world_root[..., :4]).as_matrix()
+        t_world_root = T_world_root[..., 4:7]
         if unwrapped_model.config.include_hands:
             assert train_batch.hand_quats is not None
             x_0 = network.EgoDenoiseTraj(
@@ -102,7 +105,8 @@ class TrainingLossComputer:
                 body_rotmats=SO3(train_batch.body_quats).as_matrix(),
                 contacts=train_batch.contacts,
                 hand_rotmats=SO3(train_batch.hand_quats).as_matrix(),
-                T_world_root=train_batch.T_world_root,
+                R_world_root=R_world_root,
+                t_world_root=t_world_root,
             )
         else:
             x_0 = network.EgoDenoiseTraj(
@@ -110,7 +114,8 @@ class TrainingLossComputer:
                 body_rotmats=SO3(train_batch.body_quats).as_matrix(),
                 contacts=train_batch.contacts,
                 hand_rotmats=None,
-                T_world_root=train_batch.T_world_root,
+                R_world_root=R_world_root,
+                t_world_root=t_world_root,
             )
         x_0_packed = x_0.pack()
         device = x_0_packed.device
@@ -170,6 +175,9 @@ class TrainingLossComputer:
         x_0_pred = network.EgoDenoiseTraj.unpack(
             x_0_packed_pred, include_hands=unwrapped_model.config.include_hands
         )
+        # breakpoint()
+        # import ipdb; ipdb.set_trace()
+        
 
         weight_t = self.weight_t[t].to(device)
         assert weight_t.shape == (batch,)
@@ -198,7 +206,6 @@ class TrainingLossComputer:
                 )
                 / bt_mask_sum
             )
-
         loss_terms: dict[str, Tensor | float] = {
             "betas": weight_and_mask_loss(
                 # (b, t, 16)
@@ -208,21 +215,14 @@ class TrainingLossComputer:
             ),
             "body_rotmats": weight_and_mask_loss(
                 # Reshape inputs to (batch, time, 21, 3, 3)
-                self.compute_geodesic_distance(
-                    x_0_pred.body_rotmats.reshape(batch, time, 21, 3, 3),
-                    x_0.body_rotmats.reshape(batch, time, 21, 3, 3)
-                ).reshape(batch, time, 21)
+                (x_0_pred.body_rotmats - x_0.body_rotmats).reshape(batch, time, -1) ** 2
             ),
             "contacts": weight_and_mask_loss((x_0_pred.contacts - x_0.contacts) ** 2),
-            "T_world_root_trans": weight_and_mask_loss(
-                (x_0_pred.T_world_root[..., 4:7] - x_0.T_world_root[..., 4:7]) ** 2
+            "t_world_root": weight_and_mask_loss(
+                (x_0_pred.t_world_root - x_0.t_world_root) ** 2
             ),
-            "T_world_root_rot": weight_and_mask_loss(
-                self.compute_geodesic_distance(
-                    # Convert first 4 elements (quaternion) to rotation matrix
-                    SO3(x_0_pred.T_world_root[..., :4]).as_matrix(),
-                    SO3(x_0.T_world_root[..., :4]).as_matrix()
-                )
+            "R_world_root": weight_and_mask_loss(
+                (x_0_pred.R_world_root - x_0.R_world_root).reshape(batch, time, -1) ** 2
             ),
         }
 

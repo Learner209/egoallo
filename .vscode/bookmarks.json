@@ -14,19 +14,9 @@
 			"path": "src/egoallo/network.py",
 			"bookmarks": [
 				{
-					"line": 184,
+					"line": 249,
 					"column": 0,
 					"label": "make_cond"
-				}
-			]
-		},
-		{
-			"path": "src/egoallo/vis_helpers.py",
-			"bookmarks": [
-				{
-					"line": 340,
-					"column": 21,
-					"label": "MeshSkinnedBoneHandle_viser_body_handles"
 				}
 			]
 		}

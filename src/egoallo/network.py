@@ -42,8 +42,11 @@ class EgoDenoiseTraj(TensorDataclass):
     hand_rotmats: Float[Tensor, "*#batch timesteps 30 3 3"] | None
     """Local orientations for each body joint."""
 
-    T_world_root: Float[Tensor, "*#batch timesteps 7"]
-    """Global wxyz_xyz of the root joint."""
+    R_world_root: Float[Tensor, "*#batch timesteps 3 3"]
+    """Global rotation matrix of the root joint."""
+
+    t_world_root: Float[Tensor, "*#batch timesteps 3"]
+    """Global translation vector of the root joint."""
 
     @staticmethod
     def get_packed_dim(include_hands: bool) -> int:
@@ -55,8 +58,8 @@ class EgoDenoiseTraj(TensorDataclass):
         Returns:
             Total dimension of packed state vector.
         """
-        # 16 (betas) + 21*9 (body_rotmats) + 21 (contacts) + 7 (T_world_root)
-        packed_dim = 16 + 21 * 9 + 21 + 7
+        # 16 (betas) + 21*9 (body_rotmats) + 21 (contacts) + 9 (R_world_root) + 3 (t_world_root)
+        packed_dim = 16 + 21 * 9 + 21 + 9 + 3
         if include_hands:
             packed_dim += 30 * 9  # hand_rotmats
         return packed_dim
@@ -68,8 +71,12 @@ class EgoDenoiseTraj(TensorDataclass):
         assert self.hand_rotmats is not None
         
         shaped = body_model.with_shape(self.betas)
+        T_world_root = SE3.from_rotation_and_translation(
+            SO3.from_matrix(self.R_world_root),
+            self.t_world_root,
+        ).parameters()
         posed = shaped.with_pose(
-            T_world_root=self.T_world_root,  # Use the actual T_world_root
+            T_world_root=T_world_root,
             local_quats=SO3.from_matrix(
                 torch.cat([self.body_rotmats, self.hand_rotmats], dim=-3)
             ).wxyz,
@@ -86,7 +93,8 @@ class EgoDenoiseTraj(TensorDataclass):
             self.betas.reshape((*batch, time, -1)),
             self.body_rotmats.reshape((*batch, time, -1)),
             self.contacts.reshape((*batch, time, -1)),
-            self.T_world_root.reshape((*batch, time, -1))
+            self.R_world_root.reshape((*batch, time, -1)),
+            self.t_world_root.reshape((*batch, time, -1)),
         ]
         
         if self.hand_rotmats is not None:
@@ -106,14 +114,14 @@ class EgoDenoiseTraj(TensorDataclass):
         assert d_state == cls.get_packed_dim(include_hands)
 
         if include_hands:
-            betas, body_rotmats_flat, contacts, T_world_root, hand_rotmats_flat = torch.split(
-                x, [16, 21 * 9, 21, 7, 30 * 9], dim=-1
+            betas, body_rotmats_flat, contacts, R_world_root, t_world_root, hand_rotmats_flat = torch.split(
+                x, [16, 21 * 9, 21, 9, 3, 30 * 9], dim=-1
             )
             body_rotmats = body_rotmats_flat.reshape((*batch, time, 21, 3, 3))
             hand_rotmats = hand_rotmats_flat.reshape((*batch, time, 30, 3, 3))
         else:
-            betas, body_rotmats_flat, contacts, T_world_root = torch.split(
-                x, [16, 21 * 9, 21, 7], dim=-1
+            betas, body_rotmats_flat, contacts, R_world_root, t_world_root = torch.split(
+                x, [16, 21 * 9, 21, 9, 3], dim=-1
             )
             body_rotmats = body_rotmats_flat.reshape((*batch, time, 21, 3, 3))
             hand_rotmats = None
@@ -123,12 +131,14 @@ class EgoDenoiseTraj(TensorDataclass):
             if hand_rotmats is not None:
                 hand_rotmats = project_rotmats_via_svd(hand_rotmats)
 
+        R_world_root = R_world_root.reshape(*batch, time, 3, 3)
         return cls(
             betas=betas,
             body_rotmats=body_rotmats,
             contacts=contacts,
             hand_rotmats=hand_rotmats,
-            T_world_root=T_world_root,
+            R_world_root=R_world_root,
+            t_world_root=t_world_root,
         )
 
 
@@ -158,7 +168,7 @@ class EgoDenoiserConfig:
     )
 
     # Joint position conditioning settings
-    joint_cond_mode: Literal["absolute", "canonicalized", "absrel", "absrel_global_deltas"] = "absrel_global_deltas"
+    joint_cond_mode: Literal["absolute", "canonicalized", "absrel", "absrel_global_deltas"] = "absrel"
 
     @cached_property
     def d_cond(self) -> int:
@@ -173,7 +183,7 @@ class EgoDenoiserConfig:
         elif self.joint_cond_mode == "canonicalized":
             d_cond = d_per_joint * num_visible_joints  # Canonicalized position + index embedding
         elif self.joint_cond_mode == "absrel":
-            d_cond = d_per_joint * num_visible_joints * 2  # Both absolute and relative positions + index embeddings
+            d_cond = (d_per_joint * 2 - 16) * num_visible_joints  # Both absolute and relative positions + index embeddings
         elif self.joint_cond_mode == "absrel_global_deltas":
             d_cond = (d_per_joint * num_visible_joints) + 9 + 3  # Visible joint positions + indices + global rotation + translation
         else:
@@ -223,15 +233,15 @@ class EgoDenoiserConfig:
             
         elif self.joint_cond_mode == "absrel":
             # Both absolute positions and frame-to-frame motion for visible joints
-            abs_pos = visible_joints
-            rel_pos = torch.zeros_like(visible_joints)
-            rel_pos[:, 1:] = visible_joints[:, 1:] - visible_joints[:, :-1]
+            abs_pos = visible_joints # shape: (batch, time, num_visible_joints, 3)
+            rel_pos = torch.zeros_like(visible_joints) # shape: (batch, time, num_visible_joints, 3)
+            rel_pos[:, 1:] = visible_joints[:, 1:] - visible_joints[:, :-1] # shape: (batch, time, num_visible_joints, 3)
             
             cond = torch.cat([
                 abs_pos,
                 rel_pos,
-                index_embeddings.repeat(1, 1, 2)  # Repeat embeddings for abs and rel
-            ], dim=-1)
+                index_embeddings  # Repeat embeddings for abs and rel
+            ], dim=-1).reshape(batch, time, -1) # shape: (batch, time, num_visible_joints * (3 + 3 + 16))
             
         elif self.joint_cond_mode == "absrel_global_deltas":
             # import ipdb; ipdb.set_trace()
@@ -303,7 +313,8 @@ class EgoDenoiser(nn.Module):
             "betas": 16,
             "body_rotmats": 21 * 9,
             "contacts": 21,
-            "T_world_root": 7,
+            "R_world_root": 9,
+            "t_world_root": 3,
         }
         if config.include_hands:
             modality_dims["hand_rotmats"] = 30 * 9
@@ -419,7 +430,8 @@ class EgoDenoiser(nn.Module):
             self.encoders["betas"](x_t.betas.reshape((batch, time, -1)))
             + self.encoders["body_rotmats"](x_t.body_rotmats.reshape((batch, time, -1)))
             + self.encoders["contacts"](x_t.contacts)
-            + self.encoders["T_world_root"](x_t.T_world_root)
+            + self.encoders["R_world_root"](x_t.R_world_root.reshape((batch, time, -1)))
+            + self.encoders["t_world_root"](x_t.t_world_root.reshape((batch, time, -1)))
         )
         if self.config.include_hands:
             assert x_t.hand_rotmats is not None
