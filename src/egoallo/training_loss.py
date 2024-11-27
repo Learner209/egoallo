@@ -25,7 +25,8 @@ class TrainingLossConfig:
             "body_rotmats": 1.0,
             "contacts": 0.05,
             "hand_rotmats": 0.01,
-            "T_world_root": 0.2,
+            "T_world_root_trans": 0.2,
+            "T_world_root_rot": 0.2,
         }.copy
     )
     weight_loss_by_t: Literal["emulate_eps_pred"] = "emulate_eps_pred"
@@ -213,8 +214,15 @@ class TrainingLossComputer:
                 ).reshape(batch, time, 21)
             ),
             "contacts": weight_and_mask_loss((x_0_pred.contacts - x_0.contacts) ** 2),
-            "T_world_root": weight_and_mask_loss(
-                (x_0_pred.T_world_root - x_0.T_world_root) ** 2
+            "T_world_root_trans": weight_and_mask_loss(
+                (x_0_pred.T_world_root[..., 4:7] - x_0.T_world_root[..., 4:7]) ** 2
+            ),
+            "T_world_root_rot": weight_and_mask_loss(
+                self.compute_geodesic_distance(
+                    # Convert first 4 elements (quaternion) to rotation matrix
+                    SO3(x_0_pred.T_world_root[..., :4]).as_matrix(),
+                    SO3(x_0.T_world_root[..., :4]).as_matrix()
+                )
             ),
         }
 
