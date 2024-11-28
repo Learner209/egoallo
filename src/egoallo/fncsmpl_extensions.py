@@ -73,3 +73,35 @@ def get_T_world_root_from_cpf_pose(
         @ transforms.SE3(posed.T_world_root)
     )
     return T_world_root.wxyz_xyz
+
+
+def get_T_world_cpf_from_root_pose(
+    posed: fncsmpl.SmplhShapedAndPosed,
+    T_world_root: Float[Tensor, "... 7"],
+) -> Float[Tensor, "... 7"]:
+    """Get the CPF transform from root transform and posed model.
+    
+    Args:
+        posed: SMPL-H model in posed configuration
+        T_world_root: Root transform in world coordinates
+        
+    Returns:
+        T_world_cpf: Transform from world to CPF (Central Pupil Frame)
+    """
+    device = posed.Ts_world_joint.device
+    dtype = posed.Ts_world_joint.dtype
+
+    if isinstance(T_world_root, np.ndarray):
+        T_world_root = torch.from_numpy(T_world_root).to(device=device, dtype=dtype)
+
+    assert T_world_root.shape[-1] == 7
+    
+    T_world_cpf = (
+        # T_world_root
+        transforms.SE3(T_world_root)
+        # T_root_world @ T_world_head
+        @ transforms.SE3(posed.Ts_world_joint[..., 14, :])
+        # T_head_cpf 
+        @ transforms.SE3(get_T_head_cpf(posed.shaped_model))
+    )
+    return T_world_cpf.parameters()

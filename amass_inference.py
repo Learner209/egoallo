@@ -1,9 +1,13 @@
 from __future__ import annotations
+import sys
 
 import numpy as np
 import viser
 import torch
 from pathlib import Path
+import time
+import tyro
+from egoallo import transforms as tf
 
 from egoallo.data.dataclass import EgoTrainingData
 from egoallo.inference_utils import (
@@ -12,6 +16,7 @@ from egoallo.inference_utils import (
     EgoDenoiseTraj
 )
 from egoallo import fncsmpl
+from egoallo import fncsmpl_extensions
 from egoallo.vis_helpers import visualize_traj_and_hand_detections
 from egoallo.sampling import CosineNoiseScheduleConstants, quadratic_ts
 from egoallo.data.amass import EgoAmassHdf5Dataset
@@ -34,10 +39,10 @@ from egoallo.hand_detection_structs import (
     CorrespondedHamerDetections,
 )
 from egoallo.tensor_dataclass import TensorDataclass
-from egoallo.transforms import SE3, SO3
 from egoallo.training_utils import ipdb_safety_net
 from inference_mae import run_sampling_with_masked_data, calculate_metrics
 from train_motion_prior import EgoAlloTrainConfig
+from egoallo.transforms import SO3, SE3
 import dataclasses
 
 
@@ -118,7 +123,7 @@ def main(
         )
 
         # Run sampling with masked data
-        denoised_traj = run_sampling_with_masked_data(
+        denoised_traj: EgoDenoiseTraj = run_sampling_with_masked_data(
             denoiser_network=denoiser_network,
             body_model=body_model,
             masked_data=masked_data,
@@ -132,8 +137,84 @@ def main(
             device=device,
         )
 
+        # Create EgoTrainingData instance from denoised trajectory
+        T_world_root = SE3.from_rotation_and_translation(
+            SO3.from_matrix(denoised_traj.R_world_root),
+            denoised_traj.t_world_root,
+        ).parameters()
+        betas = denoised_traj.betas
+        timesteps = betas.shape[1]
+        sample_count = betas.shape[0]
+        assert betas.shape == (sample_count, timesteps, 16)
+        body_quats = SO3.from_matrix(denoised_traj.body_rotmats).wxyz
+        assert body_quats.shape == (sample_count, timesteps, 21, 4)
+        device = body_quats.device
 
-    # Calculate metrics between original and inferred trajectories
+        # denoised_traj.hand_rotmats = None
+        if denoised_traj.hand_rotmats is not None:
+            hand_quats = SO3.from_matrix(denoised_traj.hand_rotmats).wxyz
+            left_hand_quats = hand_quats[..., :15, :]
+            right_hand_quats = hand_quats[..., 15:30, :]
+        else:
+            left_hand_quats = None
+            right_hand_quats = None
+
+        shaped = body_model.with_shape(torch.mean(betas, dim=1, keepdim=True))
+        fk_outputs: fncsmpl.SmplhShapedAndPosed = shaped.with_pose_decomposed(
+            T_world_root=T_world_root,
+            body_quats=body_quats,
+            left_hand_quats=left_hand_quats,
+            right_hand_quats=right_hand_quats,
+        )
+        T_world_cpf = fncsmpl_extensions.get_T_world_cpf_from_root_pose(fk_outputs, T_world_root)
+
+        denoised_ego_data = EgoTrainingData(
+            T_world_root=T_world_root.squeeze(0).cpu(),
+            contacts=denoised_traj.contacts.squeeze(0).cpu(),
+            betas=denoised_traj.betas.squeeze(0).cpu(),
+            joints_wrt_world=fk_outputs.Ts_world_joint.squeeze(0).cpu(),
+            body_quats=SO3.from_matrix(denoised_traj.body_rotmats).wxyz.cpu()[:, :, :21, :].cpu().squeeze(0), #denoised_traj.body_quats.cpu(),
+            T_world_cpf=T_world_cpf.cpu().squeeze(0),
+            height_from_floor=T_world_cpf[..., 6:7].cpu().squeeze(0),
+            T_cpf_tm1_cpf_t=(
+                tf.SE3(T_world_cpf[:-1, :]).inverse() @ tf.SE3(T_world_cpf[1:, :])
+            ).parameters().cpu().squeeze(0),
+            joints_wrt_cpf=(
+                # unsqueeze so both shapes are (timesteps, joints, dim)
+                tf.SE3(T_world_cpf[0, 1:, None, :]).inverse()
+                @ fk_outputs.Ts_world_joint[0, 1:, :21, 4:7].to(T_world_cpf.device)
+            ),
+            mask=torch.ones_like(denoised_traj.contacts[0, :], dtype=torch.bool),
+            hand_quats=None,
+            visible_joints_mask=None,
+            visible_joints=None,
+        )
+
+        # Create ground truth EgoTrainingData
+        gt_ego_data = EgoTrainingData(
+            T_world_root=traj_data.T_world_root.squeeze(0).cpu(),
+            contacts=traj_data.contacts.squeeze(0).cpu(),
+            betas=traj_data.betas.squeeze(0).cpu(),
+            joints_wrt_world=posed.Ts_world_joint.squeeze(0).cpu(),
+            body_quats=body_quats.squeeze(0).cpu(),
+            T_world_cpf=Ts_world_cpf.squeeze(0).cpu(),
+            height_from_floor=Ts_world_cpf[..., 6:7].squeeze(0).cpu(),
+            T_cpf_tm1_cpf_t=(
+                tf.SE3(Ts_world_cpf[:-1, :]).inverse() @ tf.SE3(Ts_world_cpf[1:, :])
+            ).parameters().cpu().squeeze(0),
+            joints_wrt_cpf=(
+                # unsqueeze so both shapes are (timesteps, joints, dim)
+            tf.SE3(Ts_world_cpf[0, 1:, None, :]).inverse()
+                @ posed.Ts_world_joint[0, 1:, :21, 4:7].to(Ts_world_cpf.device)
+            ),
+            mask=torch.ones_like(traj_data.contacts[0, :], dtype=torch.bool),
+            hand_quats=traj_data.hand_quats.squeeze(0).cpu() if traj_data.hand_quats is not None else None,
+            visible_joints_mask=None,
+            visible_joints=None,
+        )
+
+
+        # Calculate metrics between original and inferred trajectories
         metrics = calculate_metrics(
             original_posed=posed,
             denoised_traj=denoised_traj,
@@ -191,37 +272,30 @@ def main(
 
         # Visualize.
         if config.visualize_traj:
-            gt_traj = network.EgoDenoiseTraj.unpack(
-                x=torch.cat([betas,
-                             SO3(body_quats).as_matrix().reshape(*body_quats.shape[:-2], 21 * 9),
-                             contacts,
-                             SO3(Ts_world_root[..., :4]).as_matrix().reshape(*Ts_world_root.shape[:-1], 9),
-                             Ts_world_root[..., 4:7],
-                             SO3(left_hand_quats).as_matrix().reshape(*left_hand_quats.shape[:-2], 15 * 9),
-                             SO3(right_hand_quats).as_matrix().reshape(*right_hand_quats.shape[:-2], 15 * 9)], dim=-1),
-                include_hands=True,
-                project_rotmats=False
-            )
-            gt_T_world_root = traj_data.T_world_root.squeeze(0).to(device)
-            # import ipdb; ipdb.set_trace()
 
             server = viser.ViserServer()
             server.gui.configure_theme(dark_mode=True)
             assert server is not None
             use_gt = False
-            loop_cb = visualize_traj_and_hand_detections(
-                server,
-                SE3.from_rotation_and_translation(SO3.from_matrix(denoised_traj.R_world_root), denoised_traj.t_world_root).parameters().squeeze(0) if not use_gt else gt_T_world_root,
-                denoised_traj if not use_gt else gt_traj,
-                body_model,
-                hamer_detections=None,
-                aria_detections=None,
-                points_data=None,
-                splat_path=None,
-                floor_z=0.0,
-            )
-            while True:
-                loop_cb()
+
+            # breakpoint()
+            EgoTrainingData.visualize_ego_training_data(gt_ego_data, body_model, output_path="output-gt.mp4")
+            EgoTrainingData.visualize_ego_training_data(denoised_ego_data, body_model, output_path="output-inferred.mp4")
+            sys.exit(0)
+
+            # loop_cb = visualize_traj_and_hand_detections(
+            #     server,
+            #     tf.SE3.from_rotation_and_translation(tf.SO3.from_matrix(denoised_traj.R_world_root), denoised_traj.t_world_root).parameters().squeeze(0) if not use_gt else gt_T_world_root,
+            #     denoised_traj if not use_gt else gt_traj,
+            #     body_model,
+            #     hamer_detections=None,
+            #     aria_detections=None,
+            #     points_data=None,
+            #     splat_path=None,
+            #     floor_z=0.0,
+            # )
+            # while True:
+            #     loop_cb()
 
     return
 
