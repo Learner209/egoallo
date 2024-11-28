@@ -50,9 +50,7 @@ class MotionProcessor:
                 - Estimated floor height
                 - Boolean contact labels of shape (num_frames, num_joints)
         """
-        floor_height = self.detect_floor_height(joints, [
-            joint_indices["left_foot"], joint_indices["right_foot"]
-        ])
+        floor_height = self.detect_floor_height(joints, list(joint_indices.values()))
         
         # Initialize contact array
         contacts = np.zeros((joints.shape[0], joints.shape[1]), dtype=bool)
@@ -73,6 +71,38 @@ class MotionProcessor:
             contacts[:, ankle_idx] = (
                 (ankle_vel < self.contact_vel_thresh) & 
                 (joints[:, ankle_idx, 2] < floor_height + self.contact_ankle_height_thresh)
+            )
+            
+            # Knee contacts
+            knee_idx = joint_indices[f"{side}_knee"]
+            knee_vel = self.compute_joint_velocity(joints[:, knee_idx])
+            contacts[:, knee_idx] = (
+                (knee_vel < self.contact_vel_thresh) &
+                (joints[:, knee_idx, 2] < floor_height + self.contact_ankle_height_thresh)
+            )
+            
+            # Elbow contacts
+            elbow_idx = joint_indices[f"{side}_elbow"]
+            elbow_vel = self.compute_joint_velocity(joints[:, elbow_idx])
+            contacts[:, elbow_idx] = (
+                (elbow_vel < self.contact_vel_thresh) &
+                (joints[:, elbow_idx, 2] < floor_height + self.contact_ankle_height_thresh)
+            )
+            
+            # Wrist/hand contacts
+            wrist_idx = joint_indices[f"{side}_wrist"]
+            wrist_vel = self.compute_joint_velocity(joints[:, wrist_idx])
+            contacts[:, wrist_idx] = (
+                (wrist_vel < self.contact_vel_thresh) &
+                (joints[:, wrist_idx, 2] < floor_height + self.contact_ankle_height_thresh)
+            )
+            
+            # Foot contacts
+            foot_idx = joint_indices[f"{side}_foot"]
+            foot_vel = self.compute_joint_velocity(joints[:, foot_idx])
+            contacts[:, foot_idx] = (
+                (foot_vel < self.contact_vel_thresh) &
+                (joints[:, foot_idx, 2] < floor_height + self.contact_toe_height_thresh)
             )
             
         return floor_height, contacts
