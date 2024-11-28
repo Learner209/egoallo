@@ -56,6 +56,7 @@ def main(
             train_data = EgoTrainingData.load_from_npz(
                 device_body_model, npz_path, include_hands=include_hands
             )
+            EgoTrainingData.visualize_ego_training_data(train_data, body_model, output_path="output.mp4")
 
             # Get the relative path after any of the input directories
             for data_npz_dir in data_npz_dirs:

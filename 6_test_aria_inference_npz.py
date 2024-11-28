@@ -51,6 +51,7 @@ def main(
         hand_rotmats=hand_rotmats
     )
 
+
     # Visualize
     if args.visualize_traj:
         server = viser.ViserServer()

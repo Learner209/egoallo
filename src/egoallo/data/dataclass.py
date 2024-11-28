@@ -15,6 +15,7 @@ from ..tensor_dataclass import TensorDataclass
 from typing import Optional
 
 from ..network import EgoDenoiserConfig
+from ..viz.smpl_viewer import visualize_ego_training_data as viz_ego_data
 
 @jaxtyped(typechecker=typeguard.typechecked)
 class EgoTrainingData(TensorDataclass):
@@ -133,6 +134,13 @@ class EgoTrainingData(TensorDataclass):
             hand_quats=hand_quats[1:].cpu() if include_hands else None,
             visible_joints_mask=None,
             visible_joints=None,
+        )
+    
+    @staticmethod
+    def visualize_ego_training_data(data: EgoTrainingData, body_model: fncsmpl.SmplhModel, output_path: str = "output.mp4"):
+        viz_ego_data(data,
+            body_model=body_model,
+            output_path=output_path,
         )
 
 
