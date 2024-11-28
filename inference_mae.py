@@ -172,7 +172,7 @@ def run_sampling_with_masked_data(
         )
         # Update x_t using noise schedule
         x_t_packed = (
-            torch.sqrt(alpha_bar_t[t_next]) * x_0_pred
+            torch.sqrt(alpha_bar_t[t_next]) * x_0_packed_pred
             + (
                 torch.sqrt(1 - alpha_bar_t[t_next] - sigma_t[t] ** 2)
                 * (x_t_packed - torch.sqrt(alpha_bar_t[t]) * x_0_packed_pred)
@@ -193,7 +193,7 @@ def run_sampling_with_masked_data(
             T_world_root=SE3.from_rotation_and_translation(
                 SO3.from_matrix(constrained_traj.R_world_root),
                 constrained_traj.t_world_root
-            ).parameters(),
+            ).parameters().squeeze(0),
             traj=constrained_traj,
             body_model=body_model,
             guidance_mode=guidance_mode,

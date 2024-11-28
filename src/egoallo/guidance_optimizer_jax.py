@@ -361,21 +361,20 @@ def _optimize(
         output_frame: Literal["world", "root"] = "world",
     ) -> fncsmpl_jax.SmplhShapedAndPosed:
         """Helper for computing forward kinematics from variables."""
-        import ipdb; ipdb.set_trace()
         assert (left_hand is None) == (right_hand is None)
         if left_hand is None and right_hand is None:
             posed = shaped_body.with_pose(
-                T_world_root=T_world_root,
+                T_world_root=jaxlie.SE3.identity().wxyz_xyz,
                 local_quats=vals[var],
             )
         elif left_hand is not None and right_hand is None:
             posed = shaped_body.with_pose(
-                T_world_root=T_world_root,
+                T_world_root=jaxlie.SE3.identity().wxyz_xyz,
                 local_quats=jnp.concatenate([vals[var], vals[left_hand]], axis=-2),
             )
         elif left_hand is not None and right_hand is not None:
             posed = shaped_body.with_pose(
-                T_world_root=T_world_root,
+                T_world_root=jaxlie.SE3.identity().wxyz_xyz,
                 local_quats=jnp.concatenate(
                     [vals[var], vals[left_hand], vals[right_hand]], axis=-2
                 ),

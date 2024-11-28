@@ -73,7 +73,7 @@ class EgoTrainingData(TensorDataclass):
         """Load a single trajectory from a (processed_30fps) npz file."""
         raw_fields = {
             k: torch.from_numpy(v.astype(np.float32) if v.dtype == np.float64 else v)
-            for k, v in np.load(path).items()
+            for k, v in np.load(path, allow_pickle=True).items()
             if v.dtype in (np.float32, np.float64)
         }
 

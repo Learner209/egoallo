@@ -20,7 +20,7 @@ import faulthandler
 
 def main(
     smplh_npz_path: Path = Path("./assets/smpl_based_model/smplh/neutral/model.npz"),
-    data_npz_dir: Path = Path("data/amass.bak/processed"),
+    data_npz_dirs: list[Path] = [Path("data/amass.bak/processed")],
     output_file: Path = Path("data/amass.bak/processed.hdf5"),
     output_list_file: Path = Path("data/amass.bak/processed.txt"),
     include_hands: bool = True,
@@ -29,10 +29,13 @@ def main(
 
     # training_utils.ipdb_safety_net()
     assert torch.cuda.is_available()
-
+    
     task_queue = queue.Queue[Path]()
-    for path in list(data_npz_dir.glob("**/*.npz")):
-        task_queue.put_nowait(path)
+    
+    # Collect all npz files from all input directories
+    for data_npz_dir in data_npz_dirs:
+        for path in data_npz_dir.glob("**/*.npz"):
+            task_queue.put_nowait(path)
 
     total_count = task_queue.qsize()
     start_time = time.time()
@@ -54,8 +57,14 @@ def main(
                 device_body_model, npz_path, include_hands=include_hands
             )
 
-            assert "processed" in str(npz_path), npz_path
-            group_name = str(npz_path).rpartition("processed/")[2]
+            # Get the relative path after any of the input directories
+            for data_npz_dir in data_npz_dirs:
+                if str(data_npz_dir) in str(npz_path):
+                    group_name = str(npz_path).partition(str(data_npz_dir) + "/")[2]
+                    break
+            else:
+                raise ValueError(f"NPZ file {npz_path} not found in any input directory")
+
             print(f"Writing to group {group_name} on {device_idx}...")
             group = output_hdf5.create_group(group_name)
             file_list.append(group_name)
@@ -88,13 +97,13 @@ def main(
         # for i in range(torch.cuda.device_count())
         for i in range(25)
     ]
-    for w in workers:
-        w.start()
-    for w in workers:
-        w.join()
+    # for w in workers:
+    #     w.start()
+    # for w in workers:
+    #     w.join()
 
     # Single-threaded version
-    # worker(0)
+    worker(0)
     output_list_file.write_text("\n".join(file_list))
 
 

@@ -21,6 +21,7 @@ from .data.dataclass import EgoTrainingData
 from .network import EgoDenoiseTraj
 from . import transforms as tf
 from . import fncsmpl
+from .mapping import SMPLH_BODY_JOINTS
 
 
 def load_denoiser(checkpoint_dir: Path) -> EgoDenoiser:
@@ -195,7 +196,11 @@ def create_masked_training_data(
     rand_indices = torch.randperm(num_joints)
     masked_indices = rand_indices[:num_masked]
     visible_joints_mask[:, :, masked_indices] = False
-    
+
+    # Print out what joints are masked in string.
+    masked_joints_str = ", ".join(str(i) for i in masked_indices.tolist())
+    print(f"Masked joints: {masked_joints_str}")
+
     # Get joints in CPF frame
     joints_wrt_cpf = (
         tf.SE3(Ts_world_cpf[..., None, :]).inverse() 

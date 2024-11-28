@@ -18,6 +18,11 @@ outputs/
 experiments/
 blendify_assets/
 wandb/
+
+# vim.
+tags
+
+/experiments
 /assets
 /datasets
 /data

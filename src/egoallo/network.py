@@ -17,6 +17,14 @@ from .fncsmpl import SmplhModel, SmplhShapedAndPosed
 from .tensor_dataclass import TensorDataclass
 from .transforms import SE3, SO3
 
+from egoallo.config import make_cfg, CONFIG_FILE
+local_config_file = CONFIG_FILE
+CFG = make_cfg(config_name="defaults", config_file=local_config_file, cli_args=[])
+
+from egoallo.utils.setup_logger import setup_logger
+
+logger = setup_logger(output=None, name=__name__)
+
 
 def project_rotmats_via_svd(
     rotmats: Float[Tensor, "*batch 3 3"],
@@ -206,7 +214,7 @@ class EgoDenoiserConfig:
         visible_indices = visible_joints_mask.nonzero(as_tuple=True)[-1]  # Get joint indices
         
         # Create learnable joint index embeddings
-        joint_embeddings = nn.Embedding(21, 16).to(device)  # 21 joints, 16-dim embedding
+        joint_embeddings = nn.Embedding(CFG.smplh.num_joints, 16).to(device)  # 22 joints, 16-dim embedding
         
         # visible_joints shape is (batch, time, num_visible_joints, 3)
         # visible_indices shape is (num_visible_total,) where num_visible_total = batch * time * num_visible_per_frame

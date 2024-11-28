@@ -53,11 +53,11 @@ class Args(EgoAlloTrainConfig):
     """Number of samples to take."""
     guidance_mode: GuidanceMode = "aria_hamer"
     """Which guidance mode to use."""
-    guidance_inner: bool = True
+    guidance_inner: bool = False
     """Whether to apply guidance optimizer between denoising steps. This is
     important if we're doing anything with hands. It can be turned off to speed
     up debugging/experiments, or if we only care about foot skating losses."""
-    guidance_post: bool = True
+    guidance_post: bool = False
     """Whether to apply guidance optimizer after diffusion sampling."""
     visualize_traj: bool = True
     """Whether to visualize the trajectory after sampling."""
@@ -123,14 +123,30 @@ def main(
             body_model=body_model,
             masked_data=masked_data,
             guidance_mode="no_hands",
-            guidance_post=True,
-            guidance_inner=True,
+            guidance_post=config.guidance_post,
+            guidance_inner=config.guidance_inner,
             floor_z=0.0,
             hamer_detections=None,
             aria_detections=None,
             num_samples=1,
             device=device,
         )
+
+
+    # Calculate metrics between original and inferred trajectories
+        metrics = calculate_metrics(
+            original_posed=posed,
+            denoised_traj=denoised_traj,
+            masked_data=masked_data,
+            body_model=body_model
+        )
+        # Print metrics
+        print("\nTrajectory Metrics:")
+        print(f"Translation Error: {metrics['translation_error_meters']:.3f} meters")
+        print(f"Rotation Error: {metrics['rotation_error_radians']:.3f} radians")
+        print(f"Unmasked Joints MPJPE: {metrics['unmasked_mpjpe_mm']:.1f} mm")
+        print(f"Masked Joints MPJPE: {metrics['masked_mpjpe_mm']:.1f} mm")
+
 
         # import ipdb; ipdb.set_trace()
         
@@ -192,10 +208,11 @@ def main(
             server = viser.ViserServer()
             server.gui.configure_theme(dark_mode=True)
             assert server is not None
+            use_gt = False
             loop_cb = visualize_traj_and_hand_detections(
                 server,
-                SE3.from_rotation_and_translation(SO3.from_matrix(denoised_traj.R_world_root), denoised_traj.t_world_root).parameters().squeeze(0),
-                denoised_traj,
+                SE3.from_rotation_and_translation(SO3.from_matrix(denoised_traj.R_world_root), denoised_traj.t_world_root).parameters().squeeze(0) if not use_gt else gt_T_world_root,
+                denoised_traj if not use_gt else gt_traj,
                 body_model,
                 hamer_detections=None,
                 aria_detections=None,

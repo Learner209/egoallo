@@ -23,7 +23,7 @@ from accelerate.utils import ProjectConfiguration
 from loguru import logger
 
 from egoallo import network, training_loss, training_utils
-from egoallo.data.amass import EgoAmassHdf5Dataset
+from egoallo.data.amass import EgoAmassHdf5Dataset, AdaptiveAmassHdf5Dataset
 from egoallo.data.dataclass import collate_dataclass
 
 
@@ -130,16 +130,17 @@ def run_training(
     # Setup.
     model = network.EgoDenoiser(config.model)
     train_loader = torch.utils.data.DataLoader(
-        dataset=EgoAmassHdf5Dataset(
-            config.dataset_hdf5_path,
-            config.dataset_files_path,
-            splits=config.train_splits,
-            subseq_len=config.subseq_len,
-            cache_files=True,
-            slice_strategy=config.dataset_slice_strategy,
-            random_variable_len_proportion=config.dataset_slice_random_variable_len_proportion,
-            config=config.model,
-        ),
+        dataset=AdaptiveAmassHdf5Dataset(config=config),
+        # dataset=EgoAmassHdf5Dataset(
+        #     config.dataset_hdf5_path,
+        #     config.dataset_files_path,
+        #     splits=config.train_splits,
+        #     subseq_len=config.subseq_len,
+        #     cache_files=True,
+        #     slice_strategy=config.dataset_slice_strategy,
+        #     random_variable_len_proportion=config.dataset_slice_random_variable_len_proportion,
+        #     config=config.model,
+        # ),
         batch_size=config.batch_size,
         shuffle=True,
         num_workers=config.num_workers,
@@ -186,6 +187,8 @@ def run_training(
     loop_metrics_gen = training_utils.loop_metric_generator(counter_init=step)
     prev_checkpoint_path: Path | None = None
     batch_start_time = time.time()
+    epoch_start_time = time.time()
+    epoch = 0
     
     while True:
         for train_batch in train_loader:
@@ -222,10 +225,12 @@ def run_training(
             # Print status update to terminal with batch loading time
             if step % 20 == 0 and accelerator.is_main_process:
                 mem_free, mem_total = torch.cuda.mem_get_info()
+                epoch_time = time.time() - epoch_start_time
                 logger.info(
                     f"step: {step} ({loop_metrics.iterations_per_sec:.2f} it/sec)"
+                    f" epoch: {epoch} (time: {epoch_time:.1f}s)"
                     f" time: {loop_metrics.time_elapsed:.1f}s"
-                    f" batch_load: {batch_load_time*1000:.1f}ms"  # Added batch loading time
+                    f" batch_load: {batch_load_time*1000:.1f}ms"
                     f" batch: {loop_metrics.batch_time*1000:.1f}ms"
                     f" fwd: {loop_metrics.forward_time*1000:.1f}ms"
                     f" bwd: {loop_metrics.backward_time*1000:.1f}ms"
@@ -247,22 +252,30 @@ def run_training(
                 # Also log batch loading time to tensorboard
                 if writer is not None:
                     writer.add_scalar('batch_loading_time_ms', batch_load_time * 1000, step)
+                    writer.add_scalar('epoch_time_s', epoch_time, step)
 
             # Start timing next batch load
             batch_start_time = time.time()
 
-            # Checkpointing.
-            if step % 2000 == 0:
-                # Save checkpoint.
-                checkpoint_path = experiment_dir / f"checkpoints_{step}"
-                accelerator.save_state(str(checkpoint_path))
-                logger.info(f"Saved checkpoint to {checkpoint_path}")
+        # End of epoch
+        epoch += 1
+        epoch_time = time.time() - epoch_start_time
+        if accelerator.is_main_process:
+            logger.info(f"Epoch {epoch} completed in {epoch_time:.1f} seconds")
+        epoch_start_time = time.time()
 
-                # Keep checkpoints from only every 100k steps.
-                if prev_checkpoint_path is not None:
-                    shutil.rmtree(prev_checkpoint_path)
-                prev_checkpoint_path = None if step % 100_000 == 0 else checkpoint_path
-                del checkpoint_path
+        # Checkpointing.
+        if step % 2000 == 0:
+            # Save checkpoint.
+            checkpoint_path = experiment_dir / f"checkpoints_{step}"
+            accelerator.save_state(str(checkpoint_path))
+            logger.info(f"Saved checkpoint to {checkpoint_path}")
+
+            # Keep checkpoints from only every 100k steps.
+            if prev_checkpoint_path is not None:
+                shutil.rmtree(prev_checkpoint_path)
+            prev_checkpoint_path = None if step % 100_000 == 0 else checkpoint_path
+            del checkpoint_path
 
 
 if __name__ == "__main__":
