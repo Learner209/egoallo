@@ -33,9 +33,10 @@ def main(
     task_queue = queue.Queue[Path]()
     
     # Collect all npz files from all input directories
-    for data_npz_dir in data_npz_dirs:
-        for path in data_npz_dir.glob("**/*.npz"):
-            task_queue.put_nowait(path)
+    # for data_npz_dir in data_npz_dirs:
+    #     for path in data_npz_dir.glob("**/*.npz"):
+            # task_queue.put_nowait(path)
+    task_queue.put_nowait(Path("/home/minghao/src/robotflow/egoallo.worktree/feature/T_world_root_addition/data/amass.bak/processed/HumanEva/S2/Box_3_poses_621_frames_30_fps.npz"))
 
     total_count = task_queue.qsize()
     start_time = time.time()

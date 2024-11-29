@@ -25,44 +25,9 @@ from loguru import logger
 from egoallo import network, training_loss, training_utils
 from egoallo.data.amass import EgoAmassHdf5Dataset, AdaptiveAmassHdf5Dataset
 from egoallo.data.dataclass import collate_dataclass
+from config.train import EgoAlloTrainConfig
 
 
-@dataclasses.dataclass
-class EgoAlloTrainConfig:
-    experiment_name: str = "motion_prior"
-    dataset_hdf5_path: Path = Path("data/egoalgo_no_skating_dataset.hdf5")
-    dataset_files_path: Path = Path("data/egoalgo_no_skating_dataset_files.txt")
-    mask_ratio: float = 0.75
-
-    model: network.EgoDenoiserConfig = dataclasses.field(init=False)
-    loss: training_loss.TrainingLossConfig = training_loss.TrainingLossConfig()
-
-    # Dataset arguments.
-    batch_size: int = 256
-    """Effective batch size."""
-    num_workers: int = 2
-    subseq_len: int = 128
-    dataset_slice_strategy: Literal[
-        "deterministic", "random_uniform_len", "random_variable_len"
-    ] = "random_uniform_len"
-    dataset_slice_random_variable_len_proportion: float = 0.3
-    """Only used if dataset_slice_strategy == 'random_variable_len'."""
-    train_splits: tuple[Literal["train", "val", "test", "just_humaneva"], ...] = (
-        "train", 
-        "val"
-    )
-
-    # Optimizer options.
-    learning_rate: float = 1e-4
-    weight_decay: float = 1e-4
-    warmup_steps: int = 1000
-    max_grad_norm: float = 1.0
-
-    # debug
-    debug: bool = False
-
-    def __post_init__(self):
-        self.model = network.EgoDenoiserConfig(mask_ratio=self.mask_ratio)
 
 
 def get_experiment_dir(experiment_name: str, version: int = 0) -> Path:
@@ -132,14 +97,7 @@ def run_training(
     train_loader = torch.utils.data.DataLoader(
         dataset=AdaptiveAmassHdf5Dataset(config=config),
         # dataset=EgoAmassHdf5Dataset(
-        #     config.dataset_hdf5_path,
-        #     config.dataset_files_path,
-        #     splits=config.train_splits,
-        #     subseq_len=config.subseq_len,
-        #     cache_files=True,
-        #     slice_strategy=config.dataset_slice_strategy,
-        #     random_variable_len_proportion=config.dataset_slice_random_variable_len_proportion,
-        #     config=config.model,
+        #     config=config,
         # ),
         batch_size=config.batch_size,
         shuffle=True,
@@ -260,8 +218,8 @@ def run_training(
         # End of epoch
         epoch += 1
         epoch_time = time.time() - epoch_start_time
-        if accelerator.is_main_process:
-            logger.info(f"Epoch {epoch} completed in {epoch_time:.1f} seconds")
+        # if accelerator.is_main_process:
+        #     logger.info(f"Epoch {epoch} completed in {epoch_time:.1f} seconds")
         epoch_start_time = time.time()
 
         # Checkpointing.

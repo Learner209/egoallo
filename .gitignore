@@ -22,6 +22,11 @@ wandb/
 # vim.
 tags
 
+diff.bak
+
+# *.mp4
+*.mp4
+
 /experiments
 /assets
 /datasets

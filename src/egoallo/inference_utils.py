@@ -198,7 +198,7 @@ def create_masked_training_data(
     visible_joints_mask[:, :, masked_indices] = False
 
     # Print out what joints are masked in string.
-    masked_joints_str = ", ".join(str(i) for i in masked_indices.tolist())
+    masked_joints_str = ", ".join(SMPLH_BODY_JOINTS[i] for i in masked_indices.tolist())
     print(f"Masked joints: {masked_joints_str}")
 
     # Get joints in CPF frame

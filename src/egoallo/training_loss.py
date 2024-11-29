@@ -10,7 +10,7 @@ from torch._dynamo import OptimizedModule
 from torch.nn.parallel import DistributedDataParallel
 
 from . import network
-from .data.amass import EgoTrainingData
+from .data.dataclass import EgoTrainingData
 from .sampling import CosineNoiseScheduleConstants
 from .transforms import SO3
 

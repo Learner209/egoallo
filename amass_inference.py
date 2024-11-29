@@ -1,5 +1,6 @@
 from __future__ import annotations
 import sys
+from typing import Literal
 
 import numpy as np
 import viser
@@ -40,8 +41,8 @@ from egoallo.hand_detection_structs import (
 )
 from egoallo.tensor_dataclass import TensorDataclass
 from egoallo.training_utils import ipdb_safety_net
-from inference_mae import run_sampling_with_masked_data, calculate_metrics
-from train_motion_prior import EgoAlloTrainConfig
+from infer_mae import run_sampling_with_masked_data, calculate_metrics
+from config.train import EgoAlloTrainConfig
 from egoallo.transforms import SO3, SE3
 import dataclasses
 
@@ -68,6 +69,9 @@ class Args(EgoAlloTrainConfig):
     """Whether to visualize the trajectory after sampling."""
     mask_ratio: float = 0.75
     """Ratio of joints to mask."""
+    dataset_slice_strategy: Literal["deterministic", "random_uniform_len", "random_variable_len", "full_sequence"] = "full_sequence"
+    """Strategy for slicing the dataset into subsequences."""
+
 def main(
     config: Args,
     device: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu"),
@@ -75,14 +79,9 @@ def main(
 
     # Load data and models
     dataset = EgoAmassHdf5Dataset(
-        config.dataset_hdf5_path,
-        config.dataset_files_path,
-        splits=config.train_splits,
-        subseq_len=config.subseq_len,
+        config=config,
         cache_files=True,
-        slice_strategy=config.dataset_slice_strategy,
         random_variable_len_proportion=config.dataset_slice_random_variable_len_proportion,
-        config=config.model,
     )
     test_loader = torch.utils.data.DataLoader(
         dataset=dataset,
@@ -112,6 +111,30 @@ def main(
         local_quats = torch.cat([body_quats, left_hand_quats, right_hand_quats], dim=-2)
         shaped_model = body_model.with_shape(betas)
         posed = shaped_model.with_pose(Ts_world_root, local_quats)
+
+        
+        # Create ground truth EgoTrainingData
+        gt_ego_data = EgoTrainingData(
+            T_world_root=traj_data.T_world_root.squeeze(0).cpu(),
+            contacts=traj_data.contacts.squeeze(0).cpu(),
+            betas=traj_data.betas.squeeze(0).cpu(),
+            joints_wrt_world=posed.Ts_world_joint.squeeze(0).cpu(),
+            body_quats=body_quats.squeeze(0).cpu(),
+            T_world_cpf=Ts_world_cpf.squeeze(0).cpu(),
+            height_from_floor=Ts_world_cpf[..., 6:7].squeeze(0).cpu(),
+            T_cpf_tm1_cpf_t=(
+                tf.SE3(Ts_world_cpf[:-1, :]).inverse() @ tf.SE3(Ts_world_cpf[1:, :])
+            ).parameters().cpu().squeeze(0),
+            joints_wrt_cpf=(
+                # unsqueeze so both shapes are (timesteps, joints, dim)
+            tf.SE3(Ts_world_cpf[0, 1:, None, :]).inverse()
+                @ posed.Ts_world_joint[0, 1:, :21, 4:7].to(Ts_world_cpf.device)
+            ),
+            mask=torch.ones_like(traj_data.contacts[0, :], dtype=torch.bool),
+            hand_quats=traj_data.hand_quats.squeeze(0).cpu() if traj_data.hand_quats is not None else None,
+            visible_joints_mask=None,
+            visible_joints=None,
+        )
 
         # Create masked training data
         masked_data = create_masked_training_data(
@@ -190,30 +213,6 @@ def main(
             visible_joints=None,
         )
 
-        # Create ground truth EgoTrainingData
-        gt_ego_data = EgoTrainingData(
-            T_world_root=traj_data.T_world_root.squeeze(0).cpu(),
-            contacts=traj_data.contacts.squeeze(0).cpu(),
-            betas=traj_data.betas.squeeze(0).cpu(),
-            joints_wrt_world=posed.Ts_world_joint.squeeze(0).cpu(),
-            body_quats=body_quats.squeeze(0).cpu(),
-            T_world_cpf=Ts_world_cpf.squeeze(0).cpu(),
-            height_from_floor=Ts_world_cpf[..., 6:7].squeeze(0).cpu(),
-            T_cpf_tm1_cpf_t=(
-                tf.SE3(Ts_world_cpf[:-1, :]).inverse() @ tf.SE3(Ts_world_cpf[1:, :])
-            ).parameters().cpu().squeeze(0),
-            joints_wrt_cpf=(
-                # unsqueeze so both shapes are (timesteps, joints, dim)
-            tf.SE3(Ts_world_cpf[0, 1:, None, :]).inverse()
-                @ posed.Ts_world_joint[0, 1:, :21, 4:7].to(Ts_world_cpf.device)
-            ),
-            mask=torch.ones_like(traj_data.contacts[0, :], dtype=torch.bool),
-            hand_quats=traj_data.hand_quats.squeeze(0).cpu() if traj_data.hand_quats is not None else None,
-            visible_joints_mask=None,
-            visible_joints=None,
-        )
-
-
         # Calculate metrics between original and inferred trajectories
         metrics = calculate_metrics(
             original_posed=posed,
@@ -272,32 +271,37 @@ def main(
 
         # Visualize.
         if config.visualize_traj:
-
             server = viser.ViserServer()
             server.gui.configure_theme(dark_mode=True)
             assert server is not None
             use_gt = False
 
-            # breakpoint()
-            EgoTrainingData.visualize_ego_training_data(gt_ego_data, body_model, output_path="output-gt.mp4")
-            EgoTrainingData.visualize_ego_training_data(denoised_ego_data, body_model, output_path="output-inferred.mp4")
-            sys.exit(0)
+            # Create timestamp for unique filenames
+            timestamp = time.strftime("%Y%m%d-%H%M%S")
+            
+            # Create output directories if they don't exist
+            output_dir = Path("output_videos")
+            output_dir.mkdir(exist_ok=True)
+            
+            # Generate unique filenames with timestamp
+            gt_output_path = output_dir / f"gt_traj_{timestamp}.mp4"
+            inferred_output_path = output_dir / f"inferred_traj_{timestamp}.mp4"
+            
+            # Save GT and inferred trajectories to separate files
+            EgoTrainingData.visualize_ego_training_data(
+                gt_ego_data, 
+                body_model, 
+                output_path=str(gt_output_path)
+            )
+            EgoTrainingData.visualize_ego_training_data(
+                denoised_ego_data, 
+                body_model, 
+                output_path=str(inferred_output_path)
+            )
 
-            # loop_cb = visualize_traj_and_hand_detections(
-            #     server,
-            #     tf.SE3.from_rotation_and_translation(tf.SO3.from_matrix(denoised_traj.R_world_root), denoised_traj.t_world_root).parameters().squeeze(0) if not use_gt else gt_T_world_root,
-            #     denoised_traj if not use_gt else gt_traj,
-            #     body_model,
-            #     hamer_detections=None,
-            #     aria_detections=None,
-            #     points_data=None,
-            #     splat_path=None,
-            #     floor_z=0.0,
-            # )
-            # while True:
-            #     loop_cb()
+            print(f"Saved ground truth video to: {gt_output_path}")
+            print(f"Saved inferred video to: {inferred_output_path}")
 
-    return
 
 
 if __name__ == "__main__":

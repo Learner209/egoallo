@@ -7,6 +7,8 @@ import torch
 import torch.utils
 import torch.utils.data
 
+from config.train import EgoAlloTrainConfig
+
 from .dataclass import EgoTrainingData
 from ..network import EgoDenoiserConfig
 
@@ -72,21 +74,21 @@ class EgoAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
 
     def __init__(
         self,
-        hdf5_path: Path,
-        file_list_path: Path,
-        splits: tuple[
-            Literal["train", "val", "test", "test_humor", "just_humaneva"], ...
-        ],
-        subseq_len: int,
+        config: EgoAlloTrainConfig,
         cache_files: bool,
-        slice_strategy: Literal[
-            "deterministic", "random_uniform_len", "random_variable_len"
-        ],
-        min_subseq_len: int | None = None,
         random_variable_len_proportion: float = 0.3,
         random_variable_len_min: int = 16,
-        config: EgoDenoiserConfig = EgoDenoiserConfig(),
     ) -> None:
+
+        min_subseq_len = None
+
+        self.config = config
+        hdf5_path = config.dataset_hdf5_path
+        file_list_path = config.dataset_files_path
+        splits = config.train_splits
+        subseq_len = config.subseq_len
+        slice_strategy = config.dataset_slice_strategy
+
         datasets = []
         for split in set(splits):
             datasets.extend(AMASS_SPLITS[split])
@@ -94,6 +96,7 @@ class EgoAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         self._slice_strategy: Literal[
             "deterministic", "random_uniform_len", "random_variable_len"
         ] = slice_strategy
+
         self._random_variable_len_proportion = random_variable_len_proportion
         self._random_variable_len_min = random_variable_len_min
         self._hdf5_path = hdf5_path
@@ -162,7 +165,11 @@ class EgoAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
 
         # Determine slice indexing.
         mask = torch.ones(self._subseq_len, dtype=torch.bool)
-        if self._slice_strategy == "deterministic":
+
+        if self._slice_strategy == "full_sequence":
+            start_t, end_t = 0, total_t
+
+        elif self._slice_strategy == "deterministic":
             # A deterministic, non-overlapping slice.
             valid_start_indices = total_t - self._subseq_len
             start_t = (
@@ -210,13 +217,11 @@ class EgoAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
                 assert v.shape[0] == total_t
                 array = v[start_t:end_t]
 
-            # Pad to subsequence length.
-            if array.shape[0] != self._subseq_len:
+            # Only pad if not using full_sequence
+            if self._slice_strategy != "full_sequence" and array.shape[0] != self._subseq_len:
                 array = np.concatenate(
                     [
                         array,
-                        # It's important to not pad with np.zeros() here, because that
-                        # results in invalid rotations that produce NaNs.
                         np.repeat(
                             array[-1:,], self._subseq_len - array.shape[0], axis=0
                         ),
@@ -230,13 +235,14 @@ class EgoAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         if "hand_quats" not in kwargs:
             kwargs["hand_quats"] = None
 
+        subseq_len = self._subseq_len if self._slice_strategy != "full_sequence" else total_t
         # Generate MAE-style masking
         num_joints = CFG.smplh.num_joints
         device = kwargs["joints_wrt_world"].device
 
         # Generate random mask for sequence
         num_masked = int(num_joints * self.config.mask_ratio)
-        visible_joints_mask = torch.ones((self._subseq_len, num_joints), dtype=torch.bool, device=device)
+        visible_joints_mask = torch.ones((subseq_len, num_joints), dtype=torch.bool, device=device)
         
         # * Randomly select joints to mask, all data within a timestep is masked together, across batch is different.
         rand_indices = torch.randperm(num_joints)
@@ -245,10 +251,13 @@ class EgoAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
 
         # Get original joints_wrt_world
         joints_wrt_world = kwargs["joints_wrt_world"]  # shape: [time, 21, 3]
-        assert joints_wrt_world.shape == (self._subseq_len, num_joints, 3)
+        if self._slice_strategy != "full_sequence":
+            assert joints_wrt_world.shape == (self._subseq_len, num_joints, 3)
+        else:
+            assert joints_wrt_world.shape == (total_t, num_joints, 3)
         
         # Create visible_joints tensor containing only unmasked joints
-        visible_joints = joints_wrt_world[visible_joints_mask].reshape(self._subseq_len, num_joints - num_masked, 3)
+        visible_joints = joints_wrt_world[visible_joints_mask].reshape(subseq_len, num_joints - num_masked, 3)
 
         # Update kwargs with new MAE-style masking tensors
         kwargs["visible_joints"] = visible_joints
