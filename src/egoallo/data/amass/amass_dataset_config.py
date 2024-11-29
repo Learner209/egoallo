@@ -44,17 +44,36 @@ class AMASSDatasetConfig:
     # Dataset splits
     train_datasets: List[str] = dataclasses.field(
         default_factory=lambda: [
-            'CMU', 'MPI_Limits', 'TotalCapture', 'Eyes_Japan_Dataset',
-            'KIT', 'BioMotionLab_NTroje', 'BMLmovi', 'EKUT', 'ACCAD'
+            "ACCAD",
+            "BMLhandball",
+            "BMLmovi",
+            "BioMotionLab_NTroje",
+            "CMU",
+            "DFaust_67",
+            "DanceDB",
+            "EKUT",
+            "Eyes_Japan_Dataset",
+            "KIT",
+            "MPI_Limits",
+            "TCD_handMocap",
+            "TotalCapture",
         ]
     )
     
     val_datasets: List[str] = dataclasses.field(
-        default_factory=lambda: ['MPI_HDM05', 'SFU', 'MPI_mosh']
+        default_factory=lambda: [ 
+            "HumanEva",
+            "MPI_HDM05",
+            "MPI_mosh",
+            "SFU",
+        ]
     )
     
     test_datasets: List[str] = dataclasses.field(
-        default_factory=lambda: ['Transitions_mocap', 'HumanEva']
+        default_factory=lambda: [
+            "Transitions_mocap",
+            "SSM_synced",
+        ]
     )
     
     # Device options

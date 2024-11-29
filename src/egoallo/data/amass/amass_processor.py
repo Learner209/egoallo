@@ -107,7 +107,12 @@ class AMASSProcessor:
         seq_data = dict(np.load(seq_path, allow_pickle=True))
         
         # Get sequence info
-        gender = str(seq_data.get('gender', 'invalid'))
+        gender = seq_data.get('gender', 'invalid').item()
+        if isinstance(gender, bytes):
+            gender = gender.decode('utf-8')
+        else:
+            gender = str(gender)
+
         fps = int(seq_data['mocap_framerate'])
         
         # Get poses and shape

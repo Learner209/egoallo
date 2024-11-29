@@ -34,7 +34,7 @@ def process_sequence(
     # Skip if already processed
     if output_path.exists():
         rel_path = output_path.relative_to(output_path.parent.parent)
-        logger.info(f"Skipping {seq_path.name} - already processed")
+        logger.info(f"Skipping {seq_path.name}, {output_path} - already processed")
         return str(rel_path)
     
     try:
@@ -84,10 +84,13 @@ def main(config: AMASSDatasetConfig) -> None:
         # Create output directory
         output_dir = config.output_dir / split
         output_dir.mkdir(exist_ok=True)
-        
         # Add sequences to queue
-        for seq_path in dataset_dir.rglob("*.npz"):
-            output_path = output_dir / f"{dataset}_{seq_path.stem}.npz"
+        for seq_path in dataset_dir.rglob("**/*.npz"):
+            # Create unique identifier from full relative path
+            rel_path = seq_path.relative_to(dataset_dir)
+            unique_id = str(rel_path).replace('/', '_').replace('\\', '_')
+            output_path = output_dir / f"{dataset}_{unique_id}"
+            # assert output_path.exists()
             task_queue.put_nowait((processor, seq_path, output_path))
     
     total_count = task_queue.qsize()
