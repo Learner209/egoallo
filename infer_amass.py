@@ -271,16 +271,10 @@ def main(
 
         # Visualize.
         if config.visualize_traj:
-            server = viser.ViserServer()
-            server.gui.configure_theme(dark_mode=True)
-            assert server is not None
-            use_gt = False
-
-            # Create timestamp for unique filenames
             timestamp = time.strftime("%Y%m%d-%H%M%S")
             
             # Create output directories if they don't exist
-            output_dir = Path("output_videos")
+            output_dir = Path("output_videos_absrel")
             output_dir.mkdir(exist_ok=True)
             
             # Generate unique filenames with timestamp

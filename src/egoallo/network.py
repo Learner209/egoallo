@@ -255,6 +255,7 @@ class EgoDenoiserConfig:
             ], dim=-1).reshape(batch, time, -1) # shape: (batch, time, num_visible_joints * (3 + 3 + 16))
             
         elif self.joint_cond_mode == "absrel_global_deltas":
+            # !: Absrel global deltas performs worse than absrel, not only does it generate stitching motions, but also it geenrates penetration against the floor and unrealisitc foot contacts.
             # import ipdb; ipdb.set_trace()
             # Compute global transformation between each frame and first frame
             # Using Kabsch algorithm on visible joints
