@@ -2,7 +2,7 @@ from __future__ import annotations
 
 # On some systems, EGL does not start properly if OpenGL was already initialized, that's why it's better
 # to keep EGLContext import on top
-from cloudrender.libegl import EGLContext
+from third_party.cloudrender.libegl import EGLContext
 
 import logging
 from pathlib import Path
