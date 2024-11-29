@@ -176,7 +176,7 @@ class EgoDenoiserConfig:
     )
 
     # Joint position conditioning settings
-    joint_cond_mode: Literal["absolute", "canonicalized", "absrel", "absrel_global_deltas"] = "absrel"
+    joint_cond_mode: Literal["absolute", "absrel_jnts", "absrel", "absrel_global_deltas"] = "absrel"
 
     @cached_property
     def d_cond(self) -> int:
@@ -188,8 +188,8 @@ class EgoDenoiserConfig:
 
         if self.joint_cond_mode == "absolute":
             d_cond = d_per_joint * num_visible_joints  # Position + index embedding per visible joint
-        elif self.joint_cond_mode == "canonicalized":
-            d_cond = d_per_joint * num_visible_joints  # Canonicalized position + index embedding
+        elif self.joint_cond_mode == "absrel_jnts":
+            d_cond = d_per_joint * num_visible_joints  # absrel jnts position + index embedding
         elif self.joint_cond_mode == "absrel":
             d_cond = (d_per_joint * 2 - 16) * num_visible_joints  # Both absolute and relative positions + index embeddings
         elif self.joint_cond_mode == "absrel_global_deltas":
@@ -227,18 +227,21 @@ class EgoDenoiserConfig:
             # Now both have shape (batch, time, num_visible_joints, D) where D is 3 or 16
             cond = torch.cat([visible_joints, index_embeddings], dim=-1).reshape(batch, time, -1) # shape: (batch, time, num_visible_joints * D)
             
-        elif self.joint_cond_mode == "canonicalized":
-            # Align to first frame using visible joints
-            first_frame = visible_joints[:, 0:1]
-            center = first_frame.mean(dim=1, keepdim=True)
-            # Use the first visible joint as reference for forward direction
-            forward = first_frame[:, 0] - center.squeeze(1)
-            R = SO3.from_z_radians(-torch.arctan2(forward[..., 1], forward[..., 0])).as_matrix()
+        elif self.joint_cond_mode == "absrel_jnts":
+            # Use first visible joint as global reference
+            first_visible_jnt = visible_joints[..., 0:1, :] # shape: (batch, time, 1, 3)
             
-            # Apply canonicalization to visible joints
-            canonical_joints = (visible_joints - center) @ R.transpose(-1, -2)
-            cond = torch.cat([canonical_joints, index_embeddings], dim=-1)
+            # Get local coordinates of other joints relative to first joint
+            other_visible_jnts = visible_joints[..., 1:, :] # shape: (batch, time, num_visible_joints-1, 3) 
+            local_coords = other_visible_jnts - first_visible_jnt # shape: (batch, time, num_visible_joints-1, 3)
             
+            # Concatenate global reference joint, local coordinates, and index embeddings
+            cond = torch.cat([
+                first_visible_jnt.reshape(batch, time, -1), # Global reference joint
+                local_coords.reshape(batch, time, -1), # Local coordinates
+                index_embeddings.reshape(batch, time, -1) # Joint index embeddings
+            ], dim=-1)
+
         elif self.joint_cond_mode == "absrel":
             # Both absolute positions and frame-to-frame motion for visible joints
             abs_pos = visible_joints # shape: (batch, time, num_visible_joints, 3)

@@ -10,7 +10,7 @@ class EgoAlloTrainConfig:
     dataset_files_path: Path = Path("data/egoalgo_no_skating_dataset_files.txt")
 
     mask_ratio: float = 0.75
-    joint_cond_mode: Literal["absolute", "canonicalized", "absrel", "absrel_global_deltas"] = "absrel"
+    joint_cond_mode: Literal["absolute", "absrel_jnts", "absrel", "absrel_global_deltas"] = "absrel"
 
     model: network.EgoDenoiserConfig = dataclasses.field(init=False)
     loss: training_loss.TrainingLossConfig = training_loss.TrainingLossConfig()
