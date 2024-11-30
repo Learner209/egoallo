@@ -187,13 +187,13 @@ class EgoDenoiserConfig:
         d_per_joint = 3 + 16
 
         if self.joint_cond_mode == "absolute":
-            d_cond = d_per_joint * num_visible_joints  # Position + index embedding per visible joint
+            d_cond = d_per_joint * num_visible_joints + 1  # +1 for floor height
         elif self.joint_cond_mode == "absrel_jnts":
-            d_cond = d_per_joint * num_visible_joints  # absrel jnts position + index embedding
+            d_cond = d_per_joint * num_visible_joints + 1  # +1 for floor height
         elif self.joint_cond_mode == "absrel":
-            d_cond = (d_per_joint * 2 - 16) * num_visible_joints  # Both absolute and relative positions + index embeddings
+            d_cond = (d_per_joint * 2 - 16) * num_visible_joints + 1  # +1 for floor height
         elif self.joint_cond_mode == "absrel_global_deltas":
-            d_cond = (d_per_joint * num_visible_joints) + 9 + 3  # Visible joint positions + indices + global rotation + translation
+            d_cond = (d_per_joint * num_visible_joints) + 9 + 3 + 1  # +1 for floor height
         else:
             assert_never(self.joint_cond_mode)
             
@@ -205,97 +205,85 @@ class EgoDenoiserConfig:
         visible_joints: Float[Tensor, "batch time num_visible_joints 3"],
         visible_joints_mask: Bool[Tensor, "batch time 21"],
     ) -> Float[Tensor, "batch time d_cond"]:
-        """Construct conditioning using only visible joints and their indices."""
+        """Construct conditioning using visible joints, their indices, and floor height."""
         batch, time = visible_joints_mask.shape[:2]
         device = visible_joints.device
         dtype = visible_joints.dtype
 
         # Get indices of visible joints
-        visible_indices = visible_joints_mask.nonzero(as_tuple=True)[-1]  # Get joint indices
+        visible_indices = visible_joints_mask.nonzero(as_tuple=True)[-1]
         
         # Create learnable joint index embeddings
-        joint_embeddings = nn.Embedding(CFG.smplh.num_joints, 16).to(device)  # 22 joints, 16-dim embedding
-        
-        # visible_joints shape is (batch, time, num_visible_joints, 3)
-        # visible_indices shape is (num_visible_total,) where num_visible_total = batch * time * num_visible_per_frame
-        # Need to reshape visible_indices to match visible_joints
+        joint_embeddings = nn.Embedding(CFG.smplh.num_joints, 16).to(device)
         num_visible_per_frame = visible_joints.shape[2]
         index_embeddings = joint_embeddings(visible_indices).reshape(batch, time, num_visible_per_frame, 16)
 
+        # Extract floor height from visible joints (assuming lowest joint represents floor contact)
+        floor_height = visible_joints[..., :, 2].min(dim=2, keepdim=True)[0]  # shape: (batch, time, 1)
+
         if self.joint_cond_mode == "absolute":
-            # Concatenate positions with their index embeddings
-            # Now both have shape (batch, time, num_visible_joints, D) where D is 3 or 16
-            cond = torch.cat([visible_joints, index_embeddings], dim=-1).reshape(batch, time, -1) # shape: (batch, time, num_visible_joints * D)
+            # Concatenate positions, index embeddings, and floor height
+            cond = torch.cat([
+                visible_joints.reshape(batch, time, -1),  # Joint positions
+                index_embeddings.reshape(batch, time, -1),  # Joint embeddings
+                floor_height,  # Floor height
+            ], dim=-1)
             
         elif self.joint_cond_mode == "absrel_jnts":
-            # Use first visible joint as global reference
-            first_visible_jnt = visible_joints[..., 0:1, :] # shape: (batch, time, 1, 3)
+            first_visible_jnt = visible_joints[..., 0:1, :]
+            other_visible_jnts = visible_joints[..., 1:, :]
+            local_coords = other_visible_jnts - first_visible_jnt
             
-            # Get local coordinates of other joints relative to first joint
-            other_visible_jnts = visible_joints[..., 1:, :] # shape: (batch, time, num_visible_joints-1, 3) 
-            local_coords = other_visible_jnts - first_visible_jnt # shape: (batch, time, num_visible_joints-1, 3)
-            
-            # Concatenate global reference joint, local coordinates, and index embeddings
             cond = torch.cat([
-                first_visible_jnt.reshape(batch, time, -1), # Global reference joint
-                local_coords.reshape(batch, time, -1), # Local coordinates
-                index_embeddings.reshape(batch, time, -1) # Joint index embeddings
+                first_visible_jnt.reshape(batch, time, -1),
+                local_coords.reshape(batch, time, -1),
+                index_embeddings.reshape(batch, time, -1),
+                floor_height,
             ], dim=-1)
 
         elif self.joint_cond_mode == "absrel":
-            # Both absolute positions and frame-to-frame motion for visible joints
-            abs_pos = visible_joints # shape: (batch, time, num_visible_joints, 3)
-            rel_pos = torch.zeros_like(visible_joints) # shape: (batch, time, num_visible_joints, 3)
-            rel_pos[:, 1:] = visible_joints[:, 1:] - visible_joints[:, :-1] # shape: (batch, time, num_visible_joints, 3)
+            abs_pos = visible_joints
+            rel_pos = torch.zeros_like(visible_joints)
+            rel_pos[:, 1:] = visible_joints[:, 1:] - visible_joints[:, :-1]
             
             cond = torch.cat([
-                abs_pos,
-                rel_pos,
-                index_embeddings  # Repeat embeddings for abs and rel
-            ], dim=-1).reshape(batch, time, -1) # shape: (batch, time, num_visible_joints * (3 + 3 + 16))
+                abs_pos.reshape(batch, time, -1),
+                rel_pos.reshape(batch, time, -1),
+                index_embeddings.reshape(batch, time, -1),
+                floor_height,
+            ], dim=-1)
             
         elif self.joint_cond_mode == "absrel_global_deltas":
-            # !: Absrel global deltas performs worse than absrel, not only does it generate stitching motions, but also it geenrates penetration against the floor and unrealisitc foot contacts.
-            # import ipdb; ipdb.set_trace()
-            # Compute global transformation between each frame and first frame
-            # Using Kabsch algorithm on visible joints
-            first_frame = visible_joints[:, 0] # shape: (batch, num_visible_joints, 3)
-            current_frames = visible_joints # shape: (batch, time, num_visible_joints, 3)
+            first_frame = visible_joints[:, 0]
+            current_frames = visible_joints
             
-            # Compute centroids for each frame
-            first_centroid = first_frame.mean(dim=1, keepdim=True) # (batch, 1, 3)
-            current_centroids = current_frames.mean(dim=2, keepdim=True) # (batch, time, 1, 3)
+            first_centroid = first_frame.mean(dim=1, keepdim=True)
+            current_centroids = current_frames.mean(dim=2, keepdim=True)
             
-            # Center the point clouds
-            first_centered = first_frame - first_centroid # (batch, num_visible_joints, 3)
-            current_centered = current_frames - current_centroids # (batch, time, num_visible_joints, 3)
+            first_centered = first_frame - first_centroid
+            current_centered = current_frames - current_centroids
             
-            # Compute correlation matrix H for each frame relative to first frame
-            # Expand first_centered to match current_centered dimensions
             first_centered_exp = first_centered.unsqueeze(1).expand(-1, time, -1, -1)
             H = first_centered_exp.transpose(-2, -1) @ current_centered
             
-            # Compute optimal rotation using SVD
-            U, _, Vh = torch.linalg.svd(H) # shape: (batch, time, 3, 3)
-            r_mat = Vh.transpose(-2, -1) @ U.transpose(-2, -1) # shape: (batch, time, 3, 3)
+            U, _, Vh = torch.linalg.svd(H)
+            r_mat = Vh.transpose(-2, -1) @ U.transpose(-2, -1)
             
-            # Handle reflection case
-            det = torch.linalg.det(r_mat) # shape: (batch, time)
-            reflection_fix = torch.eye(3, device=r_mat.device).unsqueeze(0).unsqueeze(0).expand(batch, time, -1, -1).clone() # shape: (batch, time, 3, 3) 
-            reflection_fix[..., 2, 2] = det # shape: (batch, time, 3, 3)
-            r_mat = r_mat @ reflection_fix # shape: (batch, time, 3, 3)
+            det = torch.linalg.det(r_mat)
+            reflection_fix = torch.eye(3, device=r_mat.device).unsqueeze(0).unsqueeze(0).expand(batch, time, -1, -1).clone()
+            reflection_fix[..., 2, 2] = det
+            r_mat = r_mat @ reflection_fix
             
-            # Compute translation
-            # how much the current frame differs from the first frame rotated trajectory.
-            t = current_centroids.squeeze(2) - torch.einsum('btij,bkj->bti', r_mat, first_centroid) # shape: (batch, time, 3)
+            t = current_centroids.squeeze(2) - torch.einsum('btij,bkj->bti', r_mat, first_centroid)
             
             cond = torch.cat([
                 torch.cat([
-                    visible_joints,  # shape: (batch, time, num_visible_joints, 3)
-                    index_embeddings  # shape: (batch, time, num_visible_joints, 16)
-                ], dim=-1).reshape(batch, time, -1),  # shape: (batch, time, num_visible_joints * (3 + 16))
-                r_mat.reshape(batch, time, 9),  # Global rotation matrices
-                t.reshape(batch, time, 3),  # Global translations
+                    visible_joints,
+                    index_embeddings
+                ], dim=-1).reshape(batch, time, -1),
+                r_mat.reshape(batch, time, 9),
+                t.reshape(batch, time, 3),
+                floor_height,
             ], dim=-1)
         
         else:

@@ -291,35 +291,18 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         self._random_variable_len_min = 16
         self._mask_ratio = config.mask_ratio
 
-        # Get datasets from splits
-        datasets = self._get_datasets_from_splits(config.train_splits)
-
         # Initialize groups and cache
         with h5py.File(self._hdf5_path, "r") as hdf5_file:
             self.min_seq_len = self._subseq_len  # Removed conditioning on previous window
-            self._groups = self._initialize_groups(datasets, hdf5_file)
+            self._groups = self._initialize_groups(hdf5_file)
             self._group_lengths = self._calculate_group_lengths(hdf5_file)
             self._cum_len = np.cumsum(self._group_lengths)
 
             # Cache for better performance
             self._cache: dict[str, dict[str, np.ndarray[Any, Any]]] = {}
 
-    def _get_datasets_from_splits(self, train_splits: tuple) -> list[str]:
-        """Retrieve dataset names from specified splits.
-
-        Args:
-            train_splits (tuple): Tuple of dataset splits.
-
-        Returns:
-            list[str]: List of dataset names.
-        """
-        datasets = []
-        for split in set(train_splits):
-            datasets.extend(AMASS_SPLITS[split])
-        return datasets
-
-    def _initialize_groups(self, datasets: list[str], hdf5_file: h5py.File) -> list[str]:
-        """Initialize groups based on the datasets and HDF5 file content.
+    def _initialize_groups(self, hdf5_file: h5py.File) -> list[str]:
+        """Initialize groups based on the HDF5 file content.
 
         Args:
             datasets (list[str]): List of dataset names.
@@ -328,13 +311,20 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         Returns:
             list[str]: List of groups that meet the criteria.
         """
+        # Get all paths from the text file
+        all_paths = self.config.dataset_files_path.read_text().splitlines()
+        
+        # Filter paths that start with any of the split names
+        split_prefixes = [split + '/' for split in self.config.train_splits]
         groups = [
-            p for p in self.config.dataset_files_path.read_text().splitlines()
-            if p.partition("/")[0] in datasets and
+            p for p in all_paths
+            if any(p.startswith(prefix) for prefix in split_prefixes) and
             cast(h5py.Dataset, cast(h5py.Group, hdf5_file[p])["T_world_root"]).shape[0] >= self.min_seq_len
         ]
-        assert len(groups) > 0
-        assert len(cast(h5py.Group, hdf5_file[groups[0]]).keys()) > 0
+        
+        assert len(groups) > 0, f"No valid groups found for splits: {self.config.train_splits}"
+        assert len(cast(h5py.Group, hdf5_file[groups[0]]).keys()) > 0, f"First group {groups[0]} has no keys"
+        
         return groups
 
     def _calculate_group_lengths(self, hdf5_file: h5py.File) -> list[int]:
@@ -392,7 +382,7 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
 
         # Get original joints_wrt_world
         joints_wrt_world = kwargs["joints_wrt_world"]  # shape: [time, 21, 3]
-        assert joints_wrt_world.shape == (self._subseq_len, num_joints, 3)
+        assert joints_wrt_world.shape == (self._subseq_len, num_joints, 3), f"Expected shape: {(self._subseq_len, num_joints, 3)}, got: {joints_wrt_world.shape}"
         
         # Create visible_joints tensor containing only unmasked joints
         visible_joints = joints_wrt_world[visible_joints_mask].reshape(self._subseq_len, num_joints - num_masked, 3)

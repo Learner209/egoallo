@@ -217,7 +217,7 @@ class TrainingLossComputer:
                 # Reshape inputs to (batch, time, 21, 3, 3)
                 (x_0_pred.body_rotmats - x_0.body_rotmats).reshape(batch, time, -1) ** 2
             ),
-            "contacts": weight_and_mask_loss((x_0_pred.contacts - x_0.contacts) ** 2),
+            "contacts": weight_and_mask_loss((x_0_pred.contacts.float() - x_0.contacts.float()) ** 2),
             "t_world_root": weight_and_mask_loss(
                 (x_0_pred.t_world_root - x_0.t_world_root) ** 2
             ),
