@@ -387,6 +387,7 @@ def main(
         mask=torch.ones_like(contacts[0, :], dtype=torch.bool),
         hand_quats=torch.cat([left_hand_quats, right_hand_quats], dim=-2).squeeze(0).cpu(),
         visible_joints_mask=None,
+        visible_joints=None,
     )
 
 

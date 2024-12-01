@@ -233,7 +233,8 @@ class EgoDenoiserConfig:
 
         # Zero out invisible joints only
         mask_expanded = visible_joints_mask.unsqueeze(-1)  # (batch, time, 21, 1)
-        masked_joints = joints * mask_expanded
+        masked_joints = torch.where(mask_expanded, joints, 0)
+        # masked_joints = joints * mask_expanded # ! This is wrong impl, we want to zero out invisible joints
         masked_embeddings = index_embeddings  # Keep all embeddings
         
         # Extract floor height from visible joints
@@ -570,6 +571,7 @@ class EgoDenoiser(nn.Module):
             joints = joints,
             visible_joints_mask = visible_joints_mask,
         )
+        breakpoint()
 
         # Randomly drop out conditioning information; this serves as a
         # regularizer that aims to improve sample diversity.

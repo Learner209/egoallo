@@ -332,6 +332,7 @@ def main(config: InferenceConfig):
     dataset = AriaKeypointsDataset(
         config=config
     )
+    body_model = fncsmpl.SmplhModel.load(config.smplh_model_path).to(config.device)
     
     dataloader = DataLoader(
         dataset,
@@ -350,22 +351,52 @@ def main(config: InferenceConfig):
     with torch.no_grad():
         for batch_idx, batch in enumerate(tqdm(dataloader, desc="Processing batches")):
             # Extract batch data
-            jnts = batch["jnts"].to(config.device)
-            visible_masks = batch["visible_joints_mask"].to(config.device)
+            jnts = batch["jnts"].to(config.device) # shape: (batch, time, 22, 3)
+            visible_masks = batch["visible_joints_mask"].to(config.device) # shape: (batch, time, 22)
             take_ids = batch["take_id"]
 
-            # Create masked training data
-            aa = visible_masks.sum(dim=1).squeeze(0)
-            breakpoint()
-      
+            # Get batch dimensions
+            batch_size, seq_len, num_joints, _ = jnts.shape
+            
+            # Create placeholder tensors with appropriate shapes
+            placeholder_T_world_root = SE3.identity(device=jnts.device, dtype=jnts.dtype).parameters().repeat(batch_size, seq_len, 1)
+            placeholder_contacts = torch.zeros(batch_size, seq_len, 2).to(jnts.device)  # 2 feet contacts
+            placeholder_betas = torch.zeros(batch_size, 10).to(jnts.device)  # SMPL betas
+            placeholder_body_quats = torch.zeros(batch_size, seq_len, 21, 4).to(jnts.device)  # 21 joints, 4D quaternions
+            placeholder_T_world_cpf = SE3.identity(device=jnts.device, dtype=jnts.dtype).parameters().repeat(batch_size, seq_len, 1)
+            placeholder_hand_quats = torch.zeros(batch_size, seq_len, 30, 4).to(jnts.device)  # 15 joints per hand, 4D quaternions
+            placeholder_jnts_wrt_cpf = torch.zeros(batch_size, seq_len, 21, 3).to(jnts.device)
+            
+            # Create EgoTrainingData instance
+            masked_data = EgoTrainingData(
+                T_world_root=placeholder_T_world_root,
+                contacts=placeholder_contacts,
+                betas=placeholder_betas,
+                joints_wrt_world=jnts.float(),  # Use the actual joints from batch
+                body_quats=placeholder_body_quats,
+                T_world_cpf=placeholder_T_world_cpf,
+                height_from_floor=placeholder_T_world_cpf[..., 2:3].squeeze(0),  # Z component
+                T_cpf_tm1_cpf_t=placeholder_T_world_cpf[:-1],  # Previous to current transform
+                joints_wrt_cpf=placeholder_jnts_wrt_cpf,  # Use actual joints as placeholder
+                mask=torch.ones(batch_size, seq_len, dtype=torch.bool).to(jnts.device),
+                hand_quats=placeholder_hand_quats,
+                visible_joints_mask=visible_masks
+            )
 
-            # # Run sampling with masked data
-            # samples = run_sampling_with_masked_data(
-            #     denoiser=denoiser,
-            #     masked_data=masked_data,
-            #     num_samples=config.num_samples,
-            #     traj_length=config.traj_length
-            # )
+            # Run sampling with masked data
+            samples = run_sampling_with_masked_data(
+                denoiser_network=denoiser,
+                body_model=body_model,
+                masked_data=masked_data,
+                guidance_mode="no_hands",
+                guidance_post=False,
+                guidance_inner=False,
+                floor_z=0.0,
+                hamer_detections=None,
+                aria_detections=None,
+                num_samples=config.num_samples,
+                device=jnts.device
+            )
 
             # Save results for each take in batch
             # TODO: the visible_joints of EgoTrainingData is not used anymore, consider removing any usage of visible_joints
