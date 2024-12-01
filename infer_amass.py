@@ -133,7 +133,6 @@ def main(
             mask=torch.ones_like(traj_data.contacts[0, :], dtype=torch.bool),
             hand_quats=traj_data.hand_quats.squeeze(0).cpu() if traj_data.hand_quats is not None else None,
             visible_joints_mask=None,
-            visible_joints=None,
         )
 
         # Create masked training data
@@ -210,7 +209,6 @@ def main(
             mask=torch.ones_like(denoised_traj.contacts[0, :], dtype=torch.bool),
             hand_quats=None,
             visible_joints_mask=None,
-            visible_joints=None,
         )
 
         # Calculate metrics between original and inferred trajectories

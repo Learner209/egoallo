@@ -369,6 +369,7 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         # Add MAE-style masking
         # breakpoint()
         num_joints = CFG.smplh.num_joints
+        assert num_joints == 22, f"Expected 22 joints, got {num_joints}"
         device = kwargs["joints_wrt_world"].device
 
         # Generate random mask for sequence
@@ -394,7 +395,7 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         visible_joints = joints_wrt_world[visible_joints_mask].reshape(self._subseq_len, num_joints - num_masked, 3)
 
         # Update kwargs with new MAE-style masking tensors
-        kwargs["visible_joints"] = visible_joints
+        # kwargs["visible_joints"] = visible_joints
         kwargs["visible_joints_mask"] = visible_joints_mask
         kwargs["joints_wrt_world"] = joints_wrt_world  # Keep original joints for computing loss
 

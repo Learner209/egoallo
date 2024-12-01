@@ -207,9 +207,6 @@ def create_masked_training_data(
         @ joints_wrt_world
     )
     
-    # Create visible_joints tensor containing only unmasked joints
-    visible_joints = joints_wrt_world[visible_joints_mask].reshape(batch_size, timesteps, num_joints - num_masked, 3)
-
     return EgoTrainingData(
         T_world_root=tf.SE3(posed.T_world_root).parameters(),
         contacts=contacts,
@@ -225,5 +222,4 @@ def create_masked_training_data(
         mask=torch.ones((batch_size, timesteps), dtype=torch.bool, device=device),
         hand_quats=posed.local_quats[..., 21:51, :],
         visible_joints_mask=visible_joints_mask,
-        visible_joints=visible_joints
     )

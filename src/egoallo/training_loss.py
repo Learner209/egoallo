@@ -162,7 +162,7 @@ class TrainingLossComputer:
         x_0_packed_pred = model.forward(
             x_t_packed=x_t_packed,
             t=t,
-            visible_joints=train_batch.visible_joints,
+            joints=train_batch.joints_wrt_world,
             visible_joints_mask=train_batch.visible_joints_mask,
             project_output_rotmats=False,
             mask=train_batch.mask,

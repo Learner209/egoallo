@@ -86,7 +86,7 @@ def run_sampling_with_masked_data(
     # Initialize noise with proper shape
     # import ipdb; ipdb.set_trace()
     x_t_packed = torch.randn(
-        (num_samples, masked_data.visible_joints.shape[1], denoiser_network.get_d_state()),
+        (num_samples, masked_data.joints_wrt_world.shape[1], denoiser_network.get_d_state()),
         device=device,
     )
     x_t_list = [
@@ -130,7 +130,7 @@ def run_sampling_with_masked_data(
                 x_0_packed_pred[:, start_t:end_t, :] += denoiser_network.forward(
                     x_t_packed=x_t_packed[:, start_t:end_t, :],
                     t=torch.tensor([t], device=device).expand((num_samples,)),
-                    visible_joints=masked_data.visible_joints[:, start_t:end_t, :],
+                    joints=masked_data.joints_wrt_world[:, start_t:end_t, :],
                     visible_joints_mask=masked_data.visible_joints_mask[:, start_t:end_t, :],
                     project_output_rotmats=False,
                     mask=masked_data.mask[:, start_t:end_t],
@@ -366,7 +366,6 @@ def main(
         mask=torch.ones_like(denoised_traj.contacts[0, :], dtype=torch.bool),
         hand_quats=None,
         visible_joints_mask=None,
-        visible_joints=None,
     )
 
     # Create ground truth EgoTrainingData
@@ -388,7 +387,6 @@ def main(
         mask=torch.ones_like(contacts[0, :], dtype=torch.bool),
         hand_quats=torch.cat([left_hand_quats, right_hand_quats], dim=-2).squeeze(0).cpu(),
         visible_joints_mask=None,
-        visible_joints=None,
     )
 
 

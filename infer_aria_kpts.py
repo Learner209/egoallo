@@ -126,7 +126,7 @@ class AriaKeypointsDataset(Dataset):
         processed_data = {}
         
         for take_id, take_data in self.annotations.items():
-            visible_joints = []
+            jnts = []
             visible_masks = []
             
             all_frames = find_numerical_key_in_dict(take_data)
@@ -140,12 +140,12 @@ class AriaKeypointsDataset(Dataset):
                 jnts_wrt_egoexo = convert_egoexo4d_to_smplh(joints_3d)
                 valid_mask = ~np.isnan(jnts_wrt_egoexo).any(axis=-1)
                 
-                visible_joints.append(jnts_wrt_egoexo)
+                jnts.append(jnts_wrt_egoexo)
                 visible_masks.append(valid_mask)
             
-            if visible_joints:
+            if jnts:
                 processed_data[take_id] = {
-                    "joints": np.stack(visible_joints, axis=0),
+                    "joints": np.stack(jnts, axis=0),
                     "masks": np.stack(visible_masks, axis=0)
                 }
         return processed_data
@@ -181,7 +181,7 @@ class AriaKeypointsDataset(Dataset):
         
         return {
             "take_id": take_id,
-            "visible_joints": take_data["joints"],
+            "jnts": take_data["joints"],
             "visible_joints_mask": take_data["masks"]
         }
 
@@ -297,7 +297,6 @@ def create_ego_training_data_from_denoised(
         mask=torch.ones_like(denoised_traj.contacts[0, :], dtype=torch.bool),
         hand_quats=hand_quats_combined.squeeze(0).cpu() if hand_quats_combined is not None else None,
         visible_joints_mask=None,
-        visible_joints=None,
     )
 
 def save_results(
@@ -351,18 +350,14 @@ def main(config: InferenceConfig):
     with torch.no_grad():
         for batch_idx, batch in enumerate(tqdm(dataloader, desc="Processing batches")):
             # Extract batch data
-            visible_joints = batch["visible_joints"].to(config.device)
+            jnts = batch["jnts"].to(config.device)
             visible_masks = batch["visible_joints_mask"].to(config.device)
             take_ids = batch["take_id"]
 
             # Create masked training data
             aa = visible_masks.sum(dim=1).squeeze(0)
             breakpoint()
-            # masked_data = create_masked_training_data(
-            #     visible_joints,
-            #     visible_masks,
-            #     mask_ratio=config.mask_ratio
-            # )
+      
 
             # # Run sampling with masked data
             # samples = run_sampling_with_masked_data(
@@ -372,7 +367,8 @@ def main(config: InferenceConfig):
             #     traj_length=config.traj_length
             # )
 
-            # # Save results for each take in batch
+            # Save results for each take in batch
+            # TODO: the visible_joints of EgoTrainingData is not used anymore, consider removing any usage of visible_joints
             # for i, take_id in enumerate(take_ids):
             #     output_path = config.output_dir / f"{take_id}_samples.pt"
             #     torch.save({

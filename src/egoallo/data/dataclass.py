@@ -62,8 +62,8 @@ class EgoTrainingData(TensorDataclass):
     visible_joints_mask: Bool[Tensor, "*#batch timesteps 21"] | None
     """Boolean mask indicating which joints are visible (not masked)"""
 
-    visible_joints: Float[Tensor, "*#batch timesteps 21 3"] | None
-    """Joint positions relative to the central pupil frame for visible joints."""
+    # visible_joints: Float[Tensor, "*#batch timesteps 21 3"] | None
+    # """Joint positions relative to the central pupil frame for visible joints."""
     
     @staticmethod
     def load_from_npz(
@@ -133,7 +133,6 @@ class EgoTrainingData(TensorDataclass):
             mask=torch.ones((timesteps - 1,), dtype=torch.bool),
             hand_quats=hand_quats[1:].cpu() if include_hands else None,
             visible_joints_mask=None,
-            visible_joints=None,
         )
     
     @staticmethod
