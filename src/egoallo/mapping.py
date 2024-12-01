@@ -77,8 +77,25 @@ EGOEXO_ROOT_IDX = EGOEXO4D_EGOPOSE_BODYPOSE_MAPPINGS.index('left-hip')
 EGOEXO4D_BODYPOSE_TO_SMPL_INDICES = [-1, 11, 12, -1, 13, 14, -1, 15, 16, -1, -1, -1, -1, -1,-1, 1, 5, 6, 7, 8, 9, 10, -1, -1]
 EGOEXO4D_BODYPOSE_TO_SMPLH_INDICES = EGOEXO4D_BODYPOSE_TO_SMPL_INDICES[:-2]
 
-SMPLH_TO_EGOEXO4D_BODYPOSE_INDICES = [-1, 15, -1, -1, -1, 16,17, 18,19, 20, 21, 1, 2, 4, 5, 7, 8]
-
+SMPLH_TO_EGOEXO4D_BODYPOSE_INDICES =[
+    15,     # nose -> head
+    -1,     # left-eye -> no direct mapping
+    -1,     # right-eye -> no direct mapping
+    -1,     # left-ear -> no direct mapping
+    -1,     # right-ear -> no direct mapping
+    16,     # left-shoulder -> left_shoulder
+    17,     # right-shoulder -> right_shoulder
+    18,     # left-elbow -> left_elbow
+    19,     # right-elbow -> right_elbow
+    20,     # left-wrist -> left_wrist
+    21,     # right-wrist -> right_wrist
+    1,      # left-hip -> left_hip
+    2,      # right-hip -> right_hip
+    4,      # left-knee -> left_knee
+    5,      # right-knee -> right_knee
+    7,      # left-ankle -> left_ankle
+    8       # right-ankle -> right_ankle
+]
 # ! IN general, the egoexo4d handpose <-> smplh hand part joints indices mapping should be consistent.
 # 32 mapping indices to smplh-w-hand indice (left-wrist, right-wrist and 15*2 hand joints)
 # this variable map to the higher-32-dimension of smplh_joint_names, starting from ind+22.

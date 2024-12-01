@@ -200,6 +200,114 @@ class EgoDenoiserConfig:
         d_cond = d_cond + d_cond * self.fourier_enc_freqs * 2  # Fourier encoding
         return d_cond
 
+    def make_cond_with_masked_joints(
+        self,
+        joints: Float[Tensor, "batch time num_joints 3"],
+        visible_joints_mask: Bool[Tensor, "batch time 21"],
+    ) -> Float[Tensor, "batch time d_cond"]:
+        """Construct conditioning using all joints (zeroing invisible ones) and floor height.
+        
+        Args:
+            joints: Joint positions of shape (batch, time, num_joints, 3)
+            visible_joints_mask: Boolean mask of shape (batch, time, 21) indicating joint visibility
+        
+        Returns:
+            Conditioning tensor of shape (batch, time, d_cond)
+        """
+        batch, time = visible_joints_mask.shape[:2]
+        device = joints.device
+        dtype = joints.dtype
+
+        # Create joint index embeddings for all joints
+        joint_embeddings = nn.Embedding(CFG.smplh.num_joints, 16).to(device)
+        all_indices = torch.arange(21, device=device)
+        index_embeddings = joint_embeddings(all_indices).expand(batch, time, -1, -1)  # (batch, time, 21, 16)
+        
+        # Zero out invisible joints and their embeddings
+        mask_expanded = visible_joints_mask.unsqueeze(-1)  # (batch, time, 21, 1)
+        masked_joints = joints * mask_expanded
+        masked_embeddings = index_embeddings * mask_expanded
+        
+        # Extract floor height from visible joints
+        visible_heights = joints[..., 2] * visible_joints_mask  # Zero out invisible joints
+        floor_height = visible_heights.max(dim=2, keepdim=True)[0]  # (batch, time, 1)
+        
+        if self.joint_cond_mode == "absolute":
+            cond = torch.cat([
+                masked_joints.reshape(batch, time, -1),  # Joint positions
+                masked_embeddings.reshape(batch, time, -1),  # Joint embeddings
+                floor_height,  # Floor height
+            ], dim=-1)
+                
+        elif self.joint_cond_mode == "absrel_jnts":
+            first_joint = masked_joints[..., 0:1, :]
+            other_joints = masked_joints[..., 1:, :]
+            local_coords = other_joints - first_joint
+            
+            cond = torch.cat([
+                first_joint.reshape(batch, time, -1),
+                local_coords.reshape(batch, time, -1),
+                masked_embeddings.reshape(batch, time, -1),
+                floor_height,
+            ], dim=-1)
+
+        elif self.joint_cond_mode == "absrel":
+            abs_pos = masked_joints
+            rel_pos = torch.zeros_like(masked_joints)
+            rel_pos[:, 1:] = masked_joints[:, 1:] - masked_joints[:, :-1]
+            
+            cond = torch.cat([
+                abs_pos.reshape(batch, time, -1),
+                rel_pos.reshape(batch, time, -1),
+                masked_embeddings.reshape(batch, time, -1),
+                floor_height,
+            ], dim=-1)
+                
+        elif self.joint_cond_mode == "absrel_global_deltas":
+            first_frame = masked_joints[:, 0]  # (batch, joints, 3)
+            current_frames = masked_joints  # (batch, time, joints, 3)
+            
+            # Calculate centroids using only visible joints
+            mask_sum = visible_joints_mask.sum(dim=-1, keepdim=True).unsqueeze(-1)  # (batch, time, 1, 1)
+            mask_sum = torch.clamp(mask_sum, min=1.0)  # Avoid division by zero
+            
+            first_centroid = (first_frame * visible_joints_mask[:, 0:1]).sum(dim=1, keepdim=True) / mask_sum[:, 0:1]
+            current_centroids = (current_frames * mask_expanded).sum(dim=2, keepdim=True) / mask_sum
+            
+            first_centered = first_frame - first_centroid
+            current_centered = current_frames - current_centroids
+            
+            first_centered_exp = first_centered.unsqueeze(1).expand(-1, time, -1, -1)
+            H = first_centered_exp.transpose(-2, -1) @ current_centered
+            
+            U, _, Vh = torch.linalg.svd(H)
+            r_mat = Vh.transpose(-2, -1) @ U.transpose(-2, -1)
+            
+            det = torch.linalg.det(r_mat)
+            reflection_fix = torch.eye(3, device=r_mat.device).unsqueeze(0).unsqueeze(0).expand(batch, time, -1, -1).clone()
+            reflection_fix[..., 2, 2] = det
+            r_mat = r_mat @ reflection_fix
+            
+            t = current_centroids.squeeze(2) - torch.einsum('btij,bkj->bti', r_mat, first_centroid)
+            
+            cond = torch.cat([
+                torch.cat([
+                    masked_joints,
+                    masked_embeddings
+                ], dim=-1).reshape(batch, time, -1),
+                r_mat.reshape(batch, time, 9),
+                t.reshape(batch, time, 3),
+                floor_height,
+            ], dim=-1)
+        
+        else:
+            assert_never(self.joint_cond_mode)
+
+        # Apply Fourier encoding
+        cond = fourier_encode(cond, freqs=self.fourier_enc_freqs)
+        assert cond.shape == (batch, time, self.d_cond)
+        return cond
+
     def make_cond(
         self,
         visible_joints: Float[Tensor, "batch time num_visible_joints 3"],

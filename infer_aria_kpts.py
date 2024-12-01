@@ -14,6 +14,7 @@ from torch.utils.data import Dataset, DataLoader
 from tqdm.auto import tqdm
 
 from config.train import EgoAlloTrainConfig
+from egoallo import training_utils
 from egoallo.data.dataclass import EgoTrainingData
 from egoallo.inference_utils import (
     create_masked_training_data,
@@ -29,7 +30,7 @@ from egoallo import fncsmpl_extensions
 from infer_mae import run_sampling_with_masked_data
 from egoallo.utils.setup_logger import setup_logger
 from egoallo.egopose.stats_collector import PreprocessingStatsCollector, KeypointFilterStats
-from egoallo.utils.smpl_mapping.mapping import EGOEXO4D_EGOPOSE_BODYPOSE_MAPPINGS
+from egoallo.utils.smpl_mapping.mapping import EGOEXO4D_EGOPOSE_BODYPOSE_MAPPINGS, EGOEXO4D_BODYPOSE_TO_SMPLH_INDICES
 from egoallo.egopose.handpose.data_preparation.utils.utils import (
     world_to_cam,
     cam_to_img,
@@ -46,6 +47,28 @@ local_config_file = CONFIG_FILE
 CFG = make_cfg(config_name="defaults", config_file=local_config_file, cli_args=[])
 
 logger = logging.getLogger(__name__)
+
+def convert_egoexo4d_to_smplh(egoexo4d_joints: np.ndarray) -> np.ndarray:
+    """Convert EgoExo4D format joints to SMPLH convention.
+    
+    Args:
+        egoexo4d_joints: Array of shape (..., 17, 3) in EgoExo4D format
+        
+    Returns:
+        Array of shape (..., 22, 3) in SMPLH body joint convention
+        Non-mappable joints are filled with NaN values
+    """
+    # Initialize output array with NaN values
+    # SMPLH has 22 body joints
+    output_shape = list(egoexo4d_joints.shape[:-2]) + [22, 3]
+    smplh_joints = np.full(output_shape, np.nan)
+    
+    # Map joints using EGOEXO4D_BODYPOSE_TO_SMPLH_INDICES
+    for smplh_idx, egoexo_idx in enumerate(EGOEXO4D_BODYPOSE_TO_SMPLH_INDICES):
+        if egoexo_idx != -1:
+            smplh_joints[..., smplh_idx, :] = egoexo4d_joints[..., egoexo_idx, :]
+            
+    return smplh_joints
 
 @dataclasses.dataclass
 class InferenceConfig(EgoAlloTrainConfig):
@@ -107,22 +130,24 @@ class AriaKeypointsDataset(Dataset):
             visible_masks = []
             
             all_frames = find_numerical_key_in_dict(take_data)
-            breakpoint()
+            # breakpoint()
             for frame_idx in all_frames:
                 frame_data = take_data[str(frame_idx)]
                 # Get joints and masks from frame data
                 joints_3d = np.array(frame_data["body_3d_world"])
                 valid_mask = np.array(frame_data["body_valid_3d"])
+
+                jnts_wrt_egoexo = convert_egoexo4d_to_smplh(joints_3d)
+                valid_mask = ~np.isnan(jnts_wrt_egoexo).any(axis=-1)
                 
-                visible_joints.append(joints_3d[valid_mask])
+                visible_joints.append(jnts_wrt_egoexo)
                 visible_masks.append(valid_mask)
             
             if visible_joints:
                 processed_data[take_id] = {
-                    "joints": np.concatenate(visible_joints, axis=0),
-                    "masks": np.concatenate(visible_masks, axis=0)
+                    "joints": np.stack(visible_joints, axis=0),
+                    "masks": np.stack(visible_masks, axis=0)
                 }
-                
         return processed_data
 
     def _load_annotations(self, path: Path) -> Dict[str, Any]:
@@ -303,6 +328,8 @@ def save_results(
 def main(config: InferenceConfig):
     """Main function to run inference on Aria keypoints data."""
     # Initialize dataset and dataloader
+    training_utils.ipdb_safety_net()
+
     dataset = AriaKeypointsDataset(
         config=config
     )
@@ -329,29 +356,30 @@ def main(config: InferenceConfig):
             take_ids = batch["take_id"]
 
             # Create masked training data
+            aa = visible_masks.sum(dim=1).squeeze(0)
             breakpoint()
-            masked_data = create_masked_training_data(
-                visible_joints,
-                visible_masks,
-                mask_ratio=config.mask_ratio
-            )
+            # masked_data = create_masked_training_data(
+            #     visible_joints,
+            #     visible_masks,
+            #     mask_ratio=config.mask_ratio
+            # )
 
-            # Run sampling with masked data
-            samples = run_sampling_with_masked_data(
-                denoiser=denoiser,
-                masked_data=masked_data,
-                num_samples=config.num_samples,
-                traj_length=config.traj_length
-            )
+            # # Run sampling with masked data
+            # samples = run_sampling_with_masked_data(
+            #     denoiser=denoiser,
+            #     masked_data=masked_data,
+            #     num_samples=config.num_samples,
+            #     traj_length=config.traj_length
+            # )
 
-            # Save results for each take in batch
-            for i, take_id in enumerate(take_ids):
-                output_path = config.output_dir / f"{take_id}_samples.pt"
-                torch.save({
-                    "samples": samples[i],
-                    "visible_joints": visible_joints[i],
-                    "visible_masks": visible_masks[i]
-                }, output_path)
+            # # Save results for each take in batch
+            # for i, take_id in enumerate(take_ids):
+            #     output_path = config.output_dir / f"{take_id}_samples.pt"
+            #     torch.save({
+            #         "samples": samples[i],
+            #         "visible_joints": visible_joints[i],
+            #         "visible_masks": visible_masks[i]
+            #     }, output_path)
 
 if __name__ == "__main__":
     tyro.cli(main)
