@@ -107,6 +107,7 @@ def run_training(
         collate_fn=collate_dataclass,
         drop_last=True,
     )
+    # breakpoint()
     optim = torch.optim.AdamW(  # type: ignore
         model.parameters(),
         lr=config.learning_rate,
@@ -212,6 +213,20 @@ def run_training(
                     writer.add_scalar('batch_loading_time_ms', batch_load_time * 1000, step)
                     writer.add_scalar('epoch_time_s', epoch_time, step)
 
+            # Checkpointing.
+            log_ckpt_step = 2000
+            if step % log_ckpt_step == 0:
+                # Save checkpoint.
+                checkpoint_path = experiment_dir / f"checkpoints_{step}"
+                accelerator.save_state(str(checkpoint_path))
+                logger.info(f"Saved checkpoint to {checkpoint_path}")
+
+                # Keep checkpoints from only every 100k steps.
+                if prev_checkpoint_path is not None:
+                    shutil.rmtree(prev_checkpoint_path)
+                prev_checkpoint_path = None if step % log_ckpt_step == 0 else checkpoint_path
+                del checkpoint_path
+
             # Start timing next batch load
             batch_start_time = time.time()
 
@@ -221,20 +236,5 @@ def run_training(
         # if accelerator.is_main_process:
         #     logger.info(f"Epoch {epoch} completed in {epoch_time:.1f} seconds")
         epoch_start_time = time.time()
-
-        # Checkpointing.
-        if step % 2000 == 0:
-            # Save checkpoint.
-            checkpoint_path = experiment_dir / f"checkpoints_{step}"
-            accelerator.save_state(str(checkpoint_path))
-            logger.info(f"Saved checkpoint to {checkpoint_path}")
-
-            # Keep checkpoints from only every 100k steps.
-            if prev_checkpoint_path is not None:
-                shutil.rmtree(prev_checkpoint_path)
-            prev_checkpoint_path = None if step % 100_000 == 0 else checkpoint_path
-            del checkpoint_path
-
-
 if __name__ == "__main__":
     tyro.cli(run_training)
