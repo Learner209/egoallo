@@ -11,7 +11,7 @@ import torch.cuda
 import tyro
 
 from egoallo import fncsmpl
-from egoallo.data.amass_dataset import EgoTrainingData
+from egoallo.data.dataclass import EgoTrainingData
 from egoallo import training_utils
 import faulthandler
 

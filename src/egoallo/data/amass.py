@@ -381,7 +381,13 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         visible_joints_mask[:, masked_indices] = False
 
         # Get original joints_wrt_world
-        joints_wrt_world = kwargs["joints_wrt_world"]  # shape: [time, 21, 3]
+        # Combine root position from T_world_root with other joints to get full 22 joints
+        assert kwargs["joints_wrt_world"].shape == (self._subseq_len, num_joints-1, 3)
+        root_pos = kwargs["T_world_root"][..., 4:7]  # Get translation part [time, 3]
+        joints_wrt_world = torch.cat([
+            root_pos.unsqueeze(1),  # Add joint dimension: [time, 1, 3] 
+            kwargs["joints_wrt_world"]  # [time, 21, 3]
+        ], dim=1)  # Final shape: [time, 22, 3]
         assert joints_wrt_world.shape == (self._subseq_len, num_joints, 3), f"Expected shape: {(self._subseq_len, num_joints, 3)}, got: {joints_wrt_world.shape}"
         
         # Create visible_joints tensor containing only unmasked joints
