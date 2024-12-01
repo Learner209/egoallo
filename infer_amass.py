@@ -20,7 +20,7 @@ from egoallo import fncsmpl
 from egoallo import fncsmpl_extensions
 from egoallo.vis_helpers import visualize_traj_and_hand_detections
 from egoallo.sampling import CosineNoiseScheduleConstants, quadratic_ts
-from egoallo.data.amass import EgoAmassHdf5Dataset
+from egoallo.data.amass import EgoAmassHdf5Dataset, AdaptiveAmassHdf5Dataset
 from egoallo.data.dataclass import collate_dataclass
 import time
 
@@ -78,10 +78,8 @@ def main(
 ) -> network.EgoDenoiseTraj:
 
     # Load data and models
-    dataset = EgoAmassHdf5Dataset(
-        config=config,
-        cache_files=True,
-        random_variable_len_proportion=config.dataset_slice_random_variable_len_proportion,
+    dataset = AdaptiveAmassHdf5Dataset(
+        config=config
     )
     test_loader = torch.utils.data.DataLoader(
         dataset=dataset,

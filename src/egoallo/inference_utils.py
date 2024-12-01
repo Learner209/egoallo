@@ -23,6 +23,13 @@ from . import transforms as tf
 from . import fncsmpl
 from .mapping import SMPLH_BODY_JOINTS
 
+from egoallo.utils.setup_logger import setup_logger
+logger = setup_logger(output=None, name=__name__)
+
+
+from egoallo.config import make_cfg, CONFIG_FILE
+local_config_file = CONFIG_FILE
+CFG = make_cfg(config_name="defaults", config_file=local_config_file, cli_args=[])
 
 def load_denoiser(checkpoint_dir: Path) -> EgoDenoiser:
     """Load a denoiser model."""
@@ -93,10 +100,10 @@ class InferenceTrajectoryPaths:
         if not splat_path.exists():
             splat_path = traj_root / "scene.splat"
         if not splat_path.exists():
-            print("No scene splat found.")
+            logger.warning("No scene splat found.")
             splat_path = None
         else:
-            print("Found splat at", splat_path)
+            logger.info(f"Found splat at {splat_path}")
 
         return InferenceTrajectoryPaths(
             vrs_file=vrs_files[0],
@@ -141,7 +148,7 @@ class InferenceInputTransforms(TensorDataclass):
             - closed_loop_traj[0].tracking_timestamp.total_seconds()
         )
         num_poses = len(closed_loop_traj)
-        print(f"Loaded {num_poses=} with {aria_fps=}, visualizing at {fps=}")
+        logger.info(f"Loaded {num_poses=} with {aria_fps=}, visualizing at {fps=}")
         Ts_world_device = []
         Ts_world_cpf = []
         out_timestamps_secs = []
@@ -183,10 +190,12 @@ def create_masked_training_data(
     """
     device = posed.local_quats.device
     batch_size, timesteps = posed.local_quats.shape[:2]
-    num_joints = 21  # Number of body joints
+    num_joints = CFG.smplh.num_joints  # Number of body joints
     
     # Get joint positions in world frame
-    joints_wrt_world = posed.Ts_world_joint[..., :num_joints, 4:7]
+    root_pos = posed.T_world_root[..., 4:7].unsqueeze(-2) # (batch, timesteps, 1, 3)
+    joints_wrt_world = torch.cat([root_pos, posed.Ts_world_joint[..., :num_joints-1, 4:7]], dim=-2) # (batch, timesteps, num_joints, 3)
+    # breakpoint()
     
     # Generate random mask for sequence
     num_masked = int(num_joints * mask_ratio)
@@ -199,13 +208,13 @@ def create_masked_training_data(
 
     # Print out what joints are masked in string.
     masked_joints_str = ", ".join(SMPLH_BODY_JOINTS[i] for i in masked_indices.tolist())
-    print(f"Masked joints: {masked_joints_str}")
+    logger.info(f"Masked joints: {masked_joints_str}")
 
     # Get joints in CPF frame
     joints_wrt_cpf = (
         tf.SE3(Ts_world_cpf[..., None, :]).inverse() 
         @ joints_wrt_world
-    )
+   ) # (batch, timesteps, num_joints, 3)
     
     return EgoTrainingData(
         T_world_root=tf.SE3(posed.T_world_root).parameters(),

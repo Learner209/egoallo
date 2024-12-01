@@ -24,10 +24,10 @@ from egoallo.inference_utils import (
     InferenceTrajectoryPaths,
     load_denoiser,
 )
-from egoallo.sampling import run_sampling_with_stitching, real_time_sampling_with_stitching
+from egoallo.sampling import run_sampling_with_stitching
 from egoallo.transforms import SE3, SO3
 from egoallo.vis_helpers import visualize_traj_and_hand_detections
-from egoallo.training_utils import pdb_safety_net, ipdb_safety_net
+from egoallo.training_utils import ipdb_safety_net
 from egoallo.config.inference_config import InferenceConfig
 
 def main(config: InferenceConfig) -> None:
@@ -44,7 +44,7 @@ def main(config: InferenceConfig) -> None:
     else:
         print("No scene splat found.")
     # Get point cloud + floor.
-    points_data, floor_z = load_point_cloud_and_find_ground(points_path=traj_paths.points_path, cached_pts_path=config.output_dir)
+    points_data, floor_z = load_point_cloud_and_find_ground(points_path=traj_paths.points_path)
 
     # Read transforms from VRS / MPS, downsampled.
     transforms = InferenceInputTransforms.load(

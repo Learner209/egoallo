@@ -27,6 +27,8 @@ from egoallo.config import make_cfg, CONFIG_FILE
 from egoallo.egopose.handpose.data_preparation.handpose_dataloader import hand_pose_anno_loader
 from egoallo.egopose.stats_collector import PreprocessingStatsCollector, KeypointFilterStats
 from dataclasses import dataclass
+from egoallo.data.aria_mps import load_point_cloud_and_find_ground
+from pathlib import Path
 from typing import Dict, Optional, Any
 
 local_config_file = CONFIG_FILE
@@ -92,6 +94,9 @@ class body_pose_anno_loader(hand_pose_anno_loader):
             self.dataset_root, f"annotations/ego_pose/{split}/camera_pose"
         )
 
+        # Add ground height cache
+        self.ground_heights = {}
+
         # Load dataset
         self.db = self.load_raw_data()
 
@@ -122,6 +127,7 @@ class body_pose_anno_loader(hand_pose_anno_loader):
             comm_local_take_uid = list(
                 set(split_all_local_takes)
             )
+
 
         # Get all valid local take uids that are used in current split
         # 1. Filter takes based on split (train/val/test)
@@ -218,6 +224,31 @@ class body_pose_anno_loader(hand_pose_anno_loader):
                             # logger.warning(f"Take {curr_take_name} has no valid annotation. Skipped this take.")
         logger.warning(f"Egoexo dataset achieves {overall_valid_frames_num}/{overall_frames_num} valid frames for [{self.split}/{self.anno_type}].")
         return gt_db
+    
+    def _get_ground_height(self, take_uid: str) -> float:
+        """Get ground height for a take, computing it if not cached."""
+        if take_uid not in self.ground_heights:
+            # Get point cloud path
+            point_cloud_path = EGOEXO_UTILS_INST.load_semidense_pts(take_uid)
+            
+            if point_cloud_path is None:
+                logger.warning(f"No point cloud found for take {take_uid}")
+                self.ground_heights[take_uid] = None
+                return None
+                
+            try:
+                # Load point cloud and find ground
+                _, ground_height = load_point_cloud_and_find_ground(
+                    Path(point_cloud_path),
+                    return_points="filtered",
+                    cache_files=False
+                )
+                self.ground_heights[take_uid] = float(ground_height)
+            except Exception as e:
+                logger.error(f"Error computing ground height for take {take_uid}: {e}")
+                self.ground_heights[take_uid] = None
+                
+        return self.ground_heights[take_uid]
 
     def load_take_raw_data(
         self,
@@ -342,12 +373,15 @@ class body_pose_anno_loader(hand_pose_anno_loader):
 
         if take_valid:
             # breakpoint()
+            ground_height = self._get_ground_height(take_uid)
+
             curr_take_db["metadata"] = {
                 "take_uid": take_uid,
                 "take_name": take_name,
                 "exo_cam_names": exo_cam_names.tolist(),
                 "exo_camera_intrinsics": {k: v.tolist() for k, v in curr_exo_intrs.items()},
                 "exo_camera_extrinsics": {k: v.tolist() for k, v in curr_exo_extrs.items()},
+                "ground_height": ground_height
             }
             logger.info(f"Take {take_name} has {len(curr_take_db)-1}/{len(anno.items())} valid frames.")
 
@@ -449,12 +483,14 @@ class body_pose_anno_loader(hand_pose_anno_loader):
         self.stats_collector.mark_take_processed(take_uid, valid=take_valid)
 
         if take_valid:
+            ground_height = self._get_ground_height(take_uid)
             metadata = {
                 "take_uid": take_uid,
                 "take_name": take_name,
                 "exo_cam_names": exo_cam_names.tolist(),
                 "exo_camera_intrinsics": {k: v.tolist() for k, v in curr_intrs.items()},
                 "exo_camera_extrinsics": {k: v.tolist() for k, v in curr_extrs.items()},
+                "ground_height": ground_height,
             }
             curr_take_db["metadata"] = metadata
 

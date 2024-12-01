@@ -744,3 +744,21 @@ class EgoExoUtils:
         take = self.find_take_from_take_uid(take_uid)
         semidense_observations_path = osp.join(self.root_path, "takes", take_name, "trajectory","semidense_observations.csv.gz")
         return semidense_observations_path
+
+    def load_semidense_pts(self, take_uid):
+        """
+        Check if a specific take has an semidense_point_clouds.
+
+        Parameters
+        ----------
+            take_uid :  str,
+                The unique identifier of the take.
+        Returns
+        -------
+        - bool
+            True if the semidense_point_clouds exists, False otherwise.
+        """
+        take_name = self.take_uid_to_take_names[take_uid]
+        take = self.find_take_from_take_uid(take_uid)
+        semidense_pts_path = osp.join(self.root_path, "takes", take_name, "trajectory","semidense_points.csv.gz")
+        return semidense_pts_path

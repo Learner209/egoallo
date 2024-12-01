@@ -146,7 +146,8 @@ class AriaKeypointsDataset(Dataset):
             if jnts:
                 processed_data[take_id] = {
                     "joints": np.stack(jnts, axis=0),
-                    "masks": np.stack(visible_masks, axis=0)
+                    "masks": np.stack(visible_masks, axis=0),
+                    "ground_height": take_data['metadata']['ground_height']
                 }
         return processed_data
 
@@ -185,119 +186,6 @@ class AriaKeypointsDataset(Dataset):
             "visible_joints_mask": take_data["masks"]
         }
 
-def run_inference(
-    model: EgoDenoiseTraj,
-    masked_data: EgoTrainingData,
-    body_model: fncsmpl.SmplhModel,
-    config: InferenceConfig
-) -> Tuple[EgoTrainingData, EgoTrainingData]:
-    """Run inference on masked data and return both ground truth and predicted trajectories.
-    
-    Args:
-        model: Trained denoiser model
-        masked_data: Input data with masking
-        body_model: SMPL-H body model
-        config: Inference configuration
-        
-    Returns:
-        Tuple containing (ground truth trajectory, predicted trajectory)
-    """
-    # Run sampling with masked data
-    denoised_traj = run_sampling_with_masked_data(
-        denoiser_network=model,
-        body_model=body_model,
-        masked_data=masked_data,
-        guidance_mode="no_hands",
-        guidance_post=False,
-        guidance_inner=False,
-        floor_z=0.0,
-        hamer_detections=None,
-        aria_detections=None,
-        num_samples=config.num_samples,
-        device=torch.device(config.device),
-    )
-
-    # Create EgoTrainingData instances for ground truth and predictions
-    gt_ego_data = create_ego_training_data(
-        body_model=body_model,
-        T_world_root=masked_data.T_world_root,
-        contacts=masked_data.contacts,
-        betas=masked_data.betas,
-        body_quats=masked_data.body_quats,
-        T_world_cpf=masked_data.T_world_cpf,
-        hand_quats=masked_data.hand_quats,
-        visible_joints_mask=masked_data.visible_joints_mask
-    )
-
-    pred_ego_data = create_ego_training_data_from_denoised(
-        denoised_traj=denoised_traj,
-        body_model=body_model
-    )
-
-    return gt_ego_data, pred_ego_data
-
-def create_ego_training_data_from_denoised(
-    denoised_traj: EgoDenoiseTraj,
-    body_model: fncsmpl.SmplhModel
-) -> EgoTrainingData:
-    """Create EgoTrainingData instance from denoised trajectory.
-    
-    Args:
-        denoised_traj: Output trajectory from denoiser
-        body_model: SMPL-H body model
-        
-    Returns:
-        EgoTrainingData instance containing predicted trajectory
-    """
-    # Get transformation matrices
-    T_world_root = SE3.from_rotation_and_translation(
-        SO3.from_matrix(denoised_traj.R_world_root),
-        denoised_traj.t_world_root,
-    ).parameters()
-    
-    # Get body quaternions
-    body_quats = SO3.from_matrix(denoised_traj.body_rotmats).wxyz
-    
-    # Get hand quaternions if available
-    if denoised_traj.hand_rotmats is not None:
-        hand_quats = SO3.from_matrix(denoised_traj.hand_rotmats).wxyz
-        left_hand_quats = hand_quats[..., :15, :]
-        right_hand_quats = hand_quats[..., 15:30, :]
-        hand_quats_combined = torch.cat([left_hand_quats, right_hand_quats], dim=-2)
-    else:
-        hand_quats_combined = None
-
-    # Forward kinematics to get joint positions
-    shaped = body_model.with_shape(torch.mean(denoised_traj.betas, dim=1, keepdim=True))
-    fk_outputs = shaped.with_pose_decomposed(
-        T_world_root=T_world_root,
-        body_quats=body_quats,
-        left_hand_quats=left_hand_quats if denoised_traj.hand_rotmats is not None else None,
-        right_hand_quats=right_hand_quats if denoised_traj.hand_rotmats is not None else None,
-    )
-
-    # Get camera pose transforms
-    T_world_cpf = fncsmpl_extensions.get_T_world_cpf_from_root_pose(fk_outputs, T_world_root)
-
-    return EgoTrainingData(
-        T_world_root=T_world_root.squeeze(0).cpu(),
-        contacts=denoised_traj.contacts.squeeze(0).cpu(),
-        betas=denoised_traj.betas.squeeze(0).cpu(),
-        joints_wrt_world=fk_outputs.Ts_world_joint.squeeze(0).cpu(),
-        body_quats=body_quats.squeeze(0).cpu(),
-        T_world_cpf=T_world_cpf.squeeze(0).cpu(),
-        height_from_floor=T_world_cpf[..., 6:7].squeeze(0).cpu(),
-        T_cpf_tm1_cpf_t=(
-            tf.SE3(T_world_cpf[:-1, :]).inverse() @ tf.SE3(T_world_cpf[1:, :])
-        ).parameters().cpu().squeeze(0),
-        joints_wrt_cpf=(
-            tf.SE3(T_world_cpf[1:, None, :]).inverse() @ 
-            fk_outputs.Ts_world_joint[0, 1:, :21, 4:7].to(T_world_cpf.device)
-        ),
-        mask=torch.ones_like(denoised_traj.contacts[0, :], dtype=torch.bool),
-        hand_quats=hand_quats_combined.squeeze(0).cpu() if hand_quats_combined is not None else None,
-        visible_joints_mask=None,
-    )
 
 def save_results(
     gt_data: EgoTrainingData,
@@ -353,10 +241,14 @@ def main(config: InferenceConfig):
             # Extract batch data
             jnts = batch["jnts"].to(config.device) # shape: (batch, time, 22, 3)
             visible_masks = batch["visible_joints_mask"].to(config.device) # shape: (batch, time, 22)
+            ground_height = batch["ground_height"]
             take_ids = batch["take_id"]
 
             # Get batch dimensions
             batch_size, seq_len, num_joints, _ = jnts.shape
+
+            # Adjust ground height for each take in batch
+            jnts[..., 2] -= ground_height
             
             # Create placeholder tensors with appropriate shapes
             placeholder_T_world_root = SE3.identity(device=jnts.device, dtype=jnts.dtype).parameters().repeat(batch_size, seq_len, 1)

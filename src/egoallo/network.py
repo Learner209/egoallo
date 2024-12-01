@@ -211,13 +211,13 @@ class EgoDenoiserConfig:
     def make_cond_with_masked_joints(
         self,
         joints: Float[Tensor, "batch time num_joints 3"],
-        visible_joints_mask: Bool[Tensor, "batch time 21"],
+        visible_joints_mask: Bool[Tensor, "batch time 22"],
     ) -> Float[Tensor, "batch time d_cond"]:
         """Construct conditioning using all joints (zeroing invisible ones) and floor height.
         
         Args:
             joints: Joint positions of shape (batch, time, num_joints, 3)
-            visible_joints_mask: Boolean mask of shape (batch, time, 21) indicating joint visibility
+            visible_joints_mask: Boolean mask of shape (batch, time, 22) indicating joint visibility
         
         Returns:
             Conditioning tensor of shape (batch, time, d_cond)
@@ -229,17 +229,27 @@ class EgoDenoiserConfig:
         # Create joint index embeddings for all joints
         joint_embeddings = nn.Embedding(CFG.smplh.num_joints, 16).to(device)
         all_indices = torch.arange(CFG.smplh.num_joints, device=device)
-        index_embeddings = joint_embeddings(all_indices).expand(batch, time, -1, -1)  # (batch, time, 21, 16)
+        index_embeddings = joint_embeddings(all_indices).expand(batch, time, -1, -1)  # (batch, time, 22, 16)
 
         # Zero out invisible joints only
-        mask_expanded = visible_joints_mask.unsqueeze(-1)  # (batch, time, 21, 1)
+        mask_expanded = visible_joints_mask.unsqueeze(-1)  # (batch, time, 22, 1)
         masked_joints = torch.where(mask_expanded, joints, 0)
         # masked_joints = joints * mask_expanded # ! This is wrong impl, we want to zero out invisible joints
         masked_embeddings = index_embeddings  # Keep all embeddings
         
         # Extract floor height from visible joints
-        visible_heights = torch.where(visible_joints_mask, joints[..., 2], 0)  # Zero out invisible joints
-        floor_height = visible_heights.max(dim=2, keepdim=True)[0]  # (batch, time, 1)
+        # Get z-coordinates (heights) of all joints
+        joint_heights = joints[..., 2]  # (batch, time, num_joints)
+        
+        # Mask invisible joints with large value so they don't affect min
+        masked_heights = torch.where(
+            visible_joints_mask,
+            joint_heights,
+            torch.ones_like(joint_heights) * float('inf')
+        )
+        
+        # Get minimum height per timestep
+        floor_height = masked_heights.min(dim=-1, keepdim=True)[0]  # (batch, time, 1)
         
         if self.joint_cond_mode == "absolute":
             cond = torch.cat([
