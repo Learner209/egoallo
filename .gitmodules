@@ -1,3 +1,6 @@
 [submodule "third_party/cloudrender"]
 	path = third_party/cloudrender
 	url = git@github.com:Learner209/cloudrender.git
+[submodule "third_party/hamer"]
+	path = third_party/hamer
+	url = git@github.com:geopavlakos/hamer.git

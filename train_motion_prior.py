@@ -25,7 +25,7 @@ from loguru import logger
 from egoallo import network, training_loss, training_utils
 from egoallo.data.amass import EgoAmassHdf5Dataset, AdaptiveAmassHdf5Dataset
 from egoallo.data.dataclass import collate_dataclass
-from config.train import EgoAlloTrainConfig
+from egoallo.config.train.train_config import EgoAlloTrainConfig
 
 
 

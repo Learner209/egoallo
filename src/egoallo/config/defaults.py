@@ -173,7 +173,7 @@ _C.blender.scripts.blender_vis_human_and_headpose_utils = osp.join(_C.blender.sc
 
 _C.io = CN()
 _C.io.main_exp_path = osp.join(_C.project_root, "exp")
-_C.io.exp_path = osp.join(_C.io.main_exp_path, "default")
+_C.io.exp_path = osp.join(_C.io.main_exp_path, "egoexo-default-exp")
 
 _C.io.egoexo = CN()
 _C.io.egoexo.root_path = osp.join(_C.dataset_root_dir, "egoexo-default")

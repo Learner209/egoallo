@@ -3,6 +3,7 @@
 import pickle
 import shutil
 from pathlib import Path
+from typing import Any
 
 import cv2
 import imageio.v3 as iio
@@ -23,22 +24,30 @@ from tqdm.auto import tqdm
 from egoallo.inference_utils import InferenceTrajectoryPaths
 
 
-def main(traj_root: Path, overwrite: bool = False) -> None:
-    """Run HaMeR for on trajectory. We'll save outputs to
-    `traj_root/hamer_outputs.pkl` and `traj_root/hamer_outputs_render".
+def main(
+    traj_root: Path,
+    output_dir: Path | None = None,
+    overwrite: bool = False
+) -> None:
+    """Run HaMeR for on trajectory.
 
     Arguments:
-        traj_root: The root directory of the trajectory. We assume that there's
-            a VRS file in this directory.
-        overwrite: If True, overwrite any existing HaMeR outputs.
+        traj_root: The root directory containing the VRS file
+        output_dir: Optional output directory for HaMeR outputs. If None,
+            will use traj_root
+        overwrite: If True, overwrite any existing HaMeR outputs
     """
-
     paths = InferenceTrajectoryPaths.find(traj_root)
-
     vrs_path = paths.vrs_file
     assert vrs_path.exists()
-    pickle_out = traj_root / "hamer_outputs.pkl"
-    hamer_render_out = traj_root / "hamer_outputs_render"  # This is just for debugging.
+
+    # Use output_dir if provided, otherwise use traj_root
+    out_root = output_dir if output_dir is not None else traj_root
+    out_root.mkdir(parents=True, exist_ok=True)
+    
+    pickle_out = out_root / "hamer_outputs.pkl"
+    hamer_render_out = out_root / "hamer_outputs_render"
+    
     run_hamer_and_save(vrs_path, pickle_out, hamer_render_out, overwrite)
 
 
@@ -201,12 +210,12 @@ def run_hamer_and_save(
 
 
 def put_text(
-    image: np.ndarray,
+    image: np.ndarray[Any, np.dtype[np.uint8]],
     text: str,
     line_number: int,
     color: tuple[int, int, int],
     font_scale: float,
-) -> np.ndarray:
+) -> np.ndarray[Any, np.dtype[np.uint8]]:
     """Put some text on the top-left corner of an image."""
     image = image.copy()
     font = cv2.FONT_HERSHEY_PLAIN

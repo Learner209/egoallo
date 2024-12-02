@@ -75,7 +75,7 @@ class InferenceTrajectoryPaths:
 
     @staticmethod
     def find(traj_root: Path) -> InferenceTrajectoryPaths:
-        vrs_files = tuple(traj_root.glob("**/*.vrs"))
+        vrs_files = tuple(traj_root.glob("**/aria01.vrs"))
         assert len(vrs_files) == 1, f"Found {len(vrs_files)} VRS files!"
 
         points_paths = tuple(traj_root.glob("**/semidense_points.csv.gz"))

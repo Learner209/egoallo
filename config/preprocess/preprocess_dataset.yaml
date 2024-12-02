@@ -1,0 +1,11 @@
+valid_kpts_num_thresh: 9
+
+gt_bodypose:
+    run_demo: false
+    require_valid_kpts: []
+    output:
+        log_save_dir: ./logs/preprocess_dataset/egoexo-default
+    # output:
+    #     save_dir: "/home/minghao/src/robotflow/new_egoego/datasets/egoexo-default-gt-output/bodypose/canonical/valid_kpts_num_thresh_5_require_pelvis"
+    # sample_output:
+    # save_dir: "/home/minghao/src/robotflow/new_egoego/datasets/egoexo-default-gt-output/bodypose/test_sample/valid_kpts_num_thresh_5_require_pelvis"

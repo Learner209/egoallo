@@ -258,9 +258,9 @@ def main(config: InferenceConfig) -> None:
         raise
 
     # Create output directories
-    output_dir = Path("output_videos_absrel")
+    assert config.output_dir is not None
+    output_dir = Path(config.output_dir) 
     output_dir.mkdir(exist_ok=True, parents=True)
-    config.output_dir.mkdir(exist_ok=True, parents=True)
 
     # Test loop
     for batch_idx, batch in enumerate(tqdm(test_dataloader, desc="Generating predictions")):

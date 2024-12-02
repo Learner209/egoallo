@@ -15,7 +15,6 @@ htmlcov
 .envrc
 lightning_logs/
 outputs/
-experiments/
 blendify_assets/
 wandb/
 
@@ -28,6 +27,7 @@ diff.bak
 *.mp4
 
 /experiments
+/exp
 /assets
 /datasets
 /data
