@@ -13,14 +13,30 @@ import shutil
 import pdb
 import argparse
 import glob
+import json
+from contextlib import redirect_stdout
+import numpy as np
+import torch
+import os
+import os.path as osp
+import re
+import sys
+import ipdb
+import shutil
+import pdb
+import argparse
+import glob
+from typing import Optional, Tuple
+from torch import Tensor
+from pathlib import Path
 
 from yacs.config import CfgNode as CN
-from egoallo.config import make_cfg, CONFIG_FILE
 from egoallo.utils.setup_logger import setup_logger
+local_logger = setup_logger(output=None, name=__name__)
+
+from egoallo.config import make_cfg, CONFIG_FILE
 local_config_file = CONFIG_FILE
 CFG = make_cfg(config_name="defaults", config_file=local_config_file, cli_args=[])
-
-local_logger = setup_logger(output=None, name=__name__)
 
 
 # type annotation type aliases
@@ -231,6 +247,60 @@ def images_to_video_w_imageio(img_folder, output_vid_file):
 
     im_arr = np.asarray(im_arr)
     imageio.mimwrite(output_vid_file, im_arr, fps=30, quality=8) 
+
+
+
+def procrustes_align(
+    points_y: torch.Tensor,
+    points_x: torch.Tensor,
+    fix_scale: bool = False,
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """
+    Perform Procrustes alignment between two point sets.
+    
+    Args:
+        points_y: Target points (..., N, 3)
+        points_x: Source points (..., N, 3)
+        fix_scale: Whether to fix scale to 1
+        
+    Returns:
+        Tuple of (scale, rotation, translation)
+    """
+    *dims, N, _ = points_y.shape
+    device = points_y.device
+    dtype = points_y.dtype
+    N_tensor = torch.tensor(N, device=device, dtype=dtype)
+
+    # Center points
+    my = points_y.mean(dim=-2)
+    mx = points_x.mean(dim=-2)
+    y0 = points_y - my[..., None, :]
+    x0 = points_x - mx[..., None, :]
+
+    # Correlation
+    C = torch.matmul(y0.transpose(-1, -2), x0) / N_tensor
+    U, D, Vh = torch.linalg.svd(C, full_matrices=False)
+
+    # Fix: Clone S before modifying to avoid in-place operation conflicts
+    S = torch.eye(3, device=device, dtype=dtype).expand(*dims, 3, 3).clone()
+    det = torch.det(U) * torch.det(Vh)
+    S[..., -1, -1] = torch.where(det < 0, -1.0, 1.0)
+
+    R = torch.matmul(U, torch.matmul(S, Vh))
+
+    if fix_scale:
+        s = torch.ones(*dims, 1, device=device, dtype=dtype)
+    else:
+        var = torch.sum(x0 ** 2, dim=(-1, -2), keepdim=True) / N_tensor
+        s = (torch.sum(D * S.diagonal(dim1=-2, dim2=-1), dim=-1, keepdim=True) / var[..., 0])
+
+    t = my - s * torch.matmul(R, mx[..., None])[..., 0]
+
+    return s, R, t
+
+if __name__ == "__main__":
+    debug_on_error(debug=True, logger=local_logger)
+    raise ValueError("This is a test error")
     
 if __name__ == "__main__":
     debug_on_error(debug=True, logger=local_logger)

@@ -64,13 +64,13 @@ def get_T_world_root_from_cpf_pose(
     assert Ts_world_cpf.shape[-1] == 7
     T_world_root = (
         # T_world_cpf
-        transforms.SE3(Ts_world_cpf)
+        transforms.SE3(Ts_world_cpf) # shape: [..., 7]
         # T_cpf_head
-        @ transforms.SE3(get_T_head_cpf(posed.shaped_model)).inverse()
+        @ transforms.SE3(get_T_head_cpf(posed.shaped_model)).inverse() # shape: [..., 7]
         # T_head_world
-        @ transforms.SE3(posed.Ts_world_joint[..., 14, :]).inverse()
+        @ transforms.SE3(posed.Ts_world_joint[..., 14, :]).inverse() # shape: [..., 7]
         # T_world_root
-        @ transforms.SE3(posed.T_world_root)
+        @ transforms.SE3(posed.T_world_root) # shape: [..., 7]
     )
     return T_world_root.wxyz_xyz
 

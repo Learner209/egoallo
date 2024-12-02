@@ -7,7 +7,7 @@ import torch
 import torch.utils
 import torch.utils.data
 
-from config.train import EgoAlloTrainConfig
+from egoallo.config.train.train_config import EgoAlloTrainConfig
 
 from .dataclass import EgoTrainingData
 from ..network import EgoDenoiserConfig

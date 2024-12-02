@@ -1,0 +1,5 @@
+gt_bodypose:
+    output:
+        save_dir: "/home/minghao/src/robotflow/new_egoego/datasets/egoexo-default-gt-output/bodypose/canonical/valid_kpts_num_thresh_9_require_wrist_eye"
+    sample_output:
+        save_dir: "/home/minghao/src/robotflow/new_egoego/datasets/egoexo-default-gt-output/bodypose/test_sample/valid_kpts_num_thresh_9_require_wrist_eye"

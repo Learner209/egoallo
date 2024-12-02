@@ -13,7 +13,7 @@ import viser
 from torch.utils.data import Dataset, DataLoader
 from tqdm.auto import tqdm
 
-from config.train import EgoAlloTrainConfig
+from egoallo.config.train.train_config import EgoAlloTrainConfig
 from egoallo import training_utils
 from egoallo.data.dataclass import EgoTrainingData
 from egoallo.inference_utils import (
@@ -27,7 +27,7 @@ from egoallo.sampling import CosineNoiseScheduleConstants, quadratic_ts
 from egoallo.vis_helpers import visualize_traj_and_hand_detections
 from egoallo.training_utils import ipdb_safety_net
 from egoallo import fncsmpl_extensions
-from infer_mae import run_sampling_with_masked_data
+from egoallo.sampling import run_sampling_with_masked_data
 from egoallo.utils.setup_logger import setup_logger
 from egoallo.egopose.stats_collector import PreprocessingStatsCollector, KeypointFilterStats
 from egoallo.utils.smpl_mapping.mapping import EGOEXO4D_EGOPOSE_BODYPOSE_MAPPINGS, EGOEXO4D_BODYPOSE_TO_SMPLH_INDICES
@@ -70,22 +70,7 @@ def convert_egoexo4d_to_smplh(egoexo4d_joints: np.ndarray) -> np.ndarray:
             
     return smplh_joints
 
-@dataclasses.dataclass
-class InferenceConfig(EgoAlloTrainConfig):
-    """Configuration for inference."""
-    traj_length: int = 128
-    num_samples: int = 1
-    batch_size: int = 1
-    smplh_model_path: Path = Path("./data/smplh/neutral/model.npz")
-    output_dir: Path = Path("./outputs")
-    device: str = "cuda" if torch.cuda.is_available() else "cpu"
-    annotation_path: Path = Path("./data/egoexo-default-gt-output")
-    mask_ratio: float = 0.75
-    checkpoint_dir: Path = Path("./experiments/nov_29_absrel_jnts_pilot/v2")
-
-	# egoexod dataset.
-    split: str = "train"
-    anno_type: str = "manual"
+from egoallo.config.inference.inference_defaults import InferenceConfig
 
 
 class AriaKeypointsDataset(Dataset):

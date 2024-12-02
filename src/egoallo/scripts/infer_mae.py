@@ -39,6 +39,16 @@ from egoallo.training_utils import ipdb_safety_net
 import dataclasses
 
 
+from egoallo.config import make_cfg, CONFIG_FILE
+
+local_config_file = CONFIG_FILE
+CFG = make_cfg(config_name="defaults", config_file=local_config_file, cli_args=[])
+
+from egoallo.utils.setup_logger import setup_logger
+
+logger = setup_logger(output=None, name=__name__)
+
+
 @dataclasses.dataclass
 class Args:
     npz_path: Path = Path("./egoallo_example_trajectories/coffeemachine/egoallo_outputs/20240929-011937_10-522.npz")
@@ -244,8 +254,8 @@ def calculate_metrics(
     
     # 2. Joint position errors
     # Get original and inferred joint positions
-    orig_joints = original_posed.Ts_world_joint[..., :21, 4:7]  # Only body joints
-    infer_joints = inferred_posed.Ts_world_joint[..., :21, 4:7]
+    orig_joints = torch.cat([original_posed.T_world_root[..., 4:7].unsqueeze(-2), original_posed.Ts_world_joint[..., :CFG.smplh.num_joints-1, 4:7]], dim=-2)
+    infer_joints = torch.cat([inferred_posed.T_world_root[..., 4:7].unsqueeze(-2), inferred_posed.Ts_world_joint[..., :CFG.smplh.num_joints-1, 4:7]], dim=-2)
     
     # Calculate per-joint errors
     joint_errors = torch.norm(orig_joints - infer_joints, dim=-1)  # [B, T, J]
