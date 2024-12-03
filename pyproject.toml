@@ -61,3 +61,6 @@ ignore = [
     "PLW0603",  # Globa statement updates are discouraged.
     "PLW2901",  # For loop variable overwritten.
 ]
+
+[tool.pytest.ini_options]
+addopts = "--jaxtyping-packages=egoallo,typeguard.typechecked"

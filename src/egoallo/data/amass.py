@@ -475,4 +475,5 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         Returns:
             int: Total number of samples.
         """
-        return self._cum_len[-1] // self._subseq_len
+        _ = self._cum_len[-1] // self._subseq_len
+        return _.item()

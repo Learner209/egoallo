@@ -9,7 +9,7 @@ from pathlib import Path
 import numpy as np
 import torch
 from einops import rearrange
-from jaxtyping import Bool, Float
+from jaxtyping import Bool, Float, Int
 from loguru import logger
 from rotary_embedding_torch import RotaryEmbedding
 from torch import Tensor, nn
@@ -545,7 +545,7 @@ class EgoDenoiser(nn.Module):
     def forward(
         self,
         x_t_packed: Float[Tensor, "batch time state_dim"],
-        t: Float[Tensor, "batch"],
+        t: Int[Tensor, "batch"],
         *,
         project_output_rotmats: bool,
         joints: Float[Tensor, "batch time num_joints 3"],

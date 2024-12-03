@@ -139,7 +139,7 @@ def run_sampling_with_masked_data(
                 # Forward pass with conditioning from masked data
                 x_0_packed_pred[:, start_t:end_t, :] += denoiser_network.forward(
                     x_t_packed=x_t_packed[:, start_t:end_t, :],
-                    t=torch.tensor([t], device=device).expand((num_samples,)),
+                    t=torch.tensor([t], device=device).expand((num_samples,)).float(),
                     joints=masked_data.joints_wrt_world[:, start_t:end_t, :],
                     visible_joints_mask=masked_data.visible_joints_mask[:, start_t:end_t, :],
                     project_output_rotmats=False,

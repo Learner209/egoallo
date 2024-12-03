@@ -2,11 +2,12 @@ from typing import TYPE_CHECKING, Callable, Type, TypeVar
 
 import torch
 
-if TYPE_CHECKING:
-    from .._base import MatrixLieGroup
+# assert TYPE_CHECKING
+# if TYPE_CHECKING:
+from .._base import MatrixLieGroup
 
 
-T = TypeVar("T", bound="MatrixLieGroup")
+T = TypeVar("T", bound=MatrixLieGroup)
 
 
 def get_epsilon(dtype: torch.dtype) -> float:

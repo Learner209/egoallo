@@ -37,7 +37,7 @@ class TrainingLossConfig:
             "t_world_root": 0.2,
             "joints": 0.4,
             "foot_skating": 0.1,
-            "velocity": 0.1,
+            "velocity": 0.01,
         }.copy
     )
     weight_loss_by_t: Literal["emulate_eps_pred"] = "emulate_eps_pred"
@@ -240,6 +240,7 @@ class TrainingLossComputer:
         # visible_joints_mask: shape (b, t, 22), joint_loss: shape (b, t, 22, 3)
         # Compute masked joint loss while handling shape alignment
         # joint_loss: (b, t, 22, 3), visible_joints_mask: (b, t, 22)
+        # breakpoint()
         masked_joint_loss = (
             joint_loss * train_batch.visible_joints_mask[..., None]  # Add channel dim to mask
         ).sum(dim=(-2, -1)) / (  # Sum over joints (22) and xyz (3)
@@ -253,7 +254,7 @@ class TrainingLossComputer:
         foot_velocities = foot_positions[:, 1:] - foot_positions[:, :-1]  # (batch, time-1, 4, 3)
         
         # Get foot contacts from x_0_pred
-        foot_contacts = x_0_pred.contacts[..., foot_indices]  # (batch, time, 4)
+        foot_contacts = x_0.contacts[..., foot_indices]  # (batch, time, 4)
         foot_skating_mask = foot_contacts[:, 1:] * train_batch.mask[:, 1:, None]  # (batch, time-1, 4)
 
         # Compute foot skating loss for each foot joint

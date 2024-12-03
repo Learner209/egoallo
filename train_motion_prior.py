@@ -22,12 +22,14 @@ from accelerate import Accelerator, DataLoaderConfiguration
 from accelerate.utils import ProjectConfiguration
 from loguru import logger
 
+from jaxtyping import install_import_hook
+
+# Install hook before importing any modules you want to typecheck
+# with install_import_hook("egoallo", "typeguard.typechecked"):
 from egoallo import network, training_loss, training_utils
 from egoallo.data.amass import EgoAmassHdf5Dataset, AdaptiveAmassHdf5Dataset
 from egoallo.data.dataclass import collate_dataclass
 from egoallo.config.train.train_config import EgoAlloTrainConfig
-
-
 
 
 def get_experiment_dir(experiment_name: str, version: int = 0) -> Path:
@@ -150,6 +152,7 @@ def run_training(
     epoch = 0
     
     while True:
+        # breakpoint()
         for train_batch in train_loader:
             # Record batch loading time
             batch_load_time = time.time() - batch_start_time
@@ -185,12 +188,13 @@ def run_training(
             if step % 20 == 0 and accelerator.is_main_process:
                 mem_free, mem_total = torch.cuda.mem_get_info()
                 epoch_time = time.time() - epoch_start_time
-                logger.info(
+                # Build base log message with metrics
+                log_msg = (
                     f"step: {step} ({loop_metrics.iterations_per_sec:.2f} it/sec)"
                     f" epoch: {epoch} (time: {epoch_time:.1f}s)"
                     f" time: {loop_metrics.time_elapsed:.1f}s"
                     f" batch_load: {batch_load_time*1000:.1f}ms"
-                    f" batch: {loop_metrics.batch_time*1000:.1f}ms"
+                    f" batch: {loop_metrics.batch_time*1000:.1f}ms" 
                     f" fwd: {loop_metrics.forward_time*1000:.1f}ms"
                     f" bwd: {loop_metrics.backward_time*1000:.1f}ms"
                     f" opt: {loop_metrics.optimizer_time*1000:.1f}ms"
@@ -201,12 +205,17 @@ def run_training(
                     f" gpu_mem: {[f'{m:.1f}GB' for m in loop_metrics.gpu_memory_used]}"
                     f" lr: {scheduler.get_last_lr()[0]:.7f}"
                     f" loss: {loss.item():.6f}"
-                    f" betas: {log_outputs['loss_term/betas'].item():.6f}"
-                    f" body_rotmats: {log_outputs['loss_term/body_rotmats'].item():.6f}"
-                    f" contacts: {log_outputs['loss_term/contacts'].item():.6f}"
-                    f" R_world_root: {log_outputs['loss_term/R_world_root'].item():.6f}"
-                    f" t_world_root: {log_outputs['loss_term/t_world_root'].item():.6f}"
                 )
+
+                # Add all loss terms from log_outputs
+                for key, value in log_outputs.items():
+                    if key.startswith('loss_term/'):
+                        # Extract term name after loss_term/
+                        term_name = key.split('/')[-1]
+                        # Add formatted loss term
+                        log_msg += f" {term_name}: {value.item():.6f}"
+
+                logger.info(log_msg)
 
                 # Also log batch loading time to tensorboard
                 if writer is not None:
