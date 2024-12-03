@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from functools import cache, cached_property
 from math import ceil
 from typing import Literal, assert_never, Optional
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -177,6 +178,9 @@ class EgoDenoiserConfig:
 
     # Joint position conditioning settings
     joint_cond_mode: Literal["absolute", "absrel_jnts", "absrel", "absrel_global_deltas"] = "absrel"
+
+    # Add SMPL-H model path configuration
+    smplh_npz_path: Path = Path("path/to/SMPLH_NEUTRAL.npz")  # Default path, should be updated
 
     @cached_property
     def d_cond(self) -> int:
@@ -433,6 +437,10 @@ class EgoDenoiser(nn.Module):
         super().__init__()
 
         self.config = config
+        
+        # Load SMPL-H body model
+        self.body_model = SmplhModel.load(config.smplh_npz_path)
+        
         Activation = {"gelu": nn.GELU, "relu": nn.ReLU}[config.activation]
 
         # MLP encoders and decoders for each modality we want to denoise.

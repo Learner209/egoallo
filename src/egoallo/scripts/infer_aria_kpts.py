@@ -98,6 +98,9 @@ class AriaKeypointsDataset(Dataset):
             annotation_path = config.annotation_path / "annotation" / f"ego_pose_gt_anno_{config.split}_public.json"
         else:
             annotation_path = config.annotation_path / "annotation" / config.anno_type /f"ego_pose_gt_anno_{config.split}_public.json"
+
+        pred_floor_height_path = config.annotation_path / "ground_heights.json"
+        self.takes_floor_heights = self._load_pred_floor_heights(pred_floor_height_path)
             
         # Load and process annotations
         self.annotations = self._load_annotations(annotation_path)
@@ -105,6 +108,11 @@ class AriaKeypointsDataset(Dataset):
         
         # Pre-process visible joints data for efficient retrieval
         self.processed_joints_data = self._preprocess_joints_data()
+    
+    def _load_pred_floor_heights(self, path: Path) -> Dict[str, float]:
+        """Load predicted floor heights for each take."""
+        with open(path) as f:
+            return json.load(f)
         
     def _preprocess_joints_data(self) -> Dict[str, Dict[str, np.ndarray]]:
         """Pre-process joints data for all takes for efficient retrieval."""
@@ -132,7 +140,7 @@ class AriaKeypointsDataset(Dataset):
                 processed_data[take_id] = {
                     "joints": np.stack(jnts, axis=0),
                     "masks": np.stack(visible_masks, axis=0),
-                    "ground_height": take_data['metadata']['ground_height']
+                    "ground_height": self.takes_floor_heights[take_id]
                 }
         return processed_data
 
@@ -168,7 +176,8 @@ class AriaKeypointsDataset(Dataset):
         return {
             "take_id": take_id,
             "jnts": take_data["joints"],
-            "visible_joints_mask": take_data["masks"]
+            "visible_joints_mask": take_data["masks"],
+            "ground_height": take_data["ground_height"]
         }
 
 

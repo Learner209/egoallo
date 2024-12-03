@@ -8,6 +8,7 @@ class EgoAlloTrainConfig:
     experiment_name: str = "motion_prior"
     dataset_hdf5_path: Path = Path("data/egoalgo_no_skating_dataset.hdf5")
     dataset_files_path: Path = Path("data/egoalgo_no_skating_dataset_files.txt")
+    smplh_npz_path: Path = Path("./data/smplh/neutral/model.npz")
 
     mask_ratio: float = 0.75
     joint_cond_mode: Literal["absolute", "absrel_jnts", "absrel", "absrel_global_deltas"] = "absrel"
@@ -42,5 +43,6 @@ class EgoAlloTrainConfig:
     def __post_init__(self):
         self.model = network.EgoDenoiserConfig(
             mask_ratio=self.mask_ratio,
-            joint_cond_mode=self.joint_cond_mode
+            joint_cond_mode=self.joint_cond_mode,
+            smplh_npz_path=self.smplh_npz_path
         )

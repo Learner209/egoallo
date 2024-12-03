@@ -1,32 +1,36 @@
+# Standard library imports
 import copy
-from typing import List
 import json
 import os
+import os.path as osp
 import pickle
+from collections import defaultdict
+from contextlib import redirect_stdout
 from pathlib import Path
+from typing import Any, Dict, List
 
+# Third-party imports
+import joblib
+import numpy as np
+import torch
+import tyro
+from yacs.config import CfgNode as CN
+
+# Set environment variables for threading
 os.environ["OMP_NUM_THREADS"] = "1"
-os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1" 
 os.environ["MKL_NUM_THREADS"] = "1"
 os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
 os.environ["NUMEXPR_NUM_THREADS"] = "1"
 
-import os.path as osp
-from contextlib import redirect_stdout
-from yacs.config import CfgNode as CN
-from typing import Dict, Any
-
-from egoallo.egopose.bodypose.bodypose_dataloader import body_pose_anno_loader
-from collections import defaultdict
-from egoallo.egopose.handpose.data_preparation.utils.config import create_egopose_processing_argparse
-import torch
+# Configure torch multiprocessing
 torch.multiprocessing.set_start_method('spawn', force=True)
-from egoallo.egoexo import EGOEXO_UTILS_INST
-import joblib
-from egoallo.utils.utils import deterministic
-from egoallo.utils.utils import debug_on_error
 
-from egoallo.config import make_cfg, CONFIG_FILE
+# Local imports
+from egoallo.config import CONFIG_FILE, make_cfg
+from egoallo.egopose.bodypose.bodypose_dataloader import body_pose_anno_loader
+from egoallo.egopose.handpose.data_preparation.utils.config import create_egopose_processing_argparse
+from egoallo.utils.utils import debug_on_error, deterministic
 
 local_config_file = CONFIG_FILE
 CFG = make_cfg(config_name="defaults", config_file=local_config_file, cli_args=[])
@@ -187,6 +191,59 @@ def print_saved_stats(output_path: str, splits: List[str], anno_types: List[str]
             except FileNotFoundError:
                 logger.warning(f"No saved stats found for {split} split with {anno_type} annotations")
 
+def extract_ground_heights(splits: List[str], anno_types: List[str], output_path: str) -> None:
+    """
+    Extract ground heights from saved annotation files and create a mapping JSON.
+    
+    Args:
+        args: Configuration arguments
+        output_path: Base output directory path
+    """
+    logger.info("Extracting ground heights from annotation files...")
+    
+    # Initialize ground heights dictionary
+    ground_heights = {}
+    
+    # Process each split and annotation type
+    for split in splits:
+        for anno_type in anno_types:
+            # Determine annotation directory based on split
+            if split in ["train", "val"]:
+                gt_anno_path = osp.join(
+                    output_path,
+                    "annotation",
+                    anno_type,
+                    f"ego_pose_gt_anno_{split}_public.json"
+                )
+            else:
+                gt_anno_path = osp.join(
+                    output_path,
+                    "annotation",
+                    f"ego_pose_gt_anno_{split}_public.json"
+                )
+            
+            # Read annotation file if it exists
+            if osp.exists(gt_anno_path):
+                logger.info(f"Processing {split} split with {anno_type} annotations...")
+                with open(gt_anno_path, 'r') as f:
+                    annotations = json.load(f)
+                
+                # Extract ground heights from each take's metadata
+                for take_uid, take_data in annotations.items():
+                    if "metadata" in take_data:
+                        ground_height = take_data["metadata"].get("ground_height")
+                        if ground_height is not None:
+                            ground_heights[take_uid] = ground_height
+            else:
+                logger.warning(f"Annotation file not found: {gt_anno_path}")
+    
+    # Save ground heights mapping
+    output_file = osp.join(output_path, "ground_heights.json")
+    with open(output_file, 'w') as f:
+        json.dump(ground_heights, f)
+    logger.info(f"Saved ground heights mapping to {output_file}")
+    logger.info(f"Processed {len(ground_heights)} takes with valid ground heights")
+
 def main(cfg):
     """Main entry point for preprocessing pipeline"""
     output_path = cfg.gt_bodypose.output.log_save_dir
@@ -203,38 +260,39 @@ def main(cfg):
         )
 
 if __name__ == "__main__":
-    deterministic()
-    cli_opt = create_egopose_processing_argparse()
-    cli_opt_dict = vars(cli_opt)
-    cli_opt_dict = CN(cli_opt_dict)
+#     deterministic()
+#     cli_opt = create_egopose_processing_argparse()
+#     cli_opt_dict = vars(cli_opt)
+#     cli_opt_dict = CN(cli_opt_dict)
 
-    # Load and merge configurations
-    local_cfg = CFG
-    local_cfg.defrost()
-    preprocess_cfg = local_cfg.io.egoexo.preprocessing
-    preprocess_cfg.merge_from_other_cfg(cli_opt_dict)
-    preprocess_cfg.merge_from_file(cli_opt.config_file)
-    local_cfg.io.egoexo.preprocessing = preprocess_cfg
-    local_cfg.freeze()
+#     # Load and merge configurations
+#     local_cfg = CFG
+#     local_cfg.defrost()
+#     preprocess_cfg = local_cfg.io.egoexo.preprocessing
+#     preprocess_cfg.merge_from_other_cfg(cli_opt_dict)
+#     preprocess_cfg.merge_from_file(cli_opt.config_file)
+#     local_cfg.io.egoexo.preprocessing = preprocess_cfg
+#     local_cfg.freeze()
 
-    # Set up output directories
-    if not preprocess_cfg.gt_bodypose.run_demo:
-        gt_output_dir = preprocess_cfg.gt_bodypose.output.save_dir
-        cfg_save_dir = preprocess_cfg.gt_bodypose.output.config_save_dir
-        for dir_path in [gt_output_dir, cfg_save_dir, 
-                        preprocess_cfg.gt_bodypose.output.log_save_dir]:
-            os.makedirs(dir_path, exist_ok=True)
-    else:
-        gt_output_dir = preprocess_cfg.gt_bodypose.sample_output.save_dir
-        cfg_save_dir = preprocess_cfg.gt_bodypose.sample_output.config_save_dir
-        for dir_path in [gt_output_dir, cfg_save_dir,
-                        preprocess_cfg.gt_bodypose.sample_output.log_save_dir]:
-            os.makedirs(dir_path, exist_ok=True)
+#     # Set up output directories
+#     if not preprocess_cfg.gt_bodypose.run_demo:
+#         gt_output_dir = preprocess_cfg.gt_bodypose.output.save_dir
+#         cfg_save_dir = preprocess_cfg.gt_bodypose.output.config_save_dir
+#         for dir_path in [gt_output_dir, cfg_save_dir, 
+#                         preprocess_cfg.gt_bodypose.output.log_save_dir]:
+#             os.makedirs(dir_path, exist_ok=True)
+#     else:
+#         gt_output_dir = preprocess_cfg.gt_bodypose.sample_output.save_dir
+#         cfg_save_dir = preprocess_cfg.gt_bodypose.sample_output.config_save_dir
+#         for dir_path in [gt_output_dir, cfg_save_dir,
+#                         preprocess_cfg.gt_bodypose.sample_output.log_save_dir]:
+#             os.makedirs(dir_path, exist_ok=True)
 
-    # Save configuration
-    local_cfg_save_path = osp.join(cfg_save_dir, "preprocess_dataset.yaml")
-    with open(local_cfg_save_path, 'w') as f:
-        with redirect_stdout(f):
-            print(preprocess_cfg.dump())
+#     # Save configuration
+#     local_cfg_save_path = osp.join(cfg_save_dir, "preprocess_dataset.yaml")
+#     with open(local_cfg_save_path, 'w') as f:
+#         with redirect_stdout(f):
+#             print(preprocess_cfg.dump())
 
-    main(preprocess_cfg)
+#     main(preprocess_cfg)
+    tyro.cli(extract_ground_heights)
