@@ -182,7 +182,7 @@ class EgoDenoiserConfig:
     def d_cond(self) -> int:
         """Dimensionality of conditioning vector."""
         # Calculate number of visible joints based on mask ratio
-        num_visible_joints = ceil((1 - self.mask_ratio) * 21)  # 21 total joints
+        num_visible_joints = ceil((1 - self.mask_ratio) * 22)  # 21 total joints
         # Base dimension for joint position (3) + joint index embedding (16)
         d_per_joint = 3 + 16
 
