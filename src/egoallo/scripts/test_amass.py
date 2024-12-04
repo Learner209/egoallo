@@ -259,10 +259,16 @@ def main(config: InferenceConfig) -> None:
 
     # Create output directories
     assert config.output_dir is not None
-    output_dir = Path(config.output_dir) 
+    output_dir = Path(config.output_dir)
+    
+    # Clear output directory if it exists
+    if output_dir.exists():
+        for pt_file in output_dir.glob("*.pt"):
+            pt_file.unlink()
+    
     output_dir.mkdir(exist_ok=True, parents=True)
 
-    # Test loop
+    # Test loop 
     for batch_idx, batch in enumerate(tqdm(test_dataloader, desc="Generating predictions")):
         batch = batch.to(device)
         if batch_idx == 5:

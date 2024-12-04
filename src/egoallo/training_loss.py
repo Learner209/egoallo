@@ -36,8 +36,8 @@ class TrainingLossConfig:
             "R_world_root": 0.2,
             "t_world_root": 0.2,
             "joints": 0.4,
-            "foot_skating": 0.1,
-            "velocity": 0.01,
+            "foot_skating": 0.0,
+            "velocity": 0.0,
         }.copy
     )
     weight_loss_by_t: Literal["emulate_eps_pred"] = "emulate_eps_pred"
@@ -241,10 +241,10 @@ class TrainingLossComputer:
         # Compute masked joint loss while handling shape alignment
         # joint_loss: (b, t, 22, 3), visible_joints_mask: (b, t, 22)
         # breakpoint()
-        masked_joint_loss = (
-            joint_loss * train_batch.visible_joints_mask[..., None]  # Add channel dim to mask
+        invisible_joint_loss = (
+            joint_loss * (~train_batch.visible_joints_mask[..., None].bool())  # Add channel dim to inverted mask
         ).sum(dim=(-2, -1)) / (  # Sum over joints (22) and xyz (3)
-            (train_batch.visible_joints_mask.sum(dim=-1) * 3) + 1e-8  # Multiply by 3 for xyz channels
+            ((~train_batch.visible_joints_mask.bool()).sum(dim=-1) * 3) + 1e-8  # Multiply by 3 for xyz channels
         )  # Result: (b, t)
 
         
@@ -294,7 +294,7 @@ class TrainingLossComputer:
             "R_world_root": weight_and_mask_loss(
                 (x_0_pred.R_world_root - x_0.R_world_root).reshape(batch, time, -1) ** 2
             ),
-            "joints": weight_and_mask_loss(masked_joint_loss.unsqueeze(-1),
+            "joints": weight_and_mask_loss(invisible_joint_loss.unsqueeze(-1),
                                            train_batch.mask,
                                            torch.sum(train_batch.mask)),
             "foot_skating": foot_skating_loss,
