@@ -20,7 +20,7 @@ class InferenceConfig(EgoAlloTrainConfig):
     smplh_npz_path: Path = Path("./data/smplh/neutral/model.npz")
     """Path to SMPL+H model file"""
     
-    output_dir: Path = Path("./outputs")
+    output_dir: Path = Path("./exp/test-amass")
     """Directory to save inference outputs"""
     
     device: str = "cuda" if torch.cuda.is_available() else "cpu"

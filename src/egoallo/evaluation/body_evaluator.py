@@ -243,30 +243,30 @@ class BodyEvaluator(BaseEvaluator):
         }
 
         # Process files
-        # with ThreadPoolExecutor() as executor:
-        #     futures = [
-        #         executor.submit(
-        #             self.process_file,
-        #             pt_paths[i],
-        #             coco_regressor,
-        #             use_mean_body_shape,
-        #         )
-        #         for i in range(num_sequences)
-        #     ]
+        with ThreadPoolExecutor() as executor:
+            futures = [
+                executor.submit(
+                    self.process_file,
+                    pt_paths[i],
+                    coco_regressor,
+                    use_mean_body_shape,
+                )
+                for i in range(num_sequences)
+            ]
 
-        #     for i, future in enumerate(tqdm(futures, total=num_sequences)):
-        #         metrics = future.result()
-        #         for key in metrics_list:
-        #             stats_per_subsequence[key][i] = metrics.get(key, np.nan)
+            for i, future in enumerate(tqdm(futures, total=num_sequences)):
+                metrics = future.result()
+                for key in metrics_list:
+                    stats_per_subsequence[key][i] = metrics.get(key, np.nan)
 
-        for i in tqdm(range(num_sequences)):
-            metrics = self.process_file(
-                pt_paths[i],
-                coco_regressor,
-                use_mean_body_shape,
-            )
-            for key in metrics_list:
-                stats_per_subsequence[key][i] = metrics.get(key, np.nan)
+        # for i in tqdm(range(num_sequences)):
+        #     metrics = self.process_file(
+        #         pt_paths[i],
+        #         coco_regressor,
+        #         use_mean_body_shape,
+        #     )
+        #     for key in metrics_list:
+        #         stats_per_subsequence[key][i] = metrics.get(key, np.nan)
 
         # Save results
         torch.save(stats_per_subsequence, out_disagg_pt_path)
