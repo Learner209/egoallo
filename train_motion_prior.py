@@ -95,11 +95,8 @@ def run_training(
     # Setup.
     model = network.EgoDenoiser(config.model)
     train_loader = torch.utils.data.DataLoader(
-        # dataset=AdaptiveAmassHdf5Dataset(config=config),
-        dataset=EgoAmassHdf5Dataset(
-            config=config,
-            cache_files=True,
-        ),
+        dataset=AdaptiveAmassHdf5Dataset(config=config),
+        # dataset=EgoAmassHdf5Dataset( config=config, cache_files=True),
         batch_size=config.batch_size,
         shuffle=True,
         num_workers=config.num_workers,

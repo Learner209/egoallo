@@ -8,7 +8,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from egoallo import fncsmpl, fncsmpl_extensions
-from egoallo.data.amass_dataset import EgoAmassHdf5Dataset
+from egoallo.data.amass import EgoAmassHdf5Dataset
 from egoallo.data.dataclass import collate_dataclass
 from egoallo.network import EgoDenoiser
 from egoallo.training_utils import ipdb_safety_net
