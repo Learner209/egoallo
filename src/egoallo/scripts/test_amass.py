@@ -17,11 +17,15 @@ from egoallo.network import EgoDenoiser, EgoDenoiseTraj
 from egoallo.config.inference.inference_defaults import InferenceConfig
 from egoallo.evaluation.body_evaluator import BodyEvaluator
 from egoallo.utils.setup_logger import setup_logger
-from egoallo.inference_utils import load_denoiser, create_masked_training_data
+from egoallo.inference_utils import load_denoiser, load_runtime_config, create_masked_training_data
 from egoallo.transforms import SE3, SO3
 from egoallo.sampling import run_sampling_with_masked_data, run_sampling_with_stitching
 from egoallo import transforms as tf
 from egoallo.training_utils import ipdb_safety_net
+
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from egoallo.config.train.train_config import EgoAlloTrainConfig
 
 logger = setup_logger(output="logs/test", name=__name__)
 
@@ -103,9 +107,10 @@ def process_sequence(
     batch: EgoTrainingData,
     seq_idx: int,
     denoiser_network: EgoDenoiser,
+    train_config: EgoAlloTrainConfig,
     body_model: fncsmpl.SmplhModel,
     device: torch.device,
-    config: InferenceConfig
+    inference_config: InferenceConfig
 ) -> Tuple[EgoTrainingData, EgoDenoiseTraj, EgoTrainingData]:
     """Process a single sequence to generate predictions.
     
@@ -113,9 +118,10 @@ def process_sequence(
         batch: Input batch containing sequences
         seq_idx: Index of sequence to process
         denoiser_network: Denoising network
+        train_config: Training configuration
         body_model: SMPL-H body model
         device: Device to run computation on
-        config: Test configuration
+        inference_config: Test configuration
         
     Returns:
         Tuple containing (gt_ego_data, traj, denoised_ego_data)
@@ -165,7 +171,7 @@ def process_sequence(
         Ts_world_cpf=Ts_world_cpf,
         contacts=contacts,
         betas=betas,
-        mask_ratio=config.mask_ratio
+        mask_ratio=train_config.mask_ratio
     )
 
     # Run sampling with masked data
@@ -174,8 +180,8 @@ def process_sequence(
         body_model=body_model,
         masked_data=masked_data,
         guidance_mode="no_hands",
-        guidance_post=config.guidance_post,
-        guidance_inner=config.guidance_inner,
+        guidance_post=inference_config.guidance_post,
+        guidance_inner=inference_config.guidance_inner,
         floor_z=0.0,
         hamer_detections=None,
         aria_detections=None,
@@ -236,20 +242,26 @@ def process_sequence(
     )
 
     return gt_ego_data, denoised_traj, denoised_ego_data
-def main(config: InferenceConfig) -> None:
-    device = torch.device(config.device)
+
+def main(inference_config: InferenceConfig) -> None:
+    device = torch.device(inference_config.device)
     
     # Initialize model and dataset
     try:
-        denoiser_network = load_denoiser(config.checkpoint_dir).to(device)
-        body_model = fncsmpl.SmplhModel.load(config.smplh_npz_path).to(device)
+        denoiser_network, model_config = load_denoiser(inference_config.checkpoint_dir)
+        denoiser_network.to(device)
         
-        test_dataset = AdaptiveAmassHdf5Dataset(config)
+        body_model = fncsmpl.SmplhModel.load(model_config.smplh_npz_path).to(device)
+
+        train_config = load_runtime_config(inference_config.checkpoint_dir)
+        train_config.dataset_slice_strategy = "full_sequence" # testing is conducted on full sequences.
+
+        test_dataset = AdaptiveAmassHdf5Dataset(train_config)
         test_dataloader = DataLoader(
             test_dataset,
-            batch_size=config.batch_size,
+            batch_size=inference_config.batch_size,
             shuffle=False,
-            num_workers=config.num_workers,
+            num_workers=inference_config.num_workers,
             collate_fn=collate_dataclass,
             drop_last=False
         )
@@ -258,8 +270,8 @@ def main(config: InferenceConfig) -> None:
         raise
 
     # Create output directories
-    assert config.output_dir is not None
-    output_dir = Path(config.output_dir)
+    assert inference_config.output_dir is not None
+    output_dir = Path(inference_config.output_dir)
     
     # Clear output directory if it exists
     if output_dir.exists():
@@ -277,11 +289,11 @@ def main(config: InferenceConfig) -> None:
         for seq_idx in range(batch.T_world_cpf.shape[0]):
             # try:
             gt_ego_data, denoised_traj, denoised_ego_data = process_sequence(
-                batch, seq_idx, denoiser_network, body_model, device, config
+                batch, seq_idx, denoiser_network, train_config, body_model, device, inference_config
             )
             
             # Save visualizations if requested
-            if config.visualize_traj:
+            if inference_config.visualize_traj:
                 timestamp = time.strftime("%Y%m%d-%H%M%S")
                 gt_path, inferred_path = save_visualization(
                     gt_ego_data,
@@ -294,7 +306,7 @@ def main(config: InferenceConfig) -> None:
                 logger.info(f"Saved inferred video to: {inferred_path}")
 
             # Save sequence data
-            output_path = config.output_dir / f"sequence_{batch_idx}_{seq_idx}.pt"
+            output_path = inference_config.output_dir / f"sequence_{batch_idx}_{seq_idx}.pt"
             save_sequence_data(batch, denoised_traj, seq_idx, body_model, output_path)
 
             # except Exception as e:
@@ -302,18 +314,18 @@ def main(config: InferenceConfig) -> None:
             #     continue
 
     # Compute metrics if requested
-    if config.compute_metrics:
+    if inference_config.compute_metrics:
         logger.info("\nComputing evaluation metrics...")
         try:
             evaluator = BodyEvaluator(
-                body_model_path=config.smplh_npz_path,
+                body_model_path=train_config.smplh_npz_path,
                 device=device
             )
             
             evaluator.evaluate_directory(
-                dir_with_pt_files=config.output_dir,
-                use_mean_body_shape=config.use_mean_body_shape,
-                skip_confirm=config.skip_eval_confirm
+                dir_with_pt_files=inference_config.output_dir,
+                use_mean_body_shape=inference_config.use_mean_body_shape,
+                skip_confirm=inference_config.skip_eval_confirm
             )
         except Exception as e:
             logger.error(f"Error computing metrics: {str(e)}")

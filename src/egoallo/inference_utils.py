@@ -14,6 +14,8 @@ from projectaria_tools.core.data_provider import create_vrs_data_provider
 from safetensors import safe_open
 from torch import Tensor
 
+from egoallo.data.amass import EgoAlloTrainConfig
+
 from .network import EgoDenoiser, EgoDenoiserConfig
 from .tensor_dataclass import TensorDataclass
 from .transforms import SE3
@@ -31,23 +33,30 @@ from egoallo.config import make_cfg, CONFIG_FILE
 local_config_file = CONFIG_FILE
 CFG = make_cfg(config_name="defaults", config_file=local_config_file, cli_args=[])
 
-def load_denoiser(checkpoint_dir: Path) -> EgoDenoiser:
+def load_denoiser(checkpoint_dir: Path) -> tuple[EgoDenoiser, EgoDenoiserConfig]:
     """Load a denoiser model."""
     checkpoint_dir = checkpoint_dir.absolute()
     experiment_dir = checkpoint_dir.parent
 
-    config = yaml.load(
+    model_config = yaml.load(
         (experiment_dir / "model_config.yaml").read_text(), Loader=yaml.Loader
     )
-    assert isinstance(config, EgoDenoiserConfig)
+    assert isinstance(model_config, EgoDenoiserConfig)
 
-    model = EgoDenoiser(config)
+    model = EgoDenoiser(model_config)
     with safe_open(checkpoint_dir / "model.safetensors", framework="pt") as f:  # type: ignore
         state_dict = {k: f.get_tensor(k) for k in f.keys()}
     model.load_state_dict(state_dict)
 
-    return model
+    return model, model_config
 
+def load_runtime_config(checkpoint_dir: Path) -> EgoAlloTrainConfig:
+    experiment_dir = checkpoint_dir.parent
+    config = yaml.load(
+        (experiment_dir / "run_config.yaml").read_text(), Loader=yaml.Loader
+    )
+    assert isinstance(config, EgoAlloTrainConfig)
+    return config
 
 @dataclass(frozen=True)
 class InferenceTrajectoryPaths:

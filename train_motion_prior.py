@@ -31,10 +31,17 @@ from egoallo.data.amass import EgoAmassHdf5Dataset, AdaptiveAmassHdf5Dataset
 from egoallo.data.dataclass import collate_dataclass
 from egoallo.config.train.train_config import EgoAlloTrainConfig
 
+import wandb
+import datetime
+
 
 def get_experiment_dir(experiment_name: str, version: int = 0) -> Path:
     """Creates a directory to put experiment files in, suffixed with a version
     number. Similar to PyTorch lightning."""
+    # Use timestamp if experiment name not specified
+    if not experiment_name:
+        experiment_name = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        
     experiment_dir = (
         Path(__file__).absolute().parent
         / "experiments"
@@ -60,11 +67,25 @@ def run_training(
         project_config=ProjectConfiguration(project_dir=str(experiment_dir)),
         dataloader_config=DataLoaderConfiguration(split_batches=True),
     )
-    writer = (
-        tensorboardX.SummaryWriter(logdir=str(experiment_dir), flush_secs=10)
-        if accelerator.is_main_process
-        else None
-    )
+    
+    # Initialize wandb instead of tensorboardX
+    if accelerator.is_main_process:
+        wandb.init(
+            project="egoallo",
+            name=config.experiment_name or datetime.datetime.now().strftime("%Y%m%d_%H%M%S"),
+            config=dataclasses.asdict(config),
+            dir=str(experiment_dir)
+        )
+        
+        # Save experiment files
+        experiment_dir.mkdir(exist_ok=True, parents=True)
+        (experiment_dir / "git_commit.txt").write_text(
+            training_utils.get_git_commit_hash()
+        )
+        (experiment_dir / "git_diff.txt").write_text(training_utils.get_git_diff())
+        (experiment_dir / "run_config.yaml").write_text(yaml.dump(config))
+        (experiment_dir / "model_config.yaml").write_text(yaml.dump(config.model))
+
     device = accelerator.device
 
     if config.debug:
@@ -82,14 +103,6 @@ def run_training(
         (experiment_dir / "git_diff.txt").write_text(training_utils.get_git_diff())
         (experiment_dir / "run_config.yaml").write_text(yaml.dump(config))
         (experiment_dir / "model_config.yaml").write_text(yaml.dump(config.model))
-
-        # Add hyperparameters to TensorBoard.
-        assert writer is not None
-        writer.add_hparams(
-            hparam_dict=training_utils.flattened_hparam_dict_from_dataclass(config),
-            metric_dict={},
-            name=".",  # Hack to avoid timestamped subdirectory.
-        )
 
         # Write logs to file.
         logger.add(experiment_dir / "trainlog.log", rotation="100 MB")
@@ -165,8 +178,29 @@ def run_training(
                 unwrapped_model=accelerator.unwrap_model(model),
                 train_batch=train_batch,
             )
+            
+            # Add learning rate to outputs
             log_outputs["learning_rate"] = scheduler.get_last_lr()[0]
-            accelerator.log(log_outputs, step=step)
+            
+            # Log metrics to wandb instead of tensorboard
+            if accelerator.is_main_process:
+                # Log all outputs
+                wandb.log(log_outputs, step=step)
+                
+                # Log additional training metrics
+                wandb.log({
+                    "batch_loading_time": batch_load_time,
+                    "iterations_per_sec": loop_metrics.iterations_per_sec,
+                    "batch_time": loop_metrics.batch_time,
+                    "forward_time": loop_metrics.forward_time, 
+                    "backward_time": loop_metrics.backward_time,
+                    "optimizer_time": loop_metrics.optimizer_time,
+                    "gpu_utilization": loop_metrics.gpu_utilization,
+                    "gpu_memory_used": loop_metrics.gpu_memory_used,
+                    "total_batch_size": loop_metrics.total_batch_size,
+                    "per_gpu_batch_size": loop_metrics.per_gpu_batch_size,
+                }, step=step)
+
             accelerator.backward(loss)
             if accelerator.sync_gradients:
                 accelerator.clip_grad_norm_(model.parameters(), config.max_grad_norm)
@@ -174,18 +208,10 @@ def run_training(
             scheduler.step()
             optim.zero_grad(set_to_none=True)
 
-            # The rest of the loop will only be executed by the main process.
             if not accelerator.is_main_process:
                 continue
 
-            # Logging.
-            if step % 10 == 0:
-                assert writer is not None
-                for k, v in log_outputs.items():
-                    writer.add_scalar(k, v, step)
-
-            # Print status update to terminal with batch loading time
-            if step % 20 == 0 and accelerator.is_main_process:
+            if step % 100 == 0 and accelerator.is_main_process:
                 mem_free, mem_total = torch.cuda.mem_get_info()
                 epoch_time = time.time() - epoch_start_time
                 # Build base log message with metrics
@@ -217,12 +243,6 @@ def run_training(
 
                 logger.info(log_msg)
 
-                # Also log batch loading time to tensorboard
-                if writer is not None:
-                    writer.add_scalar('batch_loading_time_ms', batch_load_time * 1000, step)
-                    writer.add_scalar('epoch_time_s', epoch_time, step)
-
-            # Checkpointing.
             log_ckpt_step = 2000
             if step % log_ckpt_step == 0:
                 # Save checkpoint.
@@ -245,5 +265,10 @@ def run_training(
         # if accelerator.is_main_process:
         #     logger.info(f"Epoch {epoch} completed in {epoch_time:.1f} seconds")
         epoch_start_time = time.time()
+
+    # Finish wandb run
+    if accelerator.is_main_process:
+        wandb.finish()
+
 if __name__ == "__main__":
     tyro.cli(run_training)

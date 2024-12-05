@@ -180,7 +180,7 @@ class EgoDenoiserConfig:
     joint_cond_mode: Literal["absolute", "absrel_jnts", "absrel", "absrel_global_deltas"] = "absrel"
 
     # Add SMPL-H model path configuration
-    smplh_npz_path: Path = Path("path/to/SMPLH_NEUTRAL.npz")  # Default path, should be updated
+    smplh_npz_path: Path = Path("data/smplh/neutral/model.npz")
 
     @cached_property
     def d_cond(self) -> int:
@@ -437,8 +437,6 @@ class EgoDenoiser(nn.Module):
         super().__init__()
 
         self.config = config
-        
-        # Load SMPL-H body model
         self.body_model = SmplhModel.load(config.smplh_npz_path)
         
         Activation = {"gelu": nn.GELU, "relu": nn.ReLU}[config.activation]

@@ -284,7 +284,7 @@ def main(
     # Load data and models
     traj_data = np.load(config.npz_path)
     body_model = fncsmpl.SmplhModel.load(config.smplh_npz_path).to(device)
-    denoiser_network = load_denoiser(config.checkpoint_dir).to(device)
+    denoiser_network, train_config = load_denoiser(config.checkpoint_dir).to(device)
 
     # Prepare input tensors
     # import ipdb; ipdb.set_trace()

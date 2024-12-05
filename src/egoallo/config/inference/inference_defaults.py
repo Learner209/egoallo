@@ -6,7 +6,7 @@ import torch
 from egoallo.config.train.train_config import EgoAlloTrainConfig
 
 @dataclasses.dataclass
-class InferenceConfig(EgoAlloTrainConfig):
+class InferenceConfig():
     """Configuration for inference."""
     traj_length: int = 128
     """Length of trajectory sequence to process"""
@@ -28,9 +28,6 @@ class InferenceConfig(EgoAlloTrainConfig):
     
     annotation_path: Path = Path("./data/egoexo-default-gt-output")
     """Path to ground truth annotations"""
-    
-    mask_ratio: float = 0.75
-    """Ratio of joints to mask during inference"""
     
     checkpoint_dir: Path = Path("./experiments/nov_29_absrel_jnts_pilot/v2")
     """Directory containing model checkpoints"""

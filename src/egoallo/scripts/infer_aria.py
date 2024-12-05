@@ -128,7 +128,7 @@ def main(args: Args) -> None:
         server = viser.ViserServer()
         server.gui.configure_theme(dark_mode=True)
 
-    denoiser_network = load_denoiser(args.checkpoint_dir).to(device)
+    denoiser_network, train_config = load_denoiser(args.checkpoint_dir).to(device)
     body_model = fncsmpl.SmplhModel.load(args.smplh_npz_path).to(device)
 
     Ts_world_cpf[..., 6] -= floor_z

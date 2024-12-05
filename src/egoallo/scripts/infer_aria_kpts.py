@@ -225,9 +225,9 @@ def main(config: InferenceConfig):
     )
 
     # Load model and other components
-    denoiser = load_denoiser(config.checkpoint_dir)
-    denoiser.to(config.device)
-    denoiser.eval()
+    denoiser_network, train_config = load_denoiser(config.checkpoint_dir)
+    denoiser_network.to(config.device)
+    denoiser_network.eval()
 
     # Run inference on batches
     with torch.no_grad():
@@ -271,7 +271,7 @@ def main(config: InferenceConfig):
 
             # Run sampling with masked data
             samples = run_sampling_with_masked_data(
-                denoiser_network=denoiser,
+                denoiser_network=denoiser_network,
                 body_model=body_model,
                 masked_data=masked_data,
                 guidance_mode="no_hands",
