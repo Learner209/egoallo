@@ -30,7 +30,7 @@ from .types import (
     RootTransforms,
 )
 from egoallo.utilities import procrustes_align
-from egoallo.setup_logger import setup_logger
+from egoallo.utils.setup_logger import setup_logger
 
 logger = setup_logger(output="logs/evaluation", name=__name__)
 

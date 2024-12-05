@@ -22,7 +22,7 @@ from torch.cuda.amp import autocast
 from egoallo import network, training_loss, training_utils
 from egoallo.data.amass_dataset import EgoAmassHdf5Dataset
 from egoallo.data.dataclass import collate_dataclass
-from egoallo.setup_logger import setup_logger
+from egoallo.utils.setup_logger import setup_logger
 from egoallo.config.train_config import EgoAlloTrainConfig
 from egoallo.training_utils import get_experiment_dir, LoopMetrics
 from egoallo.data.dataclass import EgoTrainingData

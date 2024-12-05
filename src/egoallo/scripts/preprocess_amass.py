@@ -12,7 +12,7 @@ from tqdm import tqdm
 
 from egoallo.data.amass.amass_processor import AMASSProcessor
 from egoallo.data.amass.amass_dataset_config import AMASSDatasetConfig
-from egoallo.setup_logger import setup_logger
+from egoallo.utils.setup_logger import setup_logger
 from egoallo.training_utils import ipdb_safety_net
 
 logger = setup_logger(output="logs/amass_preprocess", name=__name__)
