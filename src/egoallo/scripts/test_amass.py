@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from egoallo import fncsmpl, fncsmpl_extensions
-from egoallo.data.amass import AdaptiveAmassHdf5Dataset
+from egoallo.data.amass import AdaptiveAmassHdf5Dataset, EgoAmassHdf5Dataset
 from egoallo.data.dataclass import collate_dataclass, EgoTrainingData
 from egoallo.network import EgoDenoiser, EgoDenoiseTraj
 
@@ -256,7 +256,8 @@ def main(inference_config: InferenceConfig) -> None:
         train_config = load_runtime_config(inference_config.checkpoint_dir)
         train_config.dataset_slice_strategy = "full_sequence" # testing is conducted on full sequences.
 
-        test_dataset = AdaptiveAmassHdf5Dataset(train_config)
+        test_dataset = EgoAmassHdf5Dataset(train_config, cache_files=True)
+        # test_dataset = AdaptiveAmassHdf5Dataset(train_config)
         test_dataloader = DataLoader(
             test_dataset,
             batch_size=inference_config.batch_size,

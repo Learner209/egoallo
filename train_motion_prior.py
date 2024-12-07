@@ -110,10 +110,8 @@ def run_training(
     # Setup.
     model = network.EgoDenoiser(config.model)
     train_loader = torch.utils.data.DataLoader(
-        dataset=AdaptiveAmassHdf5Dataset(config=config),
-        # dataset=EgoAmassHdf5Dataset(
-        #     config=config,
-        # ),
+        # dataset=AdaptiveAmassHdf5Dataset(config=config),
+        dataset=EgoAmassHdf5Dataset(config=config, cache_files=True),
         batch_size=config.batch_size,
         shuffle=True,
         num_workers=config.num_workers,
@@ -239,7 +237,7 @@ def run_training(
                         # Extract term name after loss_term/
                         term_name = key.split('/')[-1]
                         # Add formatted loss term
-                        log_msg += f" {term_name}: {value.item():.6f}"
+                        log_msg += f" {term_name}: {value:.6f}"
 
                 logger.info(log_msg)
 
@@ -250,11 +248,10 @@ def run_training(
                 accelerator.save_state(str(checkpoint_path))
                 logger.info(f"Saved checkpoint to {checkpoint_path}")
 
-                # Keep checkpoints from only every 100k steps.
+                # Delete previous checkpoint to only keep the latest one
                 if prev_checkpoint_path is not None:
                     shutil.rmtree(prev_checkpoint_path)
-                prev_checkpoint_path = None if step % log_ckpt_step == 0 else checkpoint_path
-                del checkpoint_path
+                prev_checkpoint_path = checkpoint_path
 
             # Start timing next batch load
             batch_start_time = time.time()

@@ -240,6 +240,7 @@ class EgoAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         num_joints = CFG.smplh.num_joints
         device = kwargs["joints_wrt_world"].device
 
+        # breakpoint()
         # Generate random mask for sequence
         num_masked = int(num_joints * self.config.mask_ratio)
         visible_joints_mask = torch.ones((subseq_len, num_joints), dtype=torch.bool, device=device)
@@ -252,17 +253,18 @@ class EgoAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         # Get original joints_wrt_world
         joints_wrt_world = kwargs["joints_wrt_world"]  # shape: [time, 21, 3]
         if self._slice_strategy != "full_sequence":
-            assert joints_wrt_world.shape == (self._subseq_len, num_joints, 3)
+            assert joints_wrt_world.shape == (self._subseq_len, num_joints, 3), f"Expected shape: {(self._subseq_len, num_joints, 3)}, got: {joints_wrt_world.shape}"
         else:
-            assert joints_wrt_world.shape == (total_t, num_joints, 3)
+            assert joints_wrt_world.shape == (total_t, num_joints, 3), f"Expected shape: {(total_t, num_joints, 3)}, got: {joints_wrt_world.shape}"
         
         # Create visible_joints tensor containing only unmasked joints
-        visible_joints = joints_wrt_world[visible_joints_mask].reshape(subseq_len, num_joints - num_masked, 3)
+        # visible_joints = joints_wrt_world[visible_joints_mask].reshape(subseq_len, num_joints - num_masked, 3)
 
         # Update kwargs with new MAE-style masking tensors
-        kwargs["visible_joints"] = visible_joints
+        # kwargs["visible_joints"] = visible_joints
         kwargs["visible_joints_mask"] = visible_joints_mask
         kwargs["joints_wrt_world"] = joints_wrt_world  # Keep original joints for computing loss
+        # breakpoint()
 
         # Close the file if we opened it.
         if hdf5_file is not None:
@@ -369,7 +371,7 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         # Add MAE-style masking
         # breakpoint()
         num_joints = CFG.smplh.num_joints
-        assert num_joints == 22, f"Expected 22 joints, got {num_joints}"
+        # assert num_joints == 22, f"Expected 22 joints, got {num_joints}"
         device = kwargs["joints_wrt_world"].device
 
         # Generate random mask for sequence

@@ -29,15 +29,15 @@ class TrainingLossConfig:
     beta_coeff_weights: tuple[float, ...] = tuple(1 / (i + 1) for i in range(16))
     loss_weights: dict[str, float] = dataclasses.field(
         default_factory={
-            "betas": 0.05,
+            "betas": 0.00,
             "body_rotmats": 1.0,
-            "contacts": 0.05,
-            "hand_rotmats": 0.01,
-            "R_world_root": 0.2,
-            "t_world_root": 0.2,
-            "joints": 0.4,
-            "foot_skating": 0.0,
-            "velocity": 0.0,
+            "contacts": 0.00,
+            "hand_rotmats": 0.00,
+            "R_world_root": 1.0,
+            "t_world_root": 1.0,
+            "joints": 0.00,
+            "foot_skating": 0.00,
+            "velocity": 0.00,
         }.copy
     )
     weight_loss_by_t: Literal["emulate_eps_pred"] = "emulate_eps_pred"
@@ -108,7 +108,7 @@ class TrainingLossComputer:
         batch, time, _, _ = train_batch.body_quats.shape
 
         num_joints = CFG.smplh.num_joints
-        assert num_joints == 22
+        # assert num_joints == 22
         
         T_world_root = train_batch.T_world_root
         R_world_root = SO3(T_world_root[..., :4]).as_matrix()
@@ -227,11 +227,11 @@ class TrainingLossComputer:
         # Get predicted joint positions through forward kinematics
         x_0_posed = x_0_pred.apply_to_body(unwrapped_model.body_model.to(device)) # (b, t, 22, 3)
         pred_joints = torch.cat([x_0_posed.Ts_world_joint[..., :num_joints-1, 4:7], x_0_posed.T_world_root[..., 4:7].unsqueeze(dim=-2)], dim=-2)  # (b, t, 22, 3)
-        assert pred_joints.shape == (batch, time, 22, 3)
+        assert pred_joints.shape == (batch, time, num_joints, 3)
         
         # Get ground truth joints from training batch
         gt_joints = train_batch.joints_wrt_world  # (b, t, 22, 3)
-        assert gt_joints.shape == (batch, time, 22, 3)
+        assert gt_joints.shape == (batch, time, num_joints, 3)
         
         # Calculate joint position loss with masking
         joint_loss = (pred_joints - gt_joints) ** 2  # (b, t, 22, 3)
@@ -359,10 +359,10 @@ class TrainingLossComputer:
 
         # Log loss terms.
         for name, term in loss_terms.items():
-            log_outputs[f"loss_term/{name}"] = term
+            log_outputs[f"loss_term/{name}"] = term * self.config.loss_weights[name]
 
         # Return loss.
-        loss = sum([loss_terms[k] * self.config.loss_weights[k] for k in loss_terms])
+        loss = sum([loss_terms[k] for k in loss_terms])
         assert isinstance(loss, Tensor)
         assert loss.shape == ()
         log_outputs["train_loss"] = loss

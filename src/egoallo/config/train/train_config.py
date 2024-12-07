@@ -19,7 +19,7 @@ class EgoAlloTrainConfig:
     # Dataset arguments.
     batch_size: int = 256
     """Effective batch size."""
-    num_workers: int = 2
+    num_workers: int = 0
     subseq_len: int = 128
     dataset_slice_strategy: Literal[
         "deterministic", "random_uniform_len", "random_variable_len", "full_sequence"
