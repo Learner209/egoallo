@@ -170,7 +170,7 @@ class EgoDenoiserConfig:
     
     # Model settings
     activation: Literal["gelu", "relu"] = "gelu"
-    positional_encoding: Literal["transformer", "rope"] = "rope"
+    positional_encoding: Literal["transformer", "rope"] = "transformer"
     noise_conditioning: Literal["token", "film"] = "token"
     xattn_mode: Literal["kv_from_cond_q_from_x", "kv_from_x_q_from_cond"] = (
         "kv_from_cond_q_from_x"
@@ -178,6 +178,7 @@ class EgoDenoiserConfig:
 
     # Joint position conditioning settings
     joint_cond_mode: Literal["absolute", "absrel_jnts", "absrel", "absrel_global_deltas"] = "absrel"
+    joint_emb_dim: int = 256
 
     # Add SMPL-H model path configuration
     smplh_npz_path: Path = Path("data/smplh/neutral/model.npz")
@@ -186,21 +187,20 @@ class EgoDenoiserConfig:
     def d_cond(self) -> int:
         """Dimensionality of conditioning vector."""
         num_joints = CFG.smplh.num_joints  # Assuming num_joints is 22
-        emb_dim = 16
         num_visible_joints = ceil((1 - self.mask_ratio) * num_joints)
 
         if self.joint_cond_mode == "absolute":
             # joints_with_vis (22*4) + index_embeddings (22*16) + floor_height (1)
-            d_cond = (4 * num_joints) + (emb_dim * num_joints) # + 1
+            d_cond = (4 * num_joints) + (self.joint_emb_dim * num_joints) # + 1
         elif self.joint_cond_mode == "absrel_jnts":
-            # first_joint (4) + local_coords (21*4) + index_embeddings (22*emb_dim) + floor_height (1)
-            d_cond = 4 + (4 * (num_joints - 1)) + (emb_dim * num_joints) + 1
+            # first_joint (4) + local_coords (21*4) + index_embeddings (22*self.joint_emb_dim) + floor_height (1)
+            d_cond = 4 + (4 * (num_joints - 1)) + (self.joint_emb_dim * num_joints) + 1
         elif self.joint_cond_mode == "absrel":
-            # abs_pos (22*4) + rel_pos (22*4) + index_embeddings (22*emb_dim) + floor_height (1)
-            d_cond = (4 * num_joints) + (4 * num_joints) + (emb_dim * num_joints) + 1
+            # abs_pos (22*4) + rel_pos (22*4) + index_embeddings (22*self.joint_emb_dim) + floor_height (1)
+            d_cond = (4 * num_joints) + (4 * num_joints) + (self.joint_emb_dim * num_joints) + 1
         elif self.joint_cond_mode == "absrel_global_deltas":
-            # joints_with_vis (22*4) + index_embeddings (22*emb_dim) + r_mat (9) + t (3) + floor_height (1)
-            d_cond = (4 * num_joints) + (emb_dim * num_joints) + 9 + 3 + 1
+            # joints_with_vis (22*4) + index_embeddings (22*self.joint_emb_dim) + r_mat (9) + t (3) + floor_height (1)
+            d_cond = (4 * num_joints) + (self.joint_emb_dim * num_joints) + 9 + 3 + 1
         else:
             assert_never(self.joint_cond_mode)
 
@@ -227,9 +227,7 @@ class EgoDenoiserConfig:
         device = joints.device
         dtype = joints.dtype
 
-        # Create joint index embeddings for all joints
-        emb_dim = 16
-        joint_embeddings = nn.Embedding(CFG.smplh.num_joints, emb_dim).to(device)
+        joint_embeddings = nn.Embedding(CFG.smplh.num_joints, self.joint_emb_dim).to(device)
         all_indices = torch.arange(CFG.smplh.num_joints, device=device)
         index_embeddings = joint_embeddings(all_indices).expand(batch, time, -1, -1)  # (batch, time, 22, 16)
 
@@ -246,7 +244,7 @@ class EgoDenoiserConfig:
             joint_heights,
             torch.ones_like(joint_heights) * float('inf')
         )
-        floor_height = masked_heights.min(dim=-1, keepdim=True)[0]  # (batch, time, 1)
+        # floor_height = masked_heights.min(dim=-1, keepdim=True)[0]  # (batch, time, 1)
 
         if self.joint_cond_mode == "absolute":
             cond = torch.cat([
@@ -268,7 +266,7 @@ class EgoDenoiserConfig:
                 first_joint.reshape(batch, time, -1),
                 local_coords.reshape(batch, time, -1),
                 index_embeddings.reshape(batch, time, -1),
-                floor_height,
+                # floor_height,
             ], dim=-1)
 
         elif self.joint_cond_mode == "absrel":
@@ -281,7 +279,7 @@ class EgoDenoiserConfig:
                 abs_pos.reshape(batch, time, -1),
                 rel_pos.reshape(batch, time, -1),
                 index_embeddings.reshape(batch, time, -1),
-                floor_height,
+                # floor_height,
             ], dim=-1)
                 
         elif self.joint_cond_mode == "absrel_global_deltas":
@@ -316,7 +314,7 @@ class EgoDenoiserConfig:
                 index_embeddings.reshape(batch, time, -1),  # Joint embeddings
                 r_mat.reshape(batch, time, 9),  # Rotation matrix
                 t.reshape(batch, time, 3),  # Translation
-                floor_height,  # Floor height
+                # floor_height,  # Floor height
             ], dim=-1)
         
         else:
@@ -341,19 +339,19 @@ class EgoDenoiserConfig:
         visible_indices = visible_joints_mask.nonzero(as_tuple=True)[-1]
         
         # Create learnable joint index embeddings
-        joint_embeddings = nn.Embedding(CFG.smplh.num_joints, 16).to(device)
+        joint_embeddings = nn.Embedding(CFG.smplh.num_joints, self.joint_emb_dim).to(device)
         num_visible_per_frame = visible_jnts.shape[2]
-        index_embeddings = joint_embeddings(visible_indices).reshape(batch, time, num_visible_per_frame, 16)
+        index_embeddings = joint_embeddings(visible_indices).reshape(batch, time, num_visible_per_frame, self.joint_emb_dim)
 
         # Extract floor height from visible joints (assuming lowest joint represents floor contact)
-        floor_height = visible_jnts[..., :, 2].min(dim=2, keepdim=True)[0]  # shape: (batch, time, 1)
+        # floor_height = visible_jnts[..., :, 2].min(dim=2, keepdim=True)[0]  # shape: (batch, time, 1)
 
         if self.joint_cond_mode == "absolute":
             # Concatenate positions, index embeddings, and floor height
             cond = torch.cat([
                 visible_jnts.reshape(batch, time, -1),  # Joint positions
                 index_embeddings.reshape(batch, time, -1),  # Joint embeddings
-                floor_height,  # Floor height
+                # floor_height,  # Floor height
             ], dim=-1)
             
         elif self.joint_cond_mode == "absrel_jnts":
@@ -365,7 +363,7 @@ class EgoDenoiserConfig:
                 first_visible_jnt.reshape(batch, time, -1),
                 local_coords.reshape(batch, time, -1),
                 index_embeddings.reshape(batch, time, -1),
-                floor_height,
+                # floor_height,
             ], dim=-1)
 
         elif self.joint_cond_mode == "absrel":
@@ -377,7 +375,7 @@ class EgoDenoiserConfig:
                 abs_pos.reshape(batch, time, -1),
                 rel_pos.reshape(batch, time, -1),
                 index_embeddings.reshape(batch, time, -1),
-                floor_height,
+                # floor_height,
             ], dim=-1)
             
         elif self.joint_cond_mode == "absrel_global_deltas":
@@ -410,7 +408,7 @@ class EgoDenoiserConfig:
                 ], dim=-1).reshape(batch, time, -1),
                 r_mat.reshape(batch, time, 9),
                 t.reshape(batch, time, 3),
-                floor_height,
+                # floor_height,
             ], dim=-1)
         
         else:
