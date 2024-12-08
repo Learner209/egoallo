@@ -12,7 +12,7 @@ from tqdm import tqdm
 from egoallo import fncsmpl, fncsmpl_extensions
 from egoallo.data.amass import AdaptiveAmassHdf5Dataset, EgoAmassHdf5Dataset
 from egoallo.data.dataclass import collate_dataclass, EgoTrainingData
-from egoallo.network import EgoDenoiser, EgoDenoiseTraj
+from egoallo.network import EgoDenoiser, EgoDenoiseTraj, EgoDenoiserConfig
 
 from egoallo.config.inference.inference_defaults import InferenceConfig
 from egoallo.evaluation.body_evaluator import BodyEvaluator
@@ -107,10 +107,10 @@ def process_sequence(
     batch: EgoTrainingData,
     seq_idx: int,
     denoiser_network: EgoDenoiser,
-    train_config: EgoAlloTrainConfig,
     body_model: fncsmpl.SmplhModel,
     device: torch.device,
-    inference_config: InferenceConfig
+    inference_config: InferenceConfig,
+    model_config: EgoDenoiserConfig,
 ) -> Tuple[EgoTrainingData, EgoDenoiseTraj, EgoTrainingData]:
     """Process a single sequence to generate predictions.
     
@@ -118,10 +118,9 @@ def process_sequence(
         batch: Input batch containing sequences
         seq_idx: Index of sequence to process
         denoiser_network: Denoising network
-        train_config: Training configuration
         body_model: SMPL-H body model
         device: Device to run computation on
-        inference_config: Test configuration
+        config: Test configuration
         
     Returns:
         Tuple containing (gt_ego_data, traj, denoised_ego_data)
@@ -290,7 +289,7 @@ def main(inference_config: InferenceConfig) -> None:
         for seq_idx in range(batch.T_world_cpf.shape[0]):
             # try:
             gt_ego_data, denoised_traj, denoised_ego_data = process_sequence(
-                batch, seq_idx, denoiser_network, train_config, body_model, device, inference_config
+                batch, seq_idx, denoiser_network, body_model, device, inference_config, model_config
             )
             
             # Save visualizations if requested

@@ -11,7 +11,7 @@ import torch
 from torch import Tensor, device
 from jaxtyping import Float
 
-from egoallo.setup_logger import setup_logger
+from egoallo.utils.setup_logger import setup_logger
 from egoallo.data.motion_processing import MotionProcessor
 from egoallo.fncsmpl import SmplhModel, SmplhShaped, SmplhShapedAndPosed
 from egoallo.transforms import SE3, SO3

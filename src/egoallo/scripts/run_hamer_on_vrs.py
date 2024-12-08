@@ -22,23 +22,33 @@ from tqdm.auto import tqdm
 
 from egoallo.inference_utils import InferenceTrajectoryPaths
 
+import inspect
 
-def main(traj_root: Path, overwrite: bool = False) -> None:
+if not hasattr(inspect, "getargspec"):
+    inspect.getargspec = inspect.getfullargspec
+
+
+def main(traj_root: Path, output_root: Path | None = None, overwrite: bool = False) -> None:
     """Run HaMeR for on trajectory. We'll save outputs to
-    `traj_root/hamer_outputs.pkl` and `traj_root/hamer_outputs_render".
+    `output_root/hamer_outputs.pkl` and `output_root/hamer_outputs_render".
+    If output_root is not provided, will save to traj_root.
 
     Arguments:
         traj_root: The root directory of the trajectory. We assume that there's
             a VRS file in this directory.
+        output_root: Optional directory to save outputs to. If None, will use traj_root.
         overwrite: If True, overwrite any existing HaMeR outputs.
     """
 
     paths = InferenceTrajectoryPaths.find(traj_root)
 
+    # Use output_root if provided, otherwise default to traj_root
+    out_dir = output_root if output_root is not None else traj_root
+
     vrs_path = paths.vrs_file
     assert vrs_path.exists()
-    pickle_out = traj_root / "hamer_outputs.pkl"
-    hamer_render_out = traj_root / "hamer_outputs_render"  # This is just for debugging.
+    pickle_out = out_dir / "hamer_outputs.pkl"
+    hamer_render_out = out_dir / "hamer_outputs_render"  # This is just for debugging.
     run_hamer_and_save(vrs_path, pickle_out, hamer_render_out, overwrite)
 
 

@@ -14,7 +14,7 @@ from projectaria_tools.core.data_provider import create_vrs_data_provider
 from safetensors import safe_open
 from torch import Tensor
 
-from egoallo.data.amass import EgoAlloTrainConfig
+from egoallo.config.train.train_config import EgoAlloTrainConfig
 
 from .network import EgoDenoiser, EgoDenoiserConfig
 from .tensor_dataclass import TensorDataclass
@@ -49,7 +49,6 @@ def load_denoiser(checkpoint_dir: Path) -> tuple[EgoDenoiser, EgoDenoiserConfig]
     model.load_state_dict(state_dict)
 
     return model, model_config
-
 def load_runtime_config(checkpoint_dir: Path) -> EgoAlloTrainConfig:
     experiment_dir = checkpoint_dir.parent
     config = yaml.load(

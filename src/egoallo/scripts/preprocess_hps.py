@@ -11,7 +11,7 @@ import tyro
 from tqdm import tqdm
 
 from egoallo.data.hps.hps_processor import HPSProcessor
-from egoallo.setup_logger import setup_logger
+from egoallo.utils.setup_logger import setup_logger
 from egoallo.training_utils import ipdb_safety_net
 
 logger = setup_logger(output="logs/hps_preprocess", name=__name__)

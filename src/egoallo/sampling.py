@@ -19,6 +19,9 @@ from .hand_detection_structs import (
 )
 from .tensor_dataclass import TensorDataclass
 from .transforms import SE3, SO3
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from .data.amass import EgoTrainingData
 
 
 def quadratic_ts() -> np.ndarray:

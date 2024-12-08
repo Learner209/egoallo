@@ -256,6 +256,20 @@ def run_training(
             # Start timing next batch load
             batch_start_time = time.time()
 
+            # Checkpointing.
+            steps_to_save = 5000
+            if step % steps_to_save == 0:
+                # Save checkpoint.
+                checkpoint_path = experiment_dir / f"checkpoints_{step}"
+                accelerator.save_state(str(checkpoint_path))
+                logger.info(f"Saved checkpoint to {checkpoint_path}")
+
+                # Keep checkpoints from only every 100k steps.
+                if prev_checkpoint_path is not None:
+                    shutil.rmtree(prev_checkpoint_path)
+                prev_checkpoint_path = None if step % steps_to_save == 0 else checkpoint_path
+                del checkpoint_path
+
         # End of epoch
         epoch += 1
         epoch_time = time.time() - epoch_start_time

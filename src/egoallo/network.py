@@ -1,6 +1,6 @@
 from __future__ import annotations
-
 from dataclasses import dataclass
+from pathlib import Path
 from functools import cache, cached_property
 from math import ceil
 from typing import Literal, assert_never, Optional
@@ -187,6 +187,7 @@ class EgoDenoiserConfig:
         """Dimensionality of conditioning vector."""
         num_joints = CFG.smplh.num_joints  # Assuming num_joints is 22
         emb_dim = 16
+        num_visible_joints = ceil((1 - self.mask_ratio) * num_joints)
 
         if self.joint_cond_mode == "absolute":
             # joints_with_vis (22*4) + index_embeddings (22*16) + floor_height (1)
