@@ -7,7 +7,7 @@ import torch
 import torch.utils
 import torch.utils.data
 
-from config.train import EgoAlloTrainConfig
+from egoallo.config.train.train_config import EgoAlloTrainConfig
 
 from .dataclass import EgoTrainingData
 from ..network import EgoDenoiserConfig
@@ -248,6 +248,7 @@ class EgoAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         rand_indices = torch.randperm(num_joints)
         masked_indices = rand_indices[:num_masked]
         visible_joints_mask[:, masked_indices] = False
+        # breakpoint()
 
         # Get original joints_wrt_world
         joints_wrt_world = kwargs["joints_wrt_world"]  # shape: [time, 21, 3]

@@ -291,8 +291,8 @@ def run_sampling_with_masked_data(
                 x_0_packed_pred[:, start_t:end_t, :] += denoiser_network.forward(
                     x_t_packed=x_t_packed[:, start_t:end_t, :],
                     t=torch.tensor([t], device=device).expand((num_samples,)),
-                    joints=masked_data.joints_wrt_world[:, start_t:end_t, :],
                     visible_joints_mask=masked_data.visible_joints_mask[:, start_t:end_t, :],
+                    visible_joints=masked_data.visible_joints[:, start_t:end_t, :],
                     project_output_rotmats=False,
                     mask=masked_data.mask[:, start_t:end_t],
                 ) * overlap_weights_slice

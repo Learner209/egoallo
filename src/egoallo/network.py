@@ -1,6 +1,6 @@
 from __future__ import annotations
-
 from dataclasses import dataclass
+from pathlib import Path
 from functools import cache, cached_property
 from math import ceil
 from typing import Literal, assert_never, Optional
@@ -177,6 +177,9 @@ class EgoDenoiserConfig:
 
     # Joint position conditioning settings
     joint_cond_mode: Literal["absolute", "absrel_jnts", "absrel", "absrel_global_deltas"] = "absrel"
+
+    # smplh-npz-path
+    smplh_npz_path: Path | None = None
 
     @cached_property
     def d_cond(self) -> int:
