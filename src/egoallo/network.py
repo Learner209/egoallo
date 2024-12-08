@@ -186,19 +186,20 @@ class EgoDenoiserConfig:
     def d_cond(self) -> int:
         """Dimensionality of conditioning vector."""
         num_joints = CFG.smplh.num_joints  # Assuming num_joints is 22
+        emb_dim = 16
 
         if self.joint_cond_mode == "absolute":
             # joints_with_vis (22*4) + index_embeddings (22*16) + floor_height (1)
-            d_cond = (4 * num_joints) + (16 * num_joints) + 1
+            d_cond = (4 * num_joints) + (emb_dim * num_joints) # + 1
         elif self.joint_cond_mode == "absrel_jnts":
-            # first_joint (4) + local_coords (21*4) + index_embeddings (22*16) + floor_height (1)
-            d_cond = 4 + (4 * (num_joints - 1)) + (16 * num_joints) + 1
+            # first_joint (4) + local_coords (21*4) + index_embeddings (22*emb_dim) + floor_height (1)
+            d_cond = 4 + (4 * (num_joints - 1)) + (emb_dim * num_joints) + 1
         elif self.joint_cond_mode == "absrel":
-            # abs_pos (22*4) + rel_pos (22*4) + index_embeddings (22*16) + floor_height (1)
-            d_cond = (4 * num_joints) + (4 * num_joints) + (16 * num_joints) + 1
+            # abs_pos (22*4) + rel_pos (22*4) + index_embeddings (22*emb_dim) + floor_height (1)
+            d_cond = (4 * num_joints) + (4 * num_joints) + (emb_dim * num_joints) + 1
         elif self.joint_cond_mode == "absrel_global_deltas":
-            # joints_with_vis (22*4) + index_embeddings (22*16) + r_mat (9) + t (3) + floor_height (1)
-            d_cond = (4 * num_joints) + (16 * num_joints) + 9 + 3 + 1
+            # joints_with_vis (22*4) + index_embeddings (22*emb_dim) + r_mat (9) + t (3) + floor_height (1)
+            d_cond = (4 * num_joints) + (emb_dim * num_joints) + 9 + 3 + 1
         else:
             assert_never(self.joint_cond_mode)
 
@@ -226,7 +227,8 @@ class EgoDenoiserConfig:
         dtype = joints.dtype
 
         # Create joint index embeddings for all joints
-        joint_embeddings = nn.Embedding(CFG.smplh.num_joints, 16).to(device)
+        emb_dim = 16
+        joint_embeddings = nn.Embedding(CFG.smplh.num_joints, emb_dim).to(device)
         all_indices = torch.arange(CFG.smplh.num_joints, device=device)
         index_embeddings = joint_embeddings(all_indices).expand(batch, time, -1, -1)  # (batch, time, 22, 16)
 
@@ -572,14 +574,14 @@ class EgoDenoiser(nn.Module):
         assert noise_emb.shape == (batch, config.d_noise_emb)
 
         # Create conditioning from visible joints only
-        # cond = config.make_cond(
-        #     visible_jnts=joints,
-        #     visible_joints_mask=visible_joints_mask,
-        # )
-        cond = config.make_cond_with_masked_joints(
-            joints = joints,
-            visible_joints_mask = visible_joints_mask,
+        cond = config.make_cond(
+            visible_jnts=joints,
+            visible_joints_mask=visible_joints_mask,
         )
+        # cond = config.make_cond_with_masked_joints(
+        #     joints = joints,
+        #     visible_joints_mask = visible_joints_mask,
+        # )
         # breakpoint()
 
         # Randomly drop out conditioning information; this serves as a
