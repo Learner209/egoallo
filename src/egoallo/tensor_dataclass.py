@@ -96,3 +96,24 @@ class TensorDataclass:
                 return True  # Non-tensor attributes are considered to have the same shape
 
         return _check_shapes_impl(self, other)
+
+    def get_preceding_dims(self) -> dict[str, tuple[int, ...]]:
+        """Return the dimensions of the tensors in the preceding dimensions of the TensorDataclass.
+
+        Returns:
+            A dictionary mapping attribute names to their preceding dimensions.
+        """
+
+        def _get_preceding_dims_impl(val: Any) -> tuple[int, ...]:
+            if isinstance(val, torch.Tensor):
+                return val.shape[:-1]
+            elif isinstance(val, TensorDataclass):
+                return tuple(_get_preceding_dims_impl(v) for v in vars(val).values())
+            elif isinstance(val, (list, tuple)):
+                return tuple(_get_preceding_dims_impl(v) for v in val)
+            elif isinstance(val, dict):
+                return tuple(_get_preceding_dims_impl(v) for v in val.values())
+            else:
+                return ()  # Non-tensor attributes have no preceding dimensions
+
+        return {k: _get_preceding_dims_impl(v) for k, v in vars(self).items()}
