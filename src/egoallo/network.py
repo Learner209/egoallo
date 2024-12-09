@@ -193,7 +193,7 @@ class EgoDenoiserConfig:
         spatial_dim = 4 if use_make_cond_with_masked_joints else 3
         if self.joint_cond_mode == "absolute":
             # joints_with_vis (22*4) + index_embeddings (22*16) + floor_height (1)
-            d_cond = (spatial_dim * num_joints) + (self.joint_emb_dim * num_joints) #
+            d_cond = (spatial_dim * num_joints) + (self.joint_emb_dim * num_joints)
         elif self.joint_cond_mode == "absrel_jnts":
             # first_joint (4) + local_coords (21*4) + index_embeddings (22*self.joint_emb_dim) + floor_height (1)
             d_cond = spatial_dim + (spatial_dim * (num_joints - 1)) + (self.joint_emb_dim * num_joints)
@@ -579,11 +579,11 @@ class EgoDenoiser(nn.Module):
             visible_jnts=joints,
             visible_joints_mask=visible_joints_mask,
         )
+        # breakpoint()
         # cond = config.make_cond_with_masked_joints(
         #     joints = joints,
         #     visible_joints_mask = visible_joints_mask,
         # )
-        # breakpoint()
 
         # Randomly drop out conditioning information; this serves as a
         # regularizer that aims to improve sample diversity.
