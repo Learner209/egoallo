@@ -72,3 +72,27 @@ class TensorDataclass:
                 return val
 
         return _map_impl(fn, self)
+
+    def check_shapes(self, other: 'TensorDataclass') -> bool:
+        """Check if two TensorDataclass instances have the same shape across all attributes.
+
+        Args:
+            other: The other TensorDataclass instance to compare with.
+
+        Returns:
+            True if all corresponding attributes have the same shape, False otherwise.
+        """
+
+        def _check_shapes_impl(val1: Any, val2: Any) -> bool:
+            if isinstance(val1, torch.Tensor) and isinstance(val2, torch.Tensor):
+                return val1.shape == val2.shape
+            elif isinstance(val1, TensorDataclass) and isinstance(val2, TensorDataclass):
+                return all(_check_shapes_impl(v1, v2) for v1, v2 in zip(vars(val1).values(), vars(val2).values()))
+            elif isinstance(val1, (list, tuple)) and isinstance(val2, (list, tuple)):
+                return all(_check_shapes_impl(v1, v2) for v1, v2 in zip(val1, val2))
+            elif isinstance(val1, dict) and isinstance(val2, dict):
+                return all(_check_shapes_impl(val1[k], val2[k]) for k in val1.keys() & val2.keys())
+            else:
+                return True  # Non-tensor attributes are considered to have the same shape
+
+        return _check_shapes_impl(self, other)
