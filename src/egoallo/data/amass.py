@@ -252,7 +252,7 @@ class EgoAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         # breakpoint()
 
         # Get original joints_wrt_world
-        joints_wrt_world = kwargs["joints_wrt_world"]  # shape: [time, 21, 3]
+        joints_wrt_world = kwargs["joints_wrt_world"]  # shape: [time, 22, 3]
         if self._slice_strategy != "full_sequence":
             assert joints_wrt_world.shape == (self._subseq_len, num_joints, 3), f"Expected shape: {(self._subseq_len, num_joints, 3)}, got: {joints_wrt_world.shape}"
         else:

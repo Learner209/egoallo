@@ -23,10 +23,6 @@ from egoallo.sampling import run_sampling_with_masked_data, run_sampling_with_st
 from egoallo import transforms as tf
 from egoallo.training_utils import ipdb_safety_net
 
-from typing import TYPE_CHECKING
-if TYPE_CHECKING:
-    from egoallo.config.train.train_config import EgoAlloTrainConfig
-
 logger = setup_logger(output="logs/test", name=__name__)
 
 def save_visualization(
@@ -170,7 +166,7 @@ def process_sequence(
         Ts_world_cpf=Ts_world_cpf,
         contacts=contacts,
         betas=betas,
-        mask_ratio=train_config.mask_ratio
+        mask_ratio=model_config.mask_ratio
     )
 
     # Run sampling with masked data
@@ -241,27 +237,23 @@ def process_sequence(
     )
 
     return gt_ego_data, denoised_traj, denoised_ego_data
-
 def main(inference_config: InferenceConfig) -> None:
     device = torch.device(inference_config.device)
     
     # Initialize model and dataset
     try:
         denoiser_network, model_config = load_denoiser(inference_config.checkpoint_dir)
-        denoiser_network.to(device)
+        denoiser_network = denoiser_network.to(device)
+        runtime_config = load_runtime_config(inference_config.checkpoint_dir)
+        body_model = fncsmpl.SmplhModel.load(runtime_config.smplh_npz_path).to(device)
         
-        body_model = fncsmpl.SmplhModel.load(model_config.smplh_npz_path).to(device)
-
-        train_config = load_runtime_config(inference_config.checkpoint_dir)
-        train_config.dataset_slice_strategy = "full_sequence" # testing is conducted on full sequences.
-
-        test_dataset = EgoAmassHdf5Dataset(train_config, cache_files=True)
-        # test_dataset = AdaptiveAmassHdf5Dataset(train_config)
+        runtime_config.dataset_slice_strategy = "full_sequence"
+        test_dataset = EgoAmassHdf5Dataset(runtime_config, cache_files=False)
         test_dataloader = DataLoader(
             test_dataset,
-            batch_size=inference_config.batch_size,
+            batch_size=1,
             shuffle=False,
-            num_workers=inference_config.num_workers,
+            num_workers=1,
             collate_fn=collate_dataclass,
             drop_last=False
         )
@@ -318,7 +310,7 @@ def main(inference_config: InferenceConfig) -> None:
         logger.info("\nComputing evaluation metrics...")
         try:
             evaluator = BodyEvaluator(
-                body_model_path=train_config.smplh_npz_path,
+                body_model_path=runtime_config.smplh_npz_path,
                 device=device
             )
             

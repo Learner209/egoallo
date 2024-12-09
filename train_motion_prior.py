@@ -80,8 +80,8 @@ def run_training(
         # Save experiment files
         experiment_dir.mkdir(exist_ok=True, parents=True)
         (experiment_dir / "git_commit.txt").write_text(
-            training_utils.get_git_commit_hash()
-        )
+                training_utils.get_git_commit_hash()
+                )
         (experiment_dir / "git_diff.txt").write_text(training_utils.get_git_diff())
         (experiment_dir / "run_config.yaml").write_text(yaml.dump(config))
         (experiment_dir / "model_config.yaml").write_text(yaml.dump(config.model))

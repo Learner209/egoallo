@@ -64,7 +64,7 @@ class EgoTrainingData(TensorDataclass):
 
     # visible_joints: Float[Tensor, "*#batch timesteps 21 3"] | None
     # """Joint positions relative to the central pupil frame for visible joints."""
-    
+
     @staticmethod
     def load_from_npz(
         body_model: fncsmpl.SmplhModel,
@@ -113,8 +113,8 @@ class EgoTrainingData(TensorDataclass):
             contacts=raw_fields["contacts"][1:, 1:].cpu(),  # Root is no longer a joint.
             betas=raw_fields["betas"].unsqueeze(0).cpu(),
             joints_wrt_world=raw_fields["joints"][
-                1:, 1:
-            ].cpu(),  # Root is no longer a joint.
+                1:
+            ].cpu(),  # root is included.
             body_quats=body_quats[1:].cpu(),
             # CPF frame stuff.
             T_world_cpf=T_world_cpf[1:].cpu(),
@@ -134,7 +134,7 @@ class EgoTrainingData(TensorDataclass):
             hand_quats=hand_quats[1:].cpu() if include_hands else None,
             visible_joints_mask=None,
         )
-    
+
     @staticmethod
     def visualize_ego_training_data(data: EgoTrainingData, body_model: fncsmpl.SmplhModel, output_path: str = "output.mp4"):
         viz_ego_data(data,

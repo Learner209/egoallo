@@ -109,7 +109,7 @@ def run_sampling_with_masked_data(
     seq_len = x_t_packed.shape[1]
     window_size = 128
     overlap_size = 32
-    
+
     # Create overlap weights for windowed processing
     canonical_overlap_weights = torch.from_numpy(
         np.minimum(
@@ -224,51 +224,51 @@ def calculate_metrics(
     body_model: fncsmpl.SmplhModel,
 ) -> dict[str, float]:
     """Calculate metrics between original and inferred trajectories.
-    
+
     Args:
         original_posed: Original posed SMPL-H model
         denoised_traj: Inferred trajectory from denoising
         masked_data: Training data with masking information
         body_model: SMPL-H body model
-        
+
     Returns:
         Dictionary containing computed metrics
     """
     # Get inferred posed model
     inferred_posed = denoised_traj.apply_to_body(body_model)
-    
+
     # 1. T_world_root error
     # Translation error
     trans_error = torch.norm(
-        original_posed.T_world_root[..., 4:7] - 
+        original_posed.T_world_root[..., 4:7] -
         inferred_posed.T_world_root[..., 4:7],
         dim=-1
     ).mean().item()
-    
+
     # Rotation error (geodesic distance)
     R1 = original_posed.T_world_root[..., :4]  # quaternions
     R2 = inferred_posed.T_world_root[..., :4]
     rot_error = torch.arccos(
         torch.abs(torch.sum(R1 * R2, dim=-1)).clamp(-1, 1)
     ).mean().item() * 2.0  # multiply by 2 for full rotation distance
-    
+
     # 2. Joint position errors
     # Get original and inferred joint positions
     orig_joints = torch.cat([original_posed.T_world_root[..., 4:7].unsqueeze(-2), original_posed.Ts_world_joint[..., :CFG.smplh.num_joints-1, 4:7]], dim=-2)
     infer_joints = torch.cat([inferred_posed.T_world_root[..., 4:7].unsqueeze(-2), inferred_posed.Ts_world_joint[..., :CFG.smplh.num_joints-1, 4:7]], dim=-2)
-    
+
     # Calculate per-joint errors
     joint_errors = torch.norm(orig_joints - infer_joints, dim=-1)  # [B, T, J]
-    
+
     # Separate masked and unmasked errors using visible_joints_mask
     visible_mask = masked_data.visible_joints_mask
-    
+
     # Unmasked joints error
     unmasked_mpjpe = joint_errors[visible_mask].mean().item() * 1000  # Convert to mm
-    
-    # Masked joints error  
+
+    # Masked joints error
     masked_mpjpe = joint_errors[~visible_mask].mean().item() * 1000  # Convert to mm
-    
+
     return {
         "translation_error_meters": trans_error,
         "rotation_error_radians": rot_error,
@@ -397,7 +397,6 @@ def main(
         mask=torch.ones_like(contacts[0, :], dtype=torch.bool),
         hand_quats=torch.cat([left_hand_quats, right_hand_quats], dim=-2).squeeze(0).cpu(),
         visible_joints_mask=None,
-        visible_joints=None,
     )
 
 
@@ -418,7 +417,7 @@ def main(
 
 
     # import ipdb; ipdb.set_trace()
-    
+
     # Save outputs in case we want to visualize later.
     # if args.save_traj:
     #     save_name = (
@@ -467,24 +466,24 @@ def main(
 
         # Create timestamp for unique filenames
         timestamp = time.strftime("%Y%m%d-%H%M%S")
-        
+
         # Create output directories if they don't exist
         output_dir = Path("output_videos")
         output_dir.mkdir(exist_ok=True)
-        
+
         # Generate unique filenames with timestamp
         gt_output_path = output_dir / f"gt_traj_{timestamp}.mp4"
         inferred_output_path = output_dir / f"inferred_traj_{timestamp}.mp4"
-        
+
         # Save GT and inferred trajectories to separate files
         EgoTrainingData.visualize_ego_training_data(
-            gt_ego_data, 
-            body_model, 
+            gt_ego_data,
+            body_model,
             output_path=str(gt_output_path)
         )
         EgoTrainingData.visualize_ego_training_data(
-            denoised_ego_data, 
-            body_model, 
+            denoised_ego_data,
+            body_model,
             output_path=str(inferred_output_path)
         )
 
