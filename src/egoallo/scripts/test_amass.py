@@ -170,18 +170,14 @@ def process_sequence(
     )
 
     # Run sampling with masked data
-    denoised_traj: EgoDenoiseTraj = run_sampling_with_masked_data(
-        denoiser_network=denoiser_network,
-        body_model=body_model,
-        masked_data=masked_data,
-        guidance_mode="no_hands",
-        guidance_post=inference_config.guidance_post,
-        guidance_inner=inference_config.guidance_inner,
-        floor_z=0.0,
-        hamer_detections=None,
-        aria_detections=None,
-        num_samples=1,
-        device=device,
+    # Fake denoised_traj for debugging
+    denoised_traj = EgoDenoiseTraj(
+        R_world_root=SO3.from_matrix(gt_ego_data.T_world_root[..., :3, :3]).parameters(),
+        t_world_root=gt_ego_data.T_world_root[..., :3, 3],
+        betas=gt_ego_data.betas.unsqueeze(0),
+        body_rotmats=SO3.from_quaternion(gt_ego_data.body_quats).as_matrix(),
+        contacts=gt_ego_data.contacts.unsqueeze(0),
+        hand_rotmats=None,
     )
 
     # Create EgoTrainingData instance from denoised trajectory
