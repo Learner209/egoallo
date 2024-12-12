@@ -1,12 +1,11 @@
-from __future__ import annotations
-
 from pathlib import Path
 
 import numpy as np
 import torch
 import torch.utils.data
 import typeguard
-from jaxtyping import Bool, Float, jaxtyped
+from jaxtyping import Bool, Float, jaxtyped, Array
+from beartype import beartype
 from torch import Tensor
 
 from .. import fncsmpl, fncsmpl_extensions
@@ -17,52 +16,53 @@ from typing import Optional
 from ..network import EgoDenoiserConfig
 from ..viz.smpl_viewer import visualize_ego_training_data as viz_ego_data
 
+from jaxtyping import Float, jaxtyped
+from typeguard import typechecked
+from dataclasses import dataclass
+
+
 @jaxtyped(typechecker=typeguard.typechecked)
 class EgoTrainingData(TensorDataclass):
     """Dictionary of tensors we use for EgoAllo training."""
 
-    T_world_root: Float[Tensor, "*#batch timesteps 7"]
+    T_world_root: Float[Tensor, "*batch timesteps 7"]
     """Transformation from the world frame to the root frame at each timestep."""
 
-    contacts: Float[Tensor, "*#batch timesteps 21"]
+    contacts: Float[Tensor, "*batch timesteps 22"]
     """Contact boolean for each joint."""
 
-    betas: Float[Tensor, "*#batch 1 16"]
+    betas: Float[Tensor, "*batch 1 16"]
     """Body shape parameters."""
 
     # Excluded because not needed.
-    joints_wrt_world: Float[Tensor, "*#batch timesteps 21 3"]
+    joints_wrt_world: Float[Tensor, "*batch timesteps 22 3"]
     """Joint positions relative to the world frame."""
     # @property
     # def joints_wrt_world(self) -> Tensor:
     #     return tf.SE3(self.T_world_cpf[..., None, :]) @ self.joints_wrt_cpf
 
-    body_quats: Float[Tensor, "*#batch timesteps 21 4"]
+    body_quats: Float[Tensor, "*batch timesteps 21 4"]
     """Local orientations for each body joint."""
 
-    T_cpf_tm1_cpf_t: Float[Tensor, "*#batch timesteps 7"]
-    """Transformation to the next central pupil frame, from this timestep's
-    central pupil frame."""
-
-    T_world_cpf: Float[Tensor, "*#batch timesteps 7"]
+    T_world_cpf: Float[Tensor, "*batch timesteps 7"]
     """Transformation from the world frame to the central pupil frame at each timestep."""
 
-    height_from_floor: Float[Tensor, "*#batch timesteps 1"]
+    height_from_floor: Float[Tensor, "*batch timesteps 1"]
     """Distance from CPF to floor at each timestep."""
 
-    joints_wrt_cpf: Float[Tensor, "*#batch timesteps 21 3"]
+    joints_wrt_cpf: Float[Tensor, "*batch timesteps 22 3"]
     """Joint positions relative to the central pupil frame."""
 
-    mask: Bool[Tensor, "*#batch timesteps"]
+    mask: Bool[Tensor, "*batch timesteps"]
     """Mask to support variable-length sequence."""
 
-    hand_quats: Float[Tensor, "*#batch timesteps 30 4"] | None
+    hand_quats: Float[Tensor, "*batch timesteps 30 4"] | None
     """Local orientations for each hand joint."""
 
-    visible_joints_mask: Bool[Tensor, "*#batch timesteps 21"] | None
+    visible_joints_mask: Bool[Tensor, "*batch timesteps 22"] | None
     """Boolean mask indicating which joints are visible (not masked)"""
 
-    # visible_joints: Float[Tensor, "*#batch timesteps 21 3"] | None
+    # visible_joints: Float[Tensor, "*batch timesteps 21 3"] | None
     # """Joint positions relative to the central pupil frame for visible joints."""
 
     @staticmethod
@@ -70,7 +70,7 @@ class EgoTrainingData(TensorDataclass):
         body_model: fncsmpl.SmplhModel,
         path: Path,
         include_hands: bool,
-    ) -> EgoTrainingData:
+    ) -> "EgoTrainingData":
         """Load a single trajectory from a (processed_30fps) npz file."""
         raw_fields = {
             k: torch.from_numpy(v.astype(np.float32) if v.dtype == np.float64 else v)
@@ -109,35 +109,33 @@ class EgoTrainingData(TensorDataclass):
         assert T_world_cpf.shape == (timesteps, 7)
 
         return EgoTrainingData(
-            T_world_root=T_world_root[1:].cpu(),
-            contacts=raw_fields["contacts"][1:, 1:].cpu(),  # Root is no longer a joint.
+            T_world_root=T_world_root.cpu(),
+            contacts=raw_fields["contacts"].cpu(),  # Root is no longer a joint.
             betas=raw_fields["betas"].unsqueeze(0).cpu(),
-            joints_wrt_world=raw_fields["joints"][
-                1:
-            ].cpu(),  # root is included.
-            body_quats=body_quats[1:].cpu(),
+            joints_wrt_world=raw_fields["joints"].cpu(),  # root is included.
+            body_quats=body_quats.cpu(),
             # CPF frame stuff.
-            T_world_cpf=T_world_cpf[1:].cpu(),
+            T_world_cpf=T_world_cpf.cpu(),
             # Get translational z coordinate from wxyz_xyz.
-            height_from_floor=T_world_cpf[1:, 6:7].cpu(),
-            T_cpf_tm1_cpf_t=(
-                tf.SE3(T_world_cpf[:-1, :]).inverse() @ tf.SE3(T_world_cpf[1:, :])
-            )
-            .parameters()
-            .cpu(),
+            height_from_floor=T_world_cpf[:, 6:7].cpu(),
             joints_wrt_cpf=(
                 # unsqueeze so both shapes are (timesteps, joints, dim)
-                tf.SE3(T_world_cpf[1:, None, :]).inverse()
-                @ raw_fields["joints"][1:, 1:, :].to(T_world_cpf.device)
+                tf.SE3(T_world_cpf[:, None, :]).inverse()
+                @ raw_fields["joints"].to(T_world_cpf.device)
             ).cpu(),
-            mask=torch.ones((timesteps - 1,), dtype=torch.bool),
-            hand_quats=hand_quats[1:].cpu() if include_hands else None,
+            mask=torch.ones((timesteps,), dtype=torch.bool),
+            hand_quats=hand_quats.cpu() if include_hands else None,
             visible_joints_mask=None,
         )
 
     @staticmethod
-    def visualize_ego_training_data(data: EgoTrainingData, body_model: fncsmpl.SmplhModel, output_path: str = "output.mp4"):
-        viz_ego_data(data,
+    def visualize_ego_training_data(
+        data: "EgoTrainingData",
+        body_model: fncsmpl.SmplhModel,
+        output_path: str = "output.mp4",
+    ):
+        viz_ego_data(
+            data,
             body_model=body_model,
             output_path=output_path,
         )

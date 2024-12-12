@@ -1,6 +1,7 @@
 """Training script for EgoAllo diffusion model using HuggingFace accelerate."""
 
 import os
+
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
@@ -41,7 +42,7 @@ def get_experiment_dir(experiment_name: str, version: int = 0) -> Path:
     # Use timestamp if experiment name not specified
     if not experiment_name:
         experiment_name = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        
+
     experiment_dir = (
         Path(__file__).absolute().parent
         / "experiments"
@@ -67,21 +68,22 @@ def run_training(
         project_config=ProjectConfiguration(project_dir=str(experiment_dir)),
         dataloader_config=DataLoaderConfiguration(split_batches=True),
     )
-    
+
     # Initialize wandb instead of tensorboardX
     if accelerator.is_main_process:
         wandb.init(
             project="egoallo",
-            name=config.experiment_name or datetime.datetime.now().strftime("%Y%m%d_%H%M%S"),
+            name=config.experiment_name
+            or datetime.datetime.now().strftime("%Y%m%d_%H%M%S"),
             config=dataclasses.asdict(config),
-            dir=str(experiment_dir)
+            dir=str(experiment_dir),
         )
-        
+
         # Save experiment files
         experiment_dir.mkdir(exist_ok=True, parents=True)
         (experiment_dir / "git_commit.txt").write_text(
-                training_utils.get_git_commit_hash()
-                )
+            training_utils.get_git_commit_hash()
+        )
         (experiment_dir / "git_diff.txt").write_text(training_utils.get_git_diff())
         (experiment_dir / "run_config.yaml").write_text(yaml.dump(config))
         (experiment_dir / "model_config.yaml").write_text(yaml.dump(config.model))
@@ -89,7 +91,9 @@ def run_training(
     device = accelerator.device
 
     if config.debug:
-        import ipdb; ipdb.set_trace()
+        import ipdb
+
+        ipdb.set_trace()
 
     # Initialize experiment.
     if accelerator.is_main_process:
@@ -161,13 +165,13 @@ def run_training(
     batch_start_time = time.time()
     epoch_start_time = time.time()
     epoch = 0
-    
+
     while True:
         # breakpoint()
         for train_batch in train_loader:
             # Record batch loading time
             batch_load_time = time.time() - batch_start_time
-            
+
             loop_metrics = next(loop_metrics_gen)
             step = loop_metrics.counter
 
@@ -176,28 +180,31 @@ def run_training(
                 unwrapped_model=accelerator.unwrap_model(model),
                 train_batch=train_batch,
             )
-            
+
             # Add learning rate to outputs
             log_outputs["learning_rate"] = scheduler.get_last_lr()[0]
-            
+
             # Log metrics to wandb instead of tensorboard
             if accelerator.is_main_process:
                 # Log all outputs
                 wandb.log(log_outputs, step=step)
-                
+
                 # Log additional training metrics
-                wandb.log({
-                    "batch_loading_time": batch_load_time,
-                    "iterations_per_sec": loop_metrics.iterations_per_sec,
-                    "batch_time": loop_metrics.batch_time,
-                    "forward_time": loop_metrics.forward_time, 
-                    "backward_time": loop_metrics.backward_time,
-                    "optimizer_time": loop_metrics.optimizer_time,
-                    "gpu_utilization": loop_metrics.gpu_utilization,
-                    "gpu_memory_used": loop_metrics.gpu_memory_used,
-                    "total_batch_size": loop_metrics.total_batch_size,
-                    "per_gpu_batch_size": loop_metrics.per_gpu_batch_size,
-                }, step=step)
+                wandb.log(
+                    {
+                        "batch_loading_time": batch_load_time,
+                        "iterations_per_sec": loop_metrics.iterations_per_sec,
+                        "batch_time": loop_metrics.batch_time,
+                        "forward_time": loop_metrics.forward_time,
+                        "backward_time": loop_metrics.backward_time,
+                        "optimizer_time": loop_metrics.optimizer_time,
+                        "gpu_utilization": loop_metrics.gpu_utilization,
+                        "gpu_memory_used": loop_metrics.gpu_memory_used,
+                        "total_batch_size": loop_metrics.total_batch_size,
+                        "per_gpu_batch_size": loop_metrics.per_gpu_batch_size,
+                    },
+                    step=step,
+                )
 
             accelerator.backward(loss)
             if accelerator.sync_gradients:
@@ -218,7 +225,7 @@ def run_training(
                     f" epoch: {epoch} (time: {epoch_time:.1f}s)"
                     f" time: {loop_metrics.time_elapsed:.1f}s"
                     f" batch_load: {batch_load_time*1000:.1f}ms"
-                    f" batch: {loop_metrics.batch_time*1000:.1f}ms" 
+                    f" batch: {loop_metrics.batch_time*1000:.1f}ms"
                     f" fwd: {loop_metrics.forward_time*1000:.1f}ms"
                     f" bwd: {loop_metrics.backward_time*1000:.1f}ms"
                     f" opt: {loop_metrics.optimizer_time*1000:.1f}ms"
@@ -233,15 +240,15 @@ def run_training(
 
                 # Add all loss terms from log_outputs
                 for key, value in log_outputs.items():
-                    if key.startswith('loss_term/'):
+                    if key.startswith("loss_term/"):
                         # Extract term name after loss_term/
-                        term_name = key.split('/')[-1]
+                        term_name = key.split("/")[-1]
                         # Add formatted loss term
                         log_msg += f" {term_name}: {value:.6f}"
 
                 logger.info(log_msg)
 
-            log_ckpt_step = 2000
+            log_ckpt_step = 3000
             if step % log_ckpt_step == 0:
                 # Save checkpoint.
                 checkpoint_path = experiment_dir / f"checkpoints_{step}"
@@ -267,7 +274,9 @@ def run_training(
                 # Keep checkpoints from only every 100k steps.
                 if prev_checkpoint_path is not None:
                     shutil.rmtree(prev_checkpoint_path)
-                prev_checkpoint_path = None if step % steps_to_save == 0 else checkpoint_path
+                prev_checkpoint_path = (
+                    None if step % steps_to_save == 0 else checkpoint_path
+                )
                 del checkpoint_path
 
         # End of epoch
@@ -280,6 +289,7 @@ def run_training(
     # Finish wandb run
     if accelerator.is_main_process:
         wandb.finish()
+
 
 if __name__ == "__main__":
     tyro.cli(run_training)

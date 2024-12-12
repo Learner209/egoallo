@@ -365,9 +365,6 @@ def main(
         body_quats=SO3.from_matrix(denoised_traj.body_rotmats).wxyz.cpu()[:, :, :21, :].cpu().squeeze(0), #denoised_traj.body_quats.cpu(),
         T_world_cpf=T_world_cpf.cpu().squeeze(0),
         height_from_floor=T_world_cpf[..., 6:7].cpu().squeeze(0),
-        T_cpf_tm1_cpf_t=(
-            tf.SE3(T_world_cpf[:-1, :]).inverse() @ tf.SE3(T_world_cpf[1:, :])
-        ).parameters().cpu().squeeze(0),
         joints_wrt_cpf=(
             # unsqueeze so both shapes are (timesteps, joints, dim)
             tf.SE3(T_world_cpf[0, 1:, None, :]).inverse()
@@ -387,9 +384,6 @@ def main(
         body_quats=body_quats.squeeze(0).cpu(),
         T_world_cpf=Ts_world_cpf.squeeze(0).cpu(),
         height_from_floor=Ts_world_cpf[..., 6:7].squeeze(0).cpu(),
-        T_cpf_tm1_cpf_t=(
-            tf.SE3(Ts_world_cpf[:-1, :]).inverse() @ tf.SE3(Ts_world_cpf[1:, :])
-        ).parameters().cpu().squeeze(0),
         joints_wrt_cpf=(
             # unsqueeze so both shapes are (timesteps, joints, dim)
         tf.SE3(Ts_world_cpf[1:, None, :]).inverse() @ posed.Ts_world_joint[0, 1:, :21, 4:7].to(Ts_world_cpf.device)

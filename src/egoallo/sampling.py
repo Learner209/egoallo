@@ -80,16 +80,12 @@ def run_sampling_with_stitching(
     alpha_bar_t = noise_constants.alpha_bar_t
     alpha_t = noise_constants.alpha_t
 
-    T_cpf_tm1_cpf_t = (
-        SE3(Ts_world_cpf[..., :-1, :]).inverse() @ SE3(Ts_world_cpf[..., 1:, :])
-    ).wxyz_xyz
-
     x_t_packed = torch.randn(
         (num_samples, Ts_world_cpf.shape[0] - 1, denoiser_network.get_d_state()),
         device=device,
     )
     x_t = network.EgoDenoiseTraj.unpack(
-        x_t_packed, 
+        x_t_packed,
         include_hands=denoiser_network.config.include_hands
     )
     x_t.T_world_root = Ts_world_cpf[1:]  # Use the transformed poses
@@ -141,9 +137,6 @@ def run_sampling_with_stitching(
                     denoiser_network.forward(
                         x_t_packed[:, start_t:end_t, :],
                         torch.tensor([t], device=device).expand((num_samples,)),
-                        T_cpf_tm1_cpf_t=T_cpf_tm1_cpf_t[None, start_t:end_t, :].repeat(
-                            (num_samples, 1, 1)
-                        ),
                         T_world_cpf=Ts_world_cpf[
                             None, start_t + 1 : end_t + 1, :
                         ].repeat((num_samples, 1, 1)),
@@ -263,7 +256,7 @@ def run_sampling_with_masked_data(
     seq_len = x_t_packed.shape[1]
     window_size = 128
     overlap_size = 32
-    
+
     canonical_overlap_weights = torch.from_numpy(
         np.minimum(
             overlap_size,

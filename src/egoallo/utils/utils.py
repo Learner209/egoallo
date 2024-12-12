@@ -124,7 +124,7 @@ def signal_handler(signal_received, frame, logger, opt):
 
     exp_save_root_dir = opt.io.diffusion.project_exp_name
     response = input(f"Are you sure you want to delete the directory '{exp_save_root_dir}'? (y/n): ")
-    
+
     if response.lower() == 'yes' or response.lower() == 'y':
         try:
             # Remove the directory using shutil.rmtree which deletes a directory and all its contents
@@ -246,8 +246,10 @@ def images_to_video_w_imageio(img_folder, output_vid_file):
         im_arr.append(im)
 
     im_arr = np.asarray(im_arr)
-    imageio.mimwrite(output_vid_file, im_arr, fps=30, quality=8) 
+    imageio.mimwrite(output_vid_file, im_arr, fps=30, quality=8)
 
+
+from typing import TypeVar, Union, Callable, Type, Any
 
 
 def procrustes_align(
@@ -257,12 +259,12 @@ def procrustes_align(
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Perform Procrustes alignment between two point sets.
-    
+
     Args:
         points_y: Target points (..., N, 3)
         points_x: Source points (..., N, 3)
         fix_scale: Whether to fix scale to 1
-        
+
     Returns:
         Tuple of (scale, rotation, translation)
     """
@@ -301,7 +303,7 @@ def procrustes_align(
 if __name__ == "__main__":
     debug_on_error(debug=True, logger=local_logger)
     raise ValueError("This is a test error")
-    
+
 if __name__ == "__main__":
     debug_on_error(debug=True, logger=local_logger)
     raise ValueError("This is a test error")

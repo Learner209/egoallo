@@ -7,6 +7,7 @@ import torch.utils.data
 from jaxtyping import Bool, Float, Int
 from torch import Tensor
 from torch._dynamo import OptimizedModule
+from egoallo.utils.setup_logger import setup_logger
 from torch.nn.parallel import DistributedDataParallel
 
 from . import network
@@ -16,12 +17,13 @@ from .transforms import SO3
 
 
 from egoallo.config import make_cfg, CONFIG_FILE
+
 local_config_file = CONFIG_FILE
 CFG = make_cfg(config_name="defaults", config_file=local_config_file, cli_args=[])
 
 
-from egoallo.utils.setup_logger import setup_logger
 logger = setup_logger(output=None, name=__name__)
+
 
 @dataclasses.dataclass(frozen=True)
 class TrainingLossConfig:
@@ -30,12 +32,12 @@ class TrainingLossConfig:
     loss_weights: dict[str, float] = dataclasses.field(
         default_factory={
             "betas": 0.00,
-            "body_rotmats": 1.0,
+            "body_rotmats": 0.0,
             "contacts": 0.00,
             "hand_rotmats": 0.00,
-            "R_world_root": 1.0,
-            "t_world_root": 1.0,
-            "joints": 0.00,
+            "R_world_root": 0.0,
+            "t_world_root": 0.0,
+            "joints": 1.00,
             "foot_skating": 0.00,
             "velocity": 0.00,
         }.copy
@@ -68,26 +70,28 @@ class TrainingLossComputer:
         padding = 0.01
         self.weight_t = weight_t / weight_t[1] * (1.0 - padding) + padding
 
-    def compute_geodesic_distance(self, R1: Float[Tensor, "... 3 3"], R2: Float[Tensor, "... 3 3"]) -> Float[Tensor, "..."]:
+    def compute_geodesic_distance(
+        self, R1: Float[Tensor, "... 3 3"], R2: Float[Tensor, "... 3 3"]
+    ) -> Float[Tensor, "..."]:
         """Compute geodesic distance between rotation matrices.
-        
+
         Args:
             R1: First rotation matrix
             R2: Second rotation matrix
-            
+
         Returns:
             Geodesic distance in radians
         """
         # Compute R1 @ R2.T
         R_diff = R1 @ R2.transpose(-2, -1)
-        
+
         # Get trace of the difference matrix
         trace = R_diff.diagonal(dim1=-2, dim2=-1).sum(-1)
-        
+
         # Clamp for numerical stability
         cos_theta = (trace - 1) / 2
         cos_theta = torch.clamp(cos_theta, -1 + 1e-7, 1 - 1e-7)
-        
+
         # Return geodesic distance
         return torch.acos(cos_theta)
 
@@ -102,14 +106,14 @@ class TrainingLossComputer:
         Returns:
             A tuple (loss tensor, dictionary of things to log).
         """
-            
+
         log_outputs: dict[str, Tensor | float] = {}
 
         batch, time, _, _ = train_batch.body_quats.shape
 
         num_joints = CFG.smplh.num_joints
         # assert num_joints == 22
-        
+
         T_world_root = train_batch.T_world_root
         R_world_root = SO3(T_world_root[..., :4]).as_matrix()
         t_world_root = T_world_root[..., 4:7]
@@ -153,7 +157,6 @@ class TrainingLossComputer:
             torch.sqrt(alpha_bar_t) * x_0_packed + torch.sqrt(1.0 - alpha_bar_t) * eps
         )
 
-        
         # define per-timestep weightting scheme and construct weighting function.
         weight_t = self.weight_t[t].to(device)
         assert weight_t.shape == (batch,)
@@ -225,37 +228,52 @@ class TrainingLossComputer:
 
         # Add joint position loss calculation
         # Get predicted joint positions through forward kinematics
-        x_0_posed = x_0_pred.apply_to_body(unwrapped_model.body_model.to(device)) # (b, t, 22, 3)
-        pred_joints = torch.cat([x_0_posed.Ts_world_joint[..., :num_joints-1, 4:7], x_0_posed.T_world_root[..., 4:7].unsqueeze(dim=-2)], dim=-2)  # (b, t, 22, 3)
+        x_0_posed = x_0_pred.apply_to_body(
+            unwrapped_model.body_model.to(device)
+        )  # (b, t, 22, 3)
+        pred_joints = torch.cat(
+            [
+                x_0_posed.Ts_world_joint[..., : num_joints - 1, 4:7],
+                x_0_posed.T_world_root[..., 4:7].unsqueeze(dim=-2),
+            ],
+            dim=-2,
+        )  # (b, t, 22, 3)
         assert pred_joints.shape == (batch, time, num_joints, 3)
-        
+
         # Get ground truth joints from training batch
         gt_joints = train_batch.joints_wrt_world  # (b, t, 22, 3)
         assert gt_joints.shape == (batch, time, num_joints, 3)
-        
+
         # Calculate joint position loss with masking
         joint_loss = (pred_joints - gt_joints) ** 2  # (b, t, 22, 3)
-        
+
         # Apply joint visibility mask and average
         # visible_joints_mask: shape (b, t, 22), joint_loss: shape (b, t, 22, 3)
         # Compute masked joint loss while handling shape alignment
         # joint_loss: (b, t, 22, 3), visible_joints_mask: (b, t, 22)
         # breakpoint()
         invisible_joint_loss = (
-            joint_loss * (~train_batch.visible_joints_mask[..., None].bool())  # Add channel dim to inverted mask
+            joint_loss
+            * (
+                torch.ones_like(train_batch.visible_joints_mask[..., None])
+            )  # Use all joints instead of just invisible ones
         ).sum(dim=(-2, -1)) / (  # Sum over joints (22) and xyz (3)
-            ((~train_batch.visible_joints_mask.bool()).sum(dim=-1) * 3) + 1e-8  # Multiply by 3 for xyz channels
+            (torch.ones_like(train_batch.visible_joints_mask).sum(dim=-1) * 3)
+            + 1e-8  # Multiply by 3 for xyz channels
         )  # Result: (b, t)
 
-        
         # Foot skating loss
         foot_indices = [7, 8, 10, 11]  # Indices for foot joints
         foot_positions = pred_joints[..., foot_indices, :]  # (batch, time, 4, 3)
-        foot_velocities = foot_positions[:, 1:] - foot_positions[:, :-1]  # (batch, time-1, 4, 3)
-        
+        foot_velocities = (
+            foot_positions[:, 1:] - foot_positions[:, :-1]
+        )  # (batch, time-1, 4, 3)
+
         # Get foot contacts from x_0_pred
         foot_contacts = x_0.contacts[..., foot_indices]  # (batch, time, 4)
-        foot_skating_mask = foot_contacts[:, 1:] * train_batch.mask[:, 1:, None]  # (batch, time-1, 4)
+        foot_skating_mask = (
+            foot_contacts[:, 1:] * train_batch.mask[:, 1:, None]
+        )  # (batch, time-1, 4)
 
         # Compute foot skating loss for each foot joint
         foot_skating_losses = []
@@ -265,16 +283,19 @@ class TrainingLossComputer:
                 bt_mask=foot_skating_mask[..., i],  # (batch, time-1)
                 bt_mask_sum=torch.maximum(
                     torch.sum(foot_skating_mask[..., i]) * 3,  # Multiply by 3 for x,y,z
-                    torch.tensor(1, device=device)
-                )
+                    torch.tensor(1, device=device),
+                ),
             )
             foot_skating_losses.append(foot_loss)
         foot_skating_loss = sum(foot_skating_losses) / len(foot_indices)
 
         # Velocity loss
-        joint_velocities = pred_joints[:, 1:] - pred_joints[:, :-1]  # (batch, time-1, num_joints, 3)
-        gt_velocities = train_batch.joints_wrt_world[:, 1:] - train_batch.joints_wrt_world[:, :-1]
-
+        joint_velocities = (
+            pred_joints[:, 1:] - pred_joints[:, :-1]
+        )  # (batch, time-1, num_joints, 3)
+        gt_velocities = (
+            train_batch.joints_wrt_world[:, 1:] - train_batch.joints_wrt_world[:, :-1]
+        )
 
         loss_terms: dict[str, Tensor | float] = {
             "betas": weight_and_mask_loss(
@@ -287,22 +308,26 @@ class TrainingLossComputer:
                 # Reshape inputs to (batch, time, 21, 3, 3)
                 (x_0_pred.body_rotmats - x_0.body_rotmats).reshape(batch, time, -1) ** 2
             ),
-            "contacts": weight_and_mask_loss((x_0_pred.contacts.float() - x_0.contacts.float()) ** 2),
+            "contacts": weight_and_mask_loss(
+                (x_0_pred.contacts.float() - x_0.contacts.float()) ** 2
+            ),
             "t_world_root": weight_and_mask_loss(
                 (x_0_pred.t_world_root - x_0.t_world_root) ** 2
             ),
             "R_world_root": weight_and_mask_loss(
                 (x_0_pred.R_world_root - x_0.R_world_root).reshape(batch, time, -1) ** 2
             ),
-            "joints": weight_and_mask_loss(invisible_joint_loss.unsqueeze(-1),
-                                           train_batch.mask,
-                                           torch.sum(train_batch.mask)),
+            "joints": weight_and_mask_loss(
+                invisible_joint_loss.unsqueeze(-1),
+                train_batch.mask,
+                torch.sum(train_batch.mask),
+            ),
             "foot_skating": foot_skating_loss,
             "velocity": weight_and_mask_loss(
-                (joint_velocities - gt_velocities).reshape(batch, time-1, -1) ** 2,
+                (joint_velocities - gt_velocities).reshape(batch, time - 1, -1) ** 2,
                 bt_mask=train_batch.mask[:, 1:],
-                bt_mask_sum=torch.sum(train_batch.mask[:, 1:])
-        ),
+                bt_mask_sum=torch.sum(train_batch.mask[:, 1:]),
+            ),
         }
 
         # Include hand objective.
@@ -353,7 +378,6 @@ class TrainingLossComputer:
             # )
         else:
             loss_terms["hand_rotmats"] = 0.0
-
 
         assert loss_terms.keys() == self.config.loss_weights.keys()
 

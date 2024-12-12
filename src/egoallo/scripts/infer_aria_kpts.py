@@ -50,10 +50,10 @@ logger = logging.getLogger(__name__)
 
 def convert_egoexo4d_to_smplh(egoexo4d_joints: np.ndarray) -> np.ndarray:
     """Convert EgoExo4D format joints to SMPLH convention.
-    
+
     Args:
         egoexo4d_joints: Array of shape (..., 17, 3) in EgoExo4D format
-        
+
     Returns:
         Array of shape (..., 22, 3) in SMPLH body joint convention
         Non-mappable joints are filled with NaN values
@@ -62,12 +62,12 @@ def convert_egoexo4d_to_smplh(egoexo4d_joints: np.ndarray) -> np.ndarray:
     # SMPLH has 22 body joints
     output_shape = list(egoexo4d_joints.shape[:-2]) + [22, 3]
     smplh_joints = np.full(output_shape, np.nan)
-    
+
     # Map joints using EGOEXO4D_BODYPOSE_TO_SMPLH_INDICES
     for smplh_idx, egoexo_idx in enumerate(EGOEXO4D_BODYPOSE_TO_SMPLH_INDICES):
         if egoexo_idx != -1:
             smplh_joints[..., smplh_idx, :] = egoexo4d_joints[..., egoexo_idx, :]
-            
+
     return smplh_joints
 
 from egoallo.config.inference.inference_defaults import InferenceConfig
@@ -75,13 +75,13 @@ from egoallo.config.inference.inference_defaults import InferenceConfig
 
 class AriaKeypointsDataset(Dataset):
     """Dataset for loading and processing Aria keypoints annotations."""
-    
+
     def __init__(
-        self, 
+        self,
         config: Optional[InferenceConfig] = None
     ):
         """Initialize dataset with configuration parameters.
-        
+
         Args:
             split: Dataset split ('train', 'val', 'test')
             anno_type: Type of annotation ('manual', 'auto')
@@ -92,7 +92,7 @@ class AriaKeypointsDataset(Dataset):
         self.config = config
         self.logger = setup_logger(name=self.__class__.__name__)
         self.stats_collector = PreprocessingStatsCollector()
-        
+
         # Determine annotation path based on split and anno_type
         if config.split == "test":
             annotation_path = config.annotation_path / "annotation" / f"ego_pose_gt_anno_{config.split}_public.json"
@@ -101,27 +101,27 @@ class AriaKeypointsDataset(Dataset):
 
         pred_floor_height_path = config.annotation_path / "ground_heights.json"
         self.takes_floor_heights = self._load_pred_floor_heights(pred_floor_height_path)
-            
+
         # Load and process annotations
         self.annotations = self._load_annotations(annotation_path)
         self.take_ids = list(self.annotations.keys())
-        
+
         # Pre-process visible joints data for efficient retrieval
         self.processed_joints_data = self._preprocess_joints_data()
-    
+
     def _load_pred_floor_heights(self, path: Path) -> Dict[str, float]:
         """Load predicted floor heights for each take."""
         with open(path) as f:
             return json.load(f)
-        
+
     def _preprocess_joints_data(self) -> Dict[str, Dict[str, np.ndarray]]:
         """Pre-process joints data for all takes for efficient retrieval."""
         processed_data = {}
-        
+
         for take_id, take_data in self.annotations.items():
             jnts = []
             visible_masks = []
-            
+
             all_frames = find_numerical_key_in_dict(take_data)
             # breakpoint()
             for frame_idx in all_frames:
@@ -132,10 +132,10 @@ class AriaKeypointsDataset(Dataset):
 
                 jnts_wrt_egoexo = convert_egoexo4d_to_smplh(joints_3d)
                 valid_mask = ~np.isnan(jnts_wrt_egoexo).any(axis=-1)
-                
+
                 jnts.append(jnts_wrt_egoexo)
                 visible_masks.append(valid_mask)
-            
+
             if jnts:
                 processed_data[take_id] = {
                     "joints": np.stack(jnts, axis=0),
@@ -146,7 +146,7 @@ class AriaKeypointsDataset(Dataset):
 
     def _load_annotations(self, path: Path) -> Dict[str, Any]:
         """Load and validate annotations from JSON file.
-        
+
         References bodypose_dataloader.py load_raw_data() implementation:
         ```python:T_world_root_addition/src/egoallo/egopose/bodypose/bodypose_dataloader.py
         startLine: 98
@@ -155,15 +155,15 @@ class AriaKeypointsDataset(Dataset):
         """
         with open(path) as f:
             raw_annotations = json.load(f)
-            
+
         return raw_annotations
 
     def __len__(self) -> int:
         return len(self.take_ids)
-        
+
     def __getitem__(self, idx: int) -> Dict[str, Any]:
         """Get processed data for a specific take.
-        
+
         References bodypose_dataloader.py implementation:
         ```python:T_world_root_addition/src/egoallo/egopose/bodypose/bodypose_dataloader.py
         startLine: 262
@@ -172,7 +172,7 @@ class AriaKeypointsDataset(Dataset):
         """
         take_id = self.take_ids[idx]
         take_data = self.processed_joints_data[take_id]
-        
+
         return {
             "take_id": take_id,
             "jnts": take_data["joints"],
@@ -188,20 +188,20 @@ def save_results(
     output_path: Path
 ) -> None:
     """Save ground truth and predicted trajectories along with metrics.
-    
+
     Args:
         gt_data: Ground truth trajectory
-        pred_data: Predicted trajectory  
+        pred_data: Predicted trajectory
         metrics: Dictionary of evaluation metrics
         output_path: Path to save results
     """
     # Create output directory
     output_path.mkdir(parents=True, exist_ok=True)
-    
+
     # Save trajectories
     torch.save(gt_data, output_path / "gt_trajectory.pt")
     torch.save(pred_data, output_path / "pred_trajectory.pt")
-    
+
     # Save metrics
     with open(output_path / "metrics.json", "w") as f:
         json.dump(metrics, f, indent=2)
@@ -215,7 +215,7 @@ def main(config: InferenceConfig):
         config=config
     )
     body_model = fncsmpl.SmplhModel.load(config.smplh_model_path).to(config.device)
-    
+
     dataloader = DataLoader(
         dataset,
         batch_size=config.batch_size,
@@ -243,7 +243,7 @@ def main(config: InferenceConfig):
 
             # Adjust ground height for each take in batch
             jnts[..., 2] -= ground_height
-            
+
             # Create placeholder tensors with appropriate shapes
             placeholder_T_world_root = SE3.identity(device=jnts.device, dtype=jnts.dtype).parameters().repeat(batch_size, seq_len, 1)
             placeholder_contacts = torch.zeros(batch_size, seq_len, 2).to(jnts.device)  # 2 feet contacts
@@ -252,7 +252,7 @@ def main(config: InferenceConfig):
             placeholder_T_world_cpf = SE3.identity(device=jnts.device, dtype=jnts.dtype).parameters().repeat(batch_size, seq_len, 1)
             placeholder_hand_quats = torch.zeros(batch_size, seq_len, 30, 4).to(jnts.device)  # 15 joints per hand, 4D quaternions
             placeholder_jnts_wrt_cpf = torch.zeros(batch_size, seq_len, 21, 3).to(jnts.device)
-            
+
             # Create EgoTrainingData instance
             masked_data = EgoTrainingData(
                 T_world_root=placeholder_T_world_root,
@@ -262,7 +262,6 @@ def main(config: InferenceConfig):
                 body_quats=placeholder_body_quats,
                 T_world_cpf=placeholder_T_world_cpf,
                 height_from_floor=placeholder_T_world_cpf[..., 2:3].squeeze(0),  # Z component
-                T_cpf_tm1_cpf_t=placeholder_T_world_cpf[:-1],  # Previous to current transform
                 joints_wrt_cpf=placeholder_jnts_wrt_cpf,  # Use actual joints as placeholder
                 mask=torch.ones(batch_size, seq_len, dtype=torch.bool).to(jnts.device),
                 hand_quats=placeholder_hand_quats,

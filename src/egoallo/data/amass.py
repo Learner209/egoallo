@@ -164,7 +164,7 @@ class EgoAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         assert total_t >= self._subseq_len
 
         # Determine slice indexing.
-        mask = torch.ones(self._subseq_len, dtype=torch.bool)
+        mask = torch.ones((self._subseq_len if self._slice_strategy != "full_sequence" else total_t), dtype=torch.bool)
 
         if self._slice_strategy == "full_sequence":
             start_t, end_t = 0, total_t
@@ -218,7 +218,7 @@ class EgoAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
                 array = v[start_t:end_t]
 
             # Only pad if not using full_sequence
-            if self._slice_strategy != "full_sequence" and array.shape[0] != self._subseq_len:
+            if self._slice_strategy != "full_sequence" and array.shape[0] != self._subseq_len and k != "betas":
                 array = np.concatenate(
                     [
                         array,
@@ -240,16 +240,14 @@ class EgoAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         num_joints = CFG.smplh.num_joints
         device = kwargs["joints_wrt_world"].device
 
-        # breakpoint()
         # Generate random mask for sequence
         num_masked = int(num_joints * self.config.mask_ratio)
         visible_joints_mask = torch.ones((subseq_len, num_joints), dtype=torch.bool, device=device)
-        
+
         # * Randomly select joints to mask, all data within a timestep is masked together, across batch is different.
         rand_indices = torch.randperm(num_joints)
         masked_indices = rand_indices[:num_masked]
         visible_joints_mask[:, masked_indices] = False
-        # breakpoint()
 
         # Get original joints_wrt_world
         joints_wrt_world = kwargs["joints_wrt_world"]  # shape: [time, 22, 3]
@@ -257,7 +255,7 @@ class EgoAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
             assert joints_wrt_world.shape == (self._subseq_len, num_joints, 3), f"Expected shape: {(self._subseq_len, num_joints, 3)}, got: {joints_wrt_world.shape}"
         else:
             assert joints_wrt_world.shape == (total_t, num_joints, 3), f"Expected shape: {(total_t, num_joints, 3)}, got: {joints_wrt_world.shape}"
-        
+
         # Create visible_joints tensor containing only unmasked joints
         # visible_joints = joints_wrt_world[visible_joints_mask].reshape(subseq_len, num_joints - num_masked, 3)
 
@@ -316,7 +314,7 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         """
         # Get all paths from the text file
         all_paths = self.config.dataset_files_path.read_text().splitlines()
-        
+
         # Filter paths that start with any of the split names
         split_prefixes = [split + '/' for split in self.config.train_splits]
         groups = [
@@ -324,10 +322,10 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
             if any(p.startswith(prefix) for prefix in split_prefixes) and
             cast(h5py.Dataset, cast(h5py.Group, hdf5_file[p])["T_world_root"]).shape[0] >= self.min_seq_len
         ]
-        
+
         assert len(groups) > 0, f"No valid groups found for splits: {self.config.train_splits}"
         assert len(cast(h5py.Group, hdf5_file[groups[0]]).keys()) > 0, f"First group {groups[0]} has no keys"
-        
+
         return groups
 
     def _calculate_group_lengths(self, hdf5_file: h5py.File) -> list[int]:
@@ -370,7 +368,6 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         kwargs["mask"] = torch.ones(self._subseq_len, dtype=torch.bool)
 
         # Add MAE-style masking
-        # breakpoint()
         num_joints = CFG.smplh.num_joints
         # assert num_joints == 22, f"Expected 22 joints, got {num_joints}"
         device = kwargs["joints_wrt_world"].device
@@ -378,7 +375,7 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         # Generate random mask for sequence
         num_masked = int(num_joints * self._mask_ratio)
         visible_joints_mask = torch.ones((self._subseq_len, num_joints), dtype=torch.bool, device=device)
-        
+
         # * Randomly select joints to mask, all data within a timestep is masked together, across batch is different.
         rand_indices = torch.randperm(num_joints)
         masked_indices = rand_indices[:num_masked]
@@ -389,11 +386,11 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         assert kwargs["joints_wrt_world"].shape == (self._subseq_len, num_joints-1, 3)
         root_pos = kwargs["T_world_root"][..., 4:7]  # Get translation part [time, 3]
         joints_wrt_world = torch.cat([
-            root_pos.unsqueeze(1),  # Add joint dimension: [time, 1, 3] 
+            root_pos.unsqueeze(1),  # Add joint dimension: [time, 1, 3]
             kwargs["joints_wrt_world"]  # [time, 21, 3]
         ], dim=1)  # Final shape: [time, 22, 3]
         assert joints_wrt_world.shape == (self._subseq_len, num_joints, 3), f"Expected shape: {(self._subseq_len, num_joints, 3)}, got: {joints_wrt_world.shape}"
-        
+
         # Create visible_joints tensor containing only unmasked joints
         visible_joints = joints_wrt_world[visible_joints_mask].reshape(self._subseq_len, num_joints - num_masked, 3)
 

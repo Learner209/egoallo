@@ -29,9 +29,9 @@ def main(
 
     # training_utils.ipdb_safety_net()
     assert torch.cuda.is_available()
-    
+
     task_queue = queue.Queue[Path]()
-    
+
     # Collect all npz files from all input directories
     for data_npz_dir in data_npz_dirs:
         for path in data_npz_dir.glob("**/*.npz"):
@@ -94,18 +94,18 @@ def main(
                 f"{time.time() - start_time} seconds",
             )
 
-    workers = [
-        threading.Thread(target=worker, args=(0,))
-        # for i in range(torch.cuda.device_count())
-        for i in range(25)
-    ]
-    for w in workers:
-        w.start()
-    for w in workers:
-        w.join()
+    # workers = [
+    #     threading.Thread(target=worker, args=(0,))
+    #     # for i in range(torch.cuda.device_count())
+    #     for i in range(25)
+    # ]
+    # for w in workers:
+    #     w.start()
+    # for w in workers:
+    #     w.join()
 
     # Single-threaded version
-    # worker(0)
+    worker(0)
     output_list_file.write_text("\n".join(file_list))
 
 

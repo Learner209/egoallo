@@ -97,23 +97,34 @@ class TensorDataclass:
 
         return _check_shapes_impl(self, other)
 
-    def get_preceding_dims(self) -> dict[str, tuple[int, ...]]:
-        """Return the dimensions of the tensors in the preceding dimensions of the TensorDataclass.
+    def get_batch_size(self) -> int | None:
+        """Get the batch dimension (first dimension) that is consistent across all tensors.
 
         Returns:
-            A dictionary mapping attribute names to their preceding dimensions.
+            int | None: The batch size if tensors exist, None if no tensors found
         """
+        batch_size = None
 
-        def _get_preceding_dims_impl(val: Any) -> tuple[int, ...]:
+        def _get_batch_size_impl(val: Any) -> int | None:
+            nonlocal batch_size
+
             if isinstance(val, torch.Tensor):
-                return val.shape[:-1]
+                if len(val.shape) > 0:  # Skip 0-dim tensors
+                    if batch_size is None:
+                        batch_size = val.shape[0]
+                    elif batch_size != val.shape[0]:
+                        raise ValueError(f"Inconsistent batch sizes found: {batch_size} vs {val.shape[0]}")
+                    return val.shape[0]
             elif isinstance(val, TensorDataclass):
-                return tuple(_get_preceding_dims_impl(v) for v in vars(val).values())
+                for v in vars(val).values():
+                    _get_batch_size_impl(v)
             elif isinstance(val, (list, tuple)):
-                return tuple(_get_preceding_dims_impl(v) for v in val)
+                for v in val:
+                    _get_batch_size_impl(v)
             elif isinstance(val, dict):
-                return tuple(_get_preceding_dims_impl(v) for v in val.values())
-            else:
-                return ()  # Non-tensor attributes have no preceding dimensions
+                for v in val.values():
+                    _get_batch_size_impl(v)
+            return None
 
-        return {k: _get_preceding_dims_impl(v) for k, v in vars(self).items()}
+        _get_batch_size_impl(self)
+        return batch_size

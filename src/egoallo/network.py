@@ -9,7 +9,8 @@ from pathlib import Path
 import numpy as np
 import torch
 from einops import rearrange
-from jaxtyping import Bool, Float, Int
+from jaxtyping import Bool, Float, Int, jaxtyped
+import typeguard
 from loguru import logger
 from rotary_embedding_torch import RotaryEmbedding
 from torch import Tensor, nn
@@ -19,6 +20,7 @@ from .tensor_dataclass import TensorDataclass
 from .transforms import SE3, SO3
 
 from egoallo.config import make_cfg, CONFIG_FILE
+
 local_config_file = CONFIG_FILE
 CFG = make_cfg(config_name="defaults", config_file=local_config_file, cli_args=[])
 
@@ -35,26 +37,27 @@ def project_rotmats_via_svd(
     return torch.einsum("...ij,...jk->...ik", u, vh)
 
 
+@jaxtyped(typechecker=typeguard.typechecked)
 class EgoDenoiseTraj(TensorDataclass):
     """Data structure for denoising with MAE-style masking."""
 
-    betas: Float[Tensor, "*#batch timesteps 16"]
+    betas: Float[Tensor, "*batch timesteps 16"]
     """Body shape parameters. We don't really need the timesteps axis here,
     it's just for convenience."""
 
-    body_rotmats: Float[Tensor, "*#batch timesteps 21 3 3"]
+    body_rotmats: Float[Tensor, "*batch timesteps 21 3 3"]
     """Local orientations for each body joint."""
 
-    contacts: Float[Tensor, "*#batch timesteps 21"]
+    contacts: Float[Tensor, "*batch timesteps 22"]
     """Contact boolean for each joint."""
 
-    hand_rotmats: Float[Tensor, "*#batch timesteps 30 3 3"] | None
+    hand_rotmats: Float[Tensor, "*batch timesteps 30 3 3"] | None
     """Local orientations for each body joint."""
 
-    R_world_root: Float[Tensor, "*#batch timesteps 3 3"]
+    R_world_root: Float[Tensor, "*batch timesteps 3 3"]
     """Global rotation matrix of the root joint."""
 
-    t_world_root: Float[Tensor, "*#batch timesteps 3"]
+    t_world_root: Float[Tensor, "*batch timesteps 3"]
     """Global translation vector of the root joint."""
 
     @staticmethod
@@ -68,7 +71,8 @@ class EgoDenoiseTraj(TensorDataclass):
             Total dimension of packed state vector.
         """
         # 16 (betas) + 21*9 (body_rotmats) + 21 (contacts) + 9 (R_world_root) + 3 (t_world_root)
-        packed_dim = 16 + 21 * 9 + 21 + 9 + 3
+        num_smplh_jnts = CFG.smplh.num_joints
+        packed_dim = 16 + (num_smplh_jnts - 1) * 9 + (num_smplh_jnts) + 9 + 3
         if include_hands:
             packed_dim += 30 * 9  # hand_rotmats
         return packed_dim
@@ -92,7 +96,7 @@ class EgoDenoiseTraj(TensorDataclass):
         )
         return posed
 
-    def pack(self) -> Float[Tensor, "*#batch timesteps d_state"]:
+    def pack(self) -> Float[Tensor, "*batch timesteps d_state"]:
         """Pack trajectory into a single flattened vector."""
         (*batch, time, num_joints, _, _) = self.body_rotmats.shape
         assert num_joints == 21
@@ -114,7 +118,7 @@ class EgoDenoiseTraj(TensorDataclass):
     @classmethod
     def unpack(
         cls,
-        x: Float[Tensor, "*#batch timesteps d_state"],
+        x: Float[Tensor, "*batch timesteps d_state"],
         include_hands: bool,
         project_rotmats: bool = False,
     ) -> EgoDenoiseTraj:
@@ -123,16 +127,40 @@ class EgoDenoiseTraj(TensorDataclass):
         assert d_state == cls.get_packed_dim(include_hands)
 
         if include_hands:
-            betas, body_rotmats_flat, contacts, R_world_root, t_world_root, hand_rotmats_flat = torch.split(
-                x, [16, 21 * 9, 21, 9, 3, 30 * 9], dim=-1
+            (
+                betas,
+                body_rotmats_flat,
+                contacts,
+                R_world_root,
+                t_world_root,
+                hand_rotmats_flat,
+            ) = torch.split(
+                x,
+                [
+                    16,
+                    (CFG.smplh.num_joints - 1) * 9,
+                    CFG.smplh.num_joints,
+                    9,
+                    3,
+                    30 * 9,
+                ],
+                dim=-1,
             )
-            body_rotmats = body_rotmats_flat.reshape((*batch, time, 21, 3, 3))
+            body_rotmats = body_rotmats_flat.reshape(
+                (*batch, time, (CFG.smplh.num_joints - 1), 3, 3)
+            )
             hand_rotmats = hand_rotmats_flat.reshape((*batch, time, 30, 3, 3))
         else:
-            betas, body_rotmats_flat, contacts, R_world_root, t_world_root = torch.split(
-                x, [16, 21 * 9, 21, 9, 3], dim=-1
+            betas, body_rotmats_flat, contacts, R_world_root, t_world_root = (
+                torch.split(
+                    x,
+                    [16, (CFG.smplh.num_joints - 1) * 9, CFG.smplh.num_joints, 9, 3],
+                    dim=-1,
+                )
             )
-            body_rotmats = body_rotmats_flat.reshape((*batch, time, 21, 3, 3))
+            body_rotmats = body_rotmats_flat.reshape(
+                (*batch, time, (CFG.smplh.num_joints - 1), 3, 3)
+            )
             hand_rotmats = None
 
         if project_rotmats:
@@ -151,6 +179,7 @@ class EgoDenoiseTraj(TensorDataclass):
         )
 
 
+@jaxtyped(typechecker=typeguard.typechecked)
 @dataclass
 class EgoDenoiserConfig:
     # Basic parameters
@@ -177,7 +206,9 @@ class EgoDenoiserConfig:
     )
 
     # Joint position conditioning settings
-    joint_cond_mode: Literal["absolute", "absrel_jnts", "absrel", "absrel_global_deltas"] = "absrel"
+    joint_cond_mode: Literal[
+        "absolute", "absrel_jnts", "absrel", "absrel_global_deltas"
+    ] = "absrel"
     joint_emb_dim: int = 256
 
     # Add SMPL-H model path configuration
@@ -189,20 +220,30 @@ class EgoDenoiserConfig:
         num_joints = CFG.smplh.num_joints  # Assuming num_joints is 22
         num_visible_joints = ceil((1 - self.mask_ratio) * num_joints)
 
-        use_make_cond_with_masked_joints = False
+        use_make_cond_with_masked_joints = True
         spatial_dim = 4 if use_make_cond_with_masked_joints else 3
         if self.joint_cond_mode == "absolute":
             # joints_with_vis (22*4) + index_embeddings (22*16) + floor_height (1)
             d_cond = (spatial_dim * num_joints) + (self.joint_emb_dim * num_joints)
         elif self.joint_cond_mode == "absrel_jnts":
             # first_joint (4) + local_coords (21*4) + index_embeddings (22*self.joint_emb_dim) + floor_height (1)
-            d_cond = spatial_dim + (spatial_dim * (num_joints - 1)) + (self.joint_emb_dim * num_joints)
+            d_cond = (
+                spatial_dim
+                + (spatial_dim * (num_joints - 1))
+                + (self.joint_emb_dim * num_joints)
+            )
         elif self.joint_cond_mode == "absrel":
             # abs_pos (22*4) + rel_pos (22*4) + index_embeddings (22*self.joint_emb_dim) + floor_height (1)
-            d_cond = (spatial_dim * num_joints) + (spatial_dim * num_joints) + (self.joint_emb_dim * num_joints)
+            d_cond = (
+                (spatial_dim * num_joints)
+                + (spatial_dim * num_joints)
+                + (self.joint_emb_dim * num_joints)
+            )
         elif self.joint_cond_mode == "absrel_global_deltas":
             # joints_with_vis (22*spatial_dim) + index_embeddings (22*self.joint_emb_dim) + r_mat (9) + t (3) + floor_height (1)
-            d_cond = (spatial_dim * num_joints) + (self.joint_emb_dim * num_joints) + 9 + 3
+            d_cond = (
+                (spatial_dim * num_joints) + (self.joint_emb_dim * num_joints) + 9 + 3
+            )
         else:
             assert_never(self.joint_cond_mode)
 
@@ -229,71 +270,103 @@ class EgoDenoiserConfig:
         device = joints.device
         dtype = joints.dtype
 
-        joint_embeddings = nn.Embedding(CFG.smplh.num_joints, self.joint_emb_dim).to(device)
+        joint_embeddings = nn.Embedding(CFG.smplh.num_joints, self.joint_emb_dim).to(
+            device
+        )
         all_indices = torch.arange(CFG.smplh.num_joints, device=device)
-        index_embeddings = joint_embeddings(all_indices).expand(batch, time, -1, -1)  # (batch, time, 22, 16)
+        index_embeddings = joint_embeddings(all_indices).expand(
+            batch, time, -1, -1
+        )  # (batch, time, 22, 16)
 
         # Create joints with visibility as 4th dimension
-        joints_with_vis = torch.cat([
-            joints,
-            visible_joints_mask.unsqueeze(-1).to(dtype)  # Convert bool to float
-        ], dim=-1)  # shape: (batch, time, num_joints, 4)spatial_dim
+        joints_with_vis = torch.cat(
+            [
+                joints,
+                visible_joints_mask.unsqueeze(-1).to(dtype),  # Convert bool to float
+            ],
+            dim=-1,
+        )  # shape: (batch, time, num_joints, 4)spatial_dim
 
         # Extract floor height from visible joints
         joint_heights = joints[..., 2]  # (batch, time, num_joints)
         masked_heights = torch.where(
             visible_joints_mask,
             joint_heights,
-            torch.ones_like(joint_heights) * float('inf')
+            torch.ones_like(joint_heights) * float("inf"),
         )
         # floor_height = masked_heights.min(dim=-1, keepdim=True)[0]  # (batch, time, 1)
 
         if self.joint_cond_mode == "absolute":
-            cond = torch.cat([
-                joints_with_vis.reshape(batch, time, -1),  # Joint positions with visibility
-                index_embeddings.reshape(batch, time, -1),  # Joint embeddings
-                # floor_height,  # Floor height
-            ], dim=-1)
+            cond = torch.cat(
+                [
+                    joints_with_vis.reshape(
+                        batch, time, -1
+                    ),  # Joint positions with visibility
+                    index_embeddings.reshape(batch, time, -1),  # Joint embeddings
+                    # floor_height,  # Floor height
+                ],
+                dim=-1,
+            )
 
         elif self.joint_cond_mode == "absrel_jnts":
             first_joint = joints_with_vis[..., 0:1, :]
             other_joints = joints_with_vis[..., 1:, :]
-            local_coords = other_joints - first_joint[..., :3].expand_as(other_joints[..., :3])
-            local_coords = torch.cat([
-                local_coords[..., :3],  # Only apply relative transform to xyz
-                other_joints[..., 3:],  # Keep visibility as is
-            ], dim=-1)
+            local_coords = other_joints - first_joint[..., :3].expand_as(
+                other_joints[..., :3]
+            )
+            local_coords = torch.cat(
+                [
+                    local_coords[..., :3],  # Only apply relative transform to xyz
+                    other_joints[..., 3:],  # Keep visibility as is
+                ],
+                dim=-1,
+            )
 
-            cond = torch.cat([
-                first_joint.reshape(batch, time, -1),
-                local_coords.reshape(batch, time, -1),
-                index_embeddings.reshape(batch, time, -1),
-                # floor_height,
-            ], dim=-1)
+            cond = torch.cat(
+                [
+                    first_joint.reshape(batch, time, -1),
+                    local_coords.reshape(batch, time, -1),
+                    index_embeddings.reshape(batch, time, -1),
+                    # floor_height,
+                ],
+                dim=-1,
+            )
 
         elif self.joint_cond_mode == "absrel":
             abs_pos = joints_with_vis
             rel_pos = torch.zeros_like(joints_with_vis)
-            rel_pos[:, 1:, :, :3] = joints_with_vis[:, 1:, :, :3] - joints_with_vis[:, :-1, :, :3]  # Only xyz
+            rel_pos[:, 1:, :, :3] = (
+                joints_with_vis[:, 1:, :, :3] - joints_with_vis[:, :-1, :, :3]
+            )  # Only xyz
             rel_pos[:, :, :, 3] = joints_with_vis[:, :, :, 3]  # Keep visibility as is
+            # breakpoint()
 
-            cond = torch.cat([
-                abs_pos.reshape(batch, time, -1),
-                rel_pos.reshape(batch, time, -1),
-                index_embeddings.reshape(batch, time, -1),
-                # floor_height,
-            ], dim=-1)
+            cond = torch.cat(
+                [
+                    abs_pos.reshape(batch, time, -1),
+                    rel_pos.reshape(batch, time, -1),
+                    index_embeddings.reshape(batch, time, -1),
+                    # floor_height,
+                ],
+                dim=-1,
+            )
 
         elif self.joint_cond_mode == "absrel_global_deltas":
             first_frame = joints_with_vis[:, 0]  # (batch, joints, 4)
             current_frames = joints_with_vis  # (batch, time, joints, 4)
 
             # Calculate centroids using only visible joints for xyz coordinates
-            mask_sum = visible_joints_mask.sum(dim=-1, keepdim=True).unsqueeze(-1)  # (batch, time, 1, 1)
+            mask_sum = visible_joints_mask.sum(dim=-1, keepdim=True).unsqueeze(
+                -1
+            )  # (batch, time, 1, 1)
             mask_sum = torch.clamp(mask_sum, min=1.0)  # Avoid division by zero
 
-            first_centroid = (first_frame[..., :3] * visible_joints_mask[:, 0:1].unsqueeze(-1)).sum(dim=1, keepdim=True) / mask_sum[:, 0:1]
-            current_centroids = (current_frames[..., :3] * visible_joints_mask.unsqueeze(-1)).sum(dim=2, keepdim=True) / mask_sum
+            first_centroid = (
+                first_frame[..., :3] * visible_joints_mask[:, 0:1].unsqueeze(-1)
+            ).sum(dim=1, keepdim=True) / mask_sum[:, 0:1]
+            current_centroids = (
+                current_frames[..., :3] * visible_joints_mask.unsqueeze(-1)
+            ).sum(dim=2, keepdim=True) / mask_sum
 
             first_centered = first_frame[..., :3] - first_centroid
             current_centered = current_frames[..., :3] - current_centroids
@@ -305,19 +378,30 @@ class EgoDenoiserConfig:
             r_mat = Vh.transpose(-2, -1) @ U.transpose(-2, -1)
 
             det = torch.linalg.det(r_mat)
-            reflection_fix = torch.eye(3, device=r_mat.device).unsqueeze(0).unsqueeze(0).expand(batch, time, -1, -1).clone()
+            reflection_fix = (
+                torch.eye(3, device=r_mat.device)
+                .unsqueeze(0)
+                .unsqueeze(0)
+                .expand(batch, time, -1, -1)
+                .clone()
+            )
             reflection_fix[..., 2, 2] = det
             r_mat = r_mat @ reflection_fix
 
-            t = current_centroids.squeeze(2) - torch.einsum('btij,bkj->bti', r_mat, first_centroid)
+            t = current_centroids.squeeze(2) - torch.einsum(
+                "btij,bkj->bti", r_mat, first_centroid
+            )
 
-            cond = torch.cat([
-                joints_with_vis.reshape(batch, time, -1),  # Joints with visibility
-                index_embeddings.reshape(batch, time, -1),  # Joint embeddings
-                r_mat.reshape(batch, time, 9),  # Rotation matrix
-                t.reshape(batch, time, 3),  # Translation
-                # floor_height,  # Floor height
-            ], dim=-1)
+            cond = torch.cat(
+                [
+                    joints_with_vis.reshape(batch, time, -1),  # Joints with visibility
+                    index_embeddings.reshape(batch, time, -1),  # Joint embeddings
+                    r_mat.reshape(batch, time, 9),  # Rotation matrix
+                    t.reshape(batch, time, 3),  # Translation
+                    # floor_height,  # Floor height
+                ],
+                dim=-1,
+            )
 
         else:
             assert_never(self.joint_cond_mode)
@@ -341,44 +425,57 @@ class EgoDenoiserConfig:
         visible_indices = visible_joints_mask.nonzero(as_tuple=True)[-1]
 
         # Create learnable joint index embeddings
-        joint_embeddings = nn.Embedding(CFG.smplh.num_joints, self.joint_emb_dim).to(device)
+        joint_embeddings = nn.Embedding(CFG.smplh.num_joints, self.joint_emb_dim).to(
+            device
+        )
         num_visible_per_frame = visible_jnts.shape[2]
-        index_embeddings = joint_embeddings(visible_indices).reshape(batch, time, num_visible_per_frame, self.joint_emb_dim)
+        index_embeddings = joint_embeddings(visible_indices).reshape(
+            batch, time, num_visible_per_frame, self.joint_emb_dim
+        )
 
         # Extract floor height from visible joints (assuming lowest joint represents floor contact)
         # floor_height = visible_jnts[..., :, 2].min(dim=2, keepdim=True)[0]  # shape: (batch, time, 1)
 
         if self.joint_cond_mode == "absolute":
             # Concatenate positions, index embeddings, and floor height
-            cond = torch.cat([
-                visible_jnts.reshape(batch, time, -1),  # Joint positions
-                index_embeddings.reshape(batch, time, -1),  # Joint embeddings
-                # floor_height,  # Floor height
-            ], dim=-1)
+            cond = torch.cat(
+                [
+                    visible_jnts.reshape(batch, time, -1),  # Joint positions
+                    index_embeddings.reshape(batch, time, -1),  # Joint embeddings
+                    # floor_height,  # Floor height
+                ],
+                dim=-1,
+            )
 
         elif self.joint_cond_mode == "absrel_jnts":
             first_visible_jnt = visible_jnts[..., 0:1, :]
             other_visible_jnts = visible_jnts[..., 1:, :]
             local_coords = other_visible_jnts - first_visible_jnt
 
-            cond = torch.cat([
-                first_visible_jnt.reshape(batch, time, -1),
-                local_coords.reshape(batch, time, -1),
-                index_embeddings.reshape(batch, time, -1),
-                # floor_height,
-            ], dim=-1)
+            cond = torch.cat(
+                [
+                    first_visible_jnt.reshape(batch, time, -1),
+                    local_coords.reshape(batch, time, -1),
+                    index_embeddings.reshape(batch, time, -1),
+                    # floor_height,
+                ],
+                dim=-1,
+            )
 
         elif self.joint_cond_mode == "absrel":
             abs_pos = visible_jnts
             rel_pos = torch.zeros_like(visible_jnts)
             rel_pos[:, 1:] = visible_jnts[:, 1:] - visible_jnts[:, :-1]
 
-            cond = torch.cat([
-                abs_pos.reshape(batch, time, -1),
-                rel_pos.reshape(batch, time, -1),
-                index_embeddings.reshape(batch, time, -1),
-                # floor_height,
-            ], dim=-1)
+            cond = torch.cat(
+                [
+                    abs_pos.reshape(batch, time, -1),
+                    rel_pos.reshape(batch, time, -1),
+                    index_embeddings.reshape(batch, time, -1),
+                    # floor_height,
+                ],
+                dim=-1,
+            )
 
         elif self.joint_cond_mode == "absrel_global_deltas":
             first_frame = visible_jnts[:, 0]
@@ -397,21 +494,31 @@ class EgoDenoiserConfig:
             r_mat = Vh.transpose(-2, -1) @ U.transpose(-2, -1)
 
             det = torch.linalg.det(r_mat)
-            reflection_fix = torch.eye(3, device=r_mat.device).unsqueeze(0).unsqueeze(0).expand(batch, time, -1, -1).clone()
+            reflection_fix = (
+                torch.eye(3, device=r_mat.device)
+                .unsqueeze(0)
+                .unsqueeze(0)
+                .expand(batch, time, -1, -1)
+                .clone()
+            )
             reflection_fix[..., 2, 2] = det
             r_mat = r_mat @ reflection_fix
 
-            t = current_centroids.squeeze(2) - torch.einsum('btij,bkj->bti', r_mat, first_centroid)
+            t = current_centroids.squeeze(2) - torch.einsum(
+                "btij,bkj->bti", r_mat, first_centroid
+            )
 
-            cond = torch.cat([
-                torch.cat([
-                    visible_jnts,
-                    index_embeddings
-                ], dim=-1).reshape(batch, time, -1),
-                r_mat.reshape(batch, time, 9),
-                t.reshape(batch, time, 3),
-                # floor_height,
-            ], dim=-1)
+            cond = torch.cat(
+                [
+                    torch.cat([visible_jnts, index_embeddings], dim=-1).reshape(
+                        batch, time, -1
+                    ),
+                    r_mat.reshape(batch, time, 9),
+                    t.reshape(batch, time, 3),
+                    # floor_height,
+                ],
+                dim=-1,
+            )
 
         else:
             assert_never(self.joint_cond_mode)
@@ -440,8 +547,8 @@ class EgoDenoiser(nn.Module):
         # MLP encoders and decoders for each modality we want to denoise.
         modality_dims: dict[str, int] = {
             "betas": 16,
-            "body_rotmats": 21 * 9,
-            "contacts": 21,
+            "body_rotmats": (CFG.smplh.num_joints - 1) * 9,
+            "contacts": CFG.smplh.num_joints,
             "R_world_root": 9,
             "t_world_root": 3,
         }
@@ -575,15 +682,15 @@ class EgoDenoiser(nn.Module):
         assert noise_emb.shape == (batch, config.d_noise_emb)
 
         # Create conditioning from visible joints only
-        cond = config.make_cond(
-            visible_jnts=joints,
+        # cond = config.make_cond(
+        #     visible_jnts=joints,
+        #     visible_joints_mask=visible_joints_mask,
+        # )
+        # breakpoint()
+        cond = config.make_cond_with_masked_joints(
+            joints=joints,
             visible_joints_mask=visible_joints_mask,
         )
-        # breakpoint()
-        # cond = config.make_cond_with_masked_joints(
-        #     joints = joints,
-        #     visible_joints_mask = visible_joints_mask,
-        # )
 
         # Randomly drop out conditioning information; this serves as a
         # regularizer that aims to improve sample diversity.
@@ -693,19 +800,21 @@ def make_positional_encoding(
 
 
 def fourier_encode(
-    x: Float[Tensor, "*#batch channels"], freqs: int
-) -> Float[Tensor, "*#batch channels+2*freqs*channels"]:
+    x: Float[Tensor, "*batch channels"], freqs: int
+) -> Float[Tensor, "*batch channels+2*freqs*channels"]:
     """Apply Fourier encoding to a tensor."""
     *batch_axes, x_dim = x.shape
-    coeffs = 2.0 ** torch.arange(freqs, device=x.device) # shape: (freqs,)
-    scaled = (x[..., None] * coeffs).reshape((*batch_axes, x_dim * freqs)) # shape: (*batch_axes, x_dim * freqs)
+    coeffs = 2.0 ** torch.arange(freqs, device=x.device)  # shape: (freqs,)
+    scaled = (x[..., None] * coeffs).reshape(
+        (*batch_axes, x_dim * freqs)
+    )  # shape: (*batch_axes, x_dim * freqs)
     return torch.cat(
         [
             x,
             torch.sin(torch.cat([scaled, scaled + torch.pi / 2.0], dim=-1)),
         ],
         dim=-1,
-    ) # shape: (*batch_axes, x_dim + 2 * freqs * x_dim)
+    )  # shape: (*batch_axes, x_dim + 2 * freqs * x_dim)
 
 
 @dataclass(frozen=True)

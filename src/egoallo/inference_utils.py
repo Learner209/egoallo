@@ -188,7 +188,7 @@ def create_masked_training_data(
     mask_ratio: float = 0.3,
 ) -> EgoTrainingData:
     """Create EgoTrainingData with MAE-style masking from posed SMPL-H model.
-    
+
     Args:
         posed: Posed SMPL-H model
         Ts_world_cpf: World to CPF transforms
@@ -199,16 +199,16 @@ def create_masked_training_data(
     device = posed.local_quats.device
     batch_size, timesteps = posed.local_quats.shape[:2]
     num_joints = CFG.smplh.num_joints  # Number of body joints
-    
+
     # Get joint positions in world frame
     root_pos = posed.T_world_root[..., 4:7].unsqueeze(-2) # (batch, timesteps, 1, 3)
     joints_wrt_world = torch.cat([root_pos, posed.Ts_world_joint[..., :num_joints-1, 4:7]], dim=-2) # (batch, timesteps, num_joints, 3)
     # breakpoint()
-    
+
     # Generate random mask for sequence
     num_masked = int(num_joints * mask_ratio)
     visible_joints_mask = torch.ones((batch_size, timesteps, num_joints), dtype=torch.bool, device=device)
-    
+
     # Randomly select joints to mask
     rand_indices = torch.randperm(num_joints)
     masked_indices = rand_indices[:num_masked]
@@ -220,10 +220,10 @@ def create_masked_training_data(
 
     # Get joints in CPF frame
     joints_wrt_cpf = (
-        tf.SE3(Ts_world_cpf[..., None, :]).inverse() 
+        tf.SE3(Ts_world_cpf[..., None, :]).inverse()
         @ joints_wrt_world
    ) # (batch, timesteps, num_joints, 3)
-    
+
     return EgoTrainingData(
         T_world_root=tf.SE3(posed.T_world_root).parameters(),
         contacts=contacts,
@@ -232,9 +232,6 @@ def create_masked_training_data(
         body_quats=posed.local_quats[..., :21, :],
         T_world_cpf=Ts_world_cpf,
         height_from_floor=Ts_world_cpf[..., 6:7],
-        T_cpf_tm1_cpf_t=(
-            tf.SE3(Ts_world_cpf[:-1, :]).inverse() @ tf.SE3(Ts_world_cpf[1:, :])
-        ).parameters(),
         joints_wrt_cpf=joints_wrt_cpf,
         mask=torch.ones((batch_size, timesteps), dtype=torch.bool, device=device),
         hand_quats=posed.local_quats[..., 21:51, :],

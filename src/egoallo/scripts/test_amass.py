@@ -8,6 +8,10 @@ import torch
 import torch.utils.data
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+from jaxtyping import jaxtyped
+import typeguard
+
+# with install_import_hook("egoallo", "typeguard.typechecked"):
 
 from egoallo import fncsmpl, fncsmpl_extensions
 from egoallo.data.amass import AdaptiveAmassHdf5Dataset, EgoAmassHdf5Dataset
@@ -22,6 +26,7 @@ from egoallo.transforms import SE3, SO3
 from egoallo.sampling import run_sampling_with_masked_data, run_sampling_with_stitching
 from egoallo import transforms as tf
 from egoallo.training_utils import ipdb_safety_net
+
 
 logger = setup_logger(output="logs/test", name=__name__)
 
@@ -78,11 +83,13 @@ def save_sequence_data(
         output_path: Path to save sequence data
     """
     # Save in format expected by body_evaluator.py
+    assert batch.check_shapes(traj), f"Shapes of batch and trajectory do not match, shape is {batch.get_batch_size()} against {traj.get_batch_size()}"
+
     torch.save({
         # Ground truth data
         "groundtruth_betas": batch.betas[seq_idx, :].cpu(),
         "groundtruth_T_world_root": batch.T_world_root[seq_idx, :].cpu(),
-        "groundtruth_body_quats": batch.body_quats[seq_idx, :].cpu(),
+        "groundtruth_body_quats": batch.body_quats[seq_idx, ..., :21, :].cpu(),
 
         # Sampled/predicted data
         "sampled_betas": traj.betas[0].cpu(),
@@ -93,31 +100,27 @@ def save_sequence_data(
 
     logger.info(f"Saved sequence to {output_path}")
 
-def prepare_tensors(batch, seq_idx, device):
+def prepare_tensors(batch: EgoTrainingData, seq_idx: int, device: torch.device) -> Dict[str, torch.Tensor]:
     """Prepare input tensors with consistent shapes."""
     # Add batch dimension and move to device
-    get_tensor = lambda x: x[seq_idx].to(device) if x is not None else None
+    get_tensor = lambda x: x[seq_idx:seq_idx+1].to(device) if x is not None else None
 
     return {
-            'Ts_world_cpf': get_tensor(batch.T_world_cpf), # shape: (1, timesteps, 7)
-            'Ts_world_root': get_tensor(batch.T_world_root), # shape: (1, 7)
-            'body_quats': get_tensor(batch.body_quats), # shape: (1, timesteps, 21, 4)
-            'hand_quats': get_tensor(batch.hand_quats) if batch.hand_quats is not None else None, # shape: (1, timesteps, 30, 4)
-            'contacts': get_tensor(batch.contacts), # shape: (1, timesteps, 21)
-            'betas': get_tensor(batch.betas) # shape: (1, 1, 16)
+        'Ts_world_cpf': get_tensor(batch.T_world_cpf), # shape: (1, timesteps, 7)
+        'Ts_world_root': get_tensor(batch.T_world_root), # shape: (1, 7)
+        'body_quats': get_tensor(batch.body_quats), # shape: (1, timesteps, 21, 4)
+        'hand_quats': get_tensor(batch.hand_quats) if batch.hand_quats is not None else None, # shape: (1, timesteps, 30, 4)
+        'contacts': get_tensor(batch.contacts), # shape: (1, timesteps, 21)
+        'betas': get_tensor(batch.betas) # shape: (1, 1, 16)
     }
 
-def create_ego_data(tensors, posed_model, device, is_gt=True):
+def create_ego_data(tensors: Dict[str, torch.Tensor], posed_model: fncsmpl.SmplhShapedAndPosed, device: torch.device, is_gt: bool = True) -> EgoTrainingData:
     """Factory method to create EgoTrainingData instances."""
     # Get base tensors
     Ts_world_cpf = tensors['Ts_world_cpf']
     T_world_root = tensors['Ts_world_root'] if is_gt else tensors['T_world_root']
 
-    # Create transform matrices
-    T_cpf_tm1_cpf_t = (
-        tf.SE3(Ts_world_cpf[:-1, :]).inverse() @ tf.SE3(Ts_world_cpf[1:, :])
-    ).parameters()
-
+    # breakpoint()
     joints_wrt_cpf = (
         tf.SE3(Ts_world_cpf[1:, None, :]).inverse()
         @ posed_model.Ts_world_joint[1:, :21, 4:7].to(device)
@@ -131,30 +134,29 @@ def create_ego_data(tensors, posed_model, device, is_gt=True):
         body_quats=tensors['body_quats'].cpu(),
         T_world_cpf=Ts_world_cpf.cpu(),
         height_from_floor=Ts_world_cpf[..., 6:7].cpu(),
-        T_cpf_tm1_cpf_t=T_cpf_tm1_cpf_t.cpu(),
         joints_wrt_cpf=joints_wrt_cpf,
         mask=torch.ones_like(tensors['contacts'], dtype=torch.bool),
         hand_quats=tensors.get('hand_quats', None),
         visible_joints_mask=None
     )
 
-def process_sequence(batch, seq_idx, denoiser_network, body_model, device, inference_config, model_config):
+def process_sequence(batch: EgoTrainingData, seq_idx: int, denoiser_network: EgoDenoiser, body_model: fncsmpl.SmplhModel, device: torch.device, inference_config: InferenceConfig, model_config: EgoDenoiserConfig) -> Tuple[EgoTrainingData, EgoDenoiseTraj, EgoTrainingData]:
     """Process sequence with simplified tensor handling."""
     # Prepare input tensors
-    tensors = prepare_tensors(batch, seq_idx, device)
+    # tensors = prepare_tensors(batch, seq_idx, device)
 
-    # Create posed data
-    local_quats = torch.cat([
-        tensors['body_quats'],
-        tensors['hand_quats'],
-    ], dim=-2)
+    # # Create posed data
+    # local_quats = torch.cat([
+    #     tensors['body_quats'],
+    #     tensors['hand_quats'],
+    # ], dim=-2)
 
-    posed = body_model.with_shape(tensors['betas'].mean(dim=0)).with_pose(
-        tensors['Ts_world_root'], local_quats
-    )
+    # posed = body_model.with_shape(tensors['betas'].mean(dim=0)).with_pose(
+    #     tensors['Ts_world_root'], local_quats
+    # )
 
     # Create ground truth data
-    gt_ego_data = create_ego_data(tensors, posed, device)
+    gt_ego_data = batch
 
     # Create masked training data
     # masked_data = create_masked_training_data(
@@ -176,36 +178,38 @@ def process_sequence(batch, seq_idx, denoiser_network, body_model, device, infer
     ).to(device)
 
     # Prepare denoised tensors
-    denoised_tensors = {
-        'T_world_root': SE3.from_rotation_and_translation(
-            SO3.from_matrix(denoised_traj.R_world_root),
-            denoised_traj.t_world_root
-        ).parameters(),
-        'contacts': denoised_traj.contacts,
-        'betas': denoised_traj.betas,
-        'body_quats': SO3.from_matrix(denoised_traj.body_rotmats).wxyz,
-        'Ts_world_cpf': tensors['Ts_world_cpf'],
-        'left_hand_quats': SO3.from_matrix(denoised_traj.hand_rotmats).wxyz[:, :15, :],
-        'right_hand_quats': SO3.from_matrix(denoised_traj.hand_rotmats).wxyz[:, 15:30, :]
-    }
+    # denoised_tensors = {
+    #     'T_world_root': SE3.from_rotation_and_translation(
+    #         SO3.from_matrix(denoised_traj.R_world_root),
+    #         denoised_traj.t_world_root
+    #     ).parameters(),
+    #     'contacts': denoised_traj.contacts,
+    #     'betas': denoised_traj.betas,
+    #     'body_quats': SO3.from_matrix(denoised_traj.body_rotmats).wxyz,
+    #     'Ts_world_cpf': gt_ego_data.Ts_world_cpf['Ts_world_cpf'],
+    #     'left_hand_quats': SO3.from_matrix(denoised_traj.hand_rotmats).wxyz[:, :15, :],
+    #     'right_hand_quats': SO3.from_matrix(denoised_traj.hand_rotmats).wxyz[:, 15:30, :]
+    # }
 
-    # Create final posed model
-    shaped = body_model.with_shape(denoised_tensors['betas'].mean(dim=0))
-    fk_outputs = shaped.with_pose_decomposed(
-        T_world_root=denoised_tensors['T_world_root'],
-        body_quats=denoised_tensors['body_quats'],
-        left_hand_quats=denoised_tensors['left_hand_quats'],
-        right_hand_quats=denoised_tensors['right_hand_quats']
-    )
+    # # Create final posed model
+    # shaped = body_model.with_shape(denoised_tensors['betas'].mean(dim=0))
+    # fk_outputs = shaped.with_pose_decomposed(
+    #     T_world_root=denoised_tensors['T_world_root'],
+    #     body_quats=denoised_tensors['body_quats'],
+    #     left_hand_quats=denoised_tensors['left_hand_quats'],
+    #     right_hand_quats=denoised_tensors['right_hand_quats']
+    # )
 
-    denoised_tensors['Ts_world_cpf'] = fncsmpl_extensions.get_T_world_cpf_from_root_pose(
-        fk_outputs, denoised_tensors['T_world_root']
-    )
+    # denoised_tensors['Ts_world_cpf'] = fncsmpl_extensions.get_T_world_cpf_from_root_pose(
+    #     fk_outputs, denoised_tensors['T_world_root']
+    # )
+    # # breakpoint()
 
     # Create denoised ego data
-    denoised_ego_data = create_ego_data(denoised_tensors, fk_outputs, device, is_gt=False)
+    # denoised_ego_data = create_ego_data(denoised_tensors, fk_outputs, device, is_gt=False)
 
-    return gt_ego_data, denoised_traj, denoised_ego_data
+    # TODO: return gt_ego_data for denoised-traj just for debuggin right now.
+    return gt_ego_data, denoised_traj, gt_ego_data
 
 def main(inference_config: InferenceConfig) -> None:
     device = torch.device(inference_config.device)
@@ -223,7 +227,7 @@ def main(inference_config: InferenceConfig) -> None:
             test_dataset,
             batch_size=1,
             shuffle=False,
-            num_workers=1,
+            num_workers=0,
             collate_fn=collate_dataclass,
             drop_last=False
         )
