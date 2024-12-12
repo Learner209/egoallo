@@ -23,7 +23,6 @@ dependencies = [
     "rotary-embedding-torch",
     "h5py",
     "tensorboard",
-    "projectaria_tools",
     "accelerate",
     "tensorboardX",
     "loguru",
