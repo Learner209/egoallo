@@ -5,7 +5,6 @@ import torch
 import torch.utils.data
 import typeguard
 from jaxtyping import Bool, Float, jaxtyped, Array
-from beartype import beartype
 from torch import Tensor
 
 from .. import fncsmpl, fncsmpl_extensions

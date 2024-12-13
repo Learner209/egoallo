@@ -22,6 +22,8 @@ from egoallo.fncsmpl import (
     SmplMesh,
 )
 
+from typing import TYPE_CHECKING
+
 if TYPE_CHECKING:
     from egoallo.data.dataclass import EgoTrainingData
     from egoallo.fncsmpl import SmplhModel
@@ -34,7 +36,6 @@ sys.path.append(str(Path(__file__).parent.parent.parent.parent))
 
 
 import time
-from typing import TYPE_CHECKING
 
 from egoallo.fncsmpl import SmplhShapedAndPosed, SmplMesh
 
