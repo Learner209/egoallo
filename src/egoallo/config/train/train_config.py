@@ -3,15 +3,19 @@ from typing import Literal
 import dataclasses
 from egoallo import network, training_loss
 
+
 @dataclasses.dataclass
 class EgoAlloTrainConfig:
     experiment_name: str = "motion_prior"
+    experiment_dir: Path = Path("")
     dataset_hdf5_path: Path = Path("data/egoalgo_no_skating_dataset.hdf5")
     dataset_files_path: Path = Path("data/egoalgo_no_skating_dataset_files.txt")
     smplh_npz_path: Path = Path("./data/smplh/neutral/model.npz")
 
     mask_ratio: float = 0.75
-    joint_cond_mode: Literal["absolute", "absrel_jnts", "absrel", "absrel_global_deltas"] = "absrel"
+    joint_cond_mode: Literal[
+        "absolute", "absrel_jnts", "absrel", "absrel_global_deltas"
+    ] = "absrel"
 
     model: network.EgoDenoiserConfig = dataclasses.field(init=False)
     loss: training_loss.TrainingLossConfig = training_loss.TrainingLossConfig()
@@ -27,8 +31,8 @@ class EgoAlloTrainConfig:
     dataset_slice_random_variable_len_proportion: float = 0.3
     """Only used if dataset_slice_strategy == 'random_variable_len'."""
     train_splits: tuple[Literal["train", "val", "test", "just_humaneva"], ...] = (
-        "train", 
-        "val"
+        "train",
+        "val",
     )
 
     # Optimizer options.
@@ -44,5 +48,5 @@ class EgoAlloTrainConfig:
         self.model = network.EgoDenoiserConfig(
             mask_ratio=self.mask_ratio,
             joint_cond_mode=self.joint_cond_mode,
-            smplh_npz_path=self.smplh_npz_path
+            smplh_npz_path=self.smplh_npz_path,
         )

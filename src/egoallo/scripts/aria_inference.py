@@ -5,7 +5,8 @@ import time
 from pathlib import Path
 
 import os
-os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"]="false"
+
+os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 
 import numpy as np
 import torch
@@ -28,23 +29,29 @@ from egoallo.sampling import run_sampling_with_stitching
 from egoallo.transforms import SE3, SO3
 from egoallo.vis_helpers import visualize_traj_and_hand_detections
 from egoallo.training_utils import ipdb_safety_net
-from egoallo.config.inference_config import InferenceConfig
+from egoallo.config.inference.inference_defaults import InferenceConfig
+
 
 def main(config: InferenceConfig) -> None:
-
     if config.use_ipdb:
-        import ipdb; ipdb.set_trace()
+        import ipdb
+
+        ipdb.set_trace()
 
     device = torch.device("cuda")
 
     config.output_dir.mkdir(parents=True, exist_ok=True)
-    traj_paths = InferenceTrajectoryPaths.find(config.traj_root, config.output_dir, soft_link=False)
+    traj_paths = InferenceTrajectoryPaths.find(
+        config.traj_root, config.output_dir, soft_link=False
+    )
     if traj_paths.splat_path is not None:
         print("Found splat at", traj_paths.splat_path)
     else:
         print("No scene splat found.")
     # Get point cloud + floor.
-    points_data, floor_z = load_point_cloud_and_find_ground(points_path=traj_paths.points_path)
+    points_data, floor_z = load_point_cloud_and_find_ground(
+        points_path=traj_paths.points_path
+    )
 
     # Read transforms from VRS / MPS, downsampled.
     transforms = InferenceInputTransforms.load(
@@ -146,7 +153,9 @@ def main(config: InferenceConfig) -> None:
             right_hand_quats=posed.local_quats[..., 36:51, :].numpy(force=True),
             contacts=traj.contacts.numpy(force=True),  # Sometimes we forgot this...
             betas=traj.betas.numpy(force=True),
-            frame_nums=np.arange(config.start_index, config.start_index + config.traj_length),
+            frame_nums=np.arange(
+                config.start_index, config.start_index + config.traj_length
+            ),
             timestamps_ns=(np.array(pose_timestamps_sec) * 1e9).astype(np.int64),
         )
         print("saved!")
@@ -171,6 +180,7 @@ def main(config: InferenceConfig) -> None:
 
 if __name__ == "__main__":
     import tyro
+
     ipdb_safety_net()
 
     main(tyro.cli(InferenceConfig))

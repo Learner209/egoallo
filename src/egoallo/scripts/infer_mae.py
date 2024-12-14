@@ -9,11 +9,15 @@ from egoallo.data.dataclass import EgoTrainingData
 from egoallo.inference_utils import (
     create_masked_training_data,
     load_denoiser,
-    EgoDenoiseTraj
+    EgoDenoiseTraj,
 )
 from egoallo import fncsmpl
 from egoallo.vis_helpers import visualize_traj_and_hand_detections
-from egoallo.sampling import CosineNoiseScheduleConstants, quadratic_ts
+from egoallo.sampling import (
+    CosineNoiseScheduleConstants,
+    quadratic_ts,
+    run_sampling_with_masked_data,
+)
 import time
 from egoallo import fncsmpl_extensions
 
@@ -51,9 +55,13 @@ logger = setup_logger(output=None, name=__name__)
 
 @dataclasses.dataclass
 class Args:
-    npz_path: Path = Path("./egoallo_example_trajectories/coffeemachine/egoallo_outputs/20240929-011937_10-522.npz")
+    npz_path: Path = Path(
+        "./egoallo_example_trajectories/coffeemachine/egoallo_outputs/20240929-011937_10-522.npz"
+    )
     """Path to the input trajectory."""
-    checkpoint_dir: Path = Path("/mnt/homes/minghao/src/robotflow/egoallo/experiments/predict_T_world_root/v7/checkpoints_15000")
+    checkpoint_dir: Path = Path(
+        "/mnt/homes/minghao/src/robotflow/egoallo/experiments/predict_T_world_root/v7/checkpoints_15000"
+    )
     """Path to the checkpoint directory."""
     smplh_npz_path: Path = Path("./data/smplh/neutral/model.npz")
     """Path to the SMPLH model."""
@@ -74,148 +82,6 @@ class Args:
     mask_ratio: float = 0.75
     """Ratio of joints to mask."""
 
-
-def run_sampling_with_masked_data(
-    denoiser_network: network.EgoDenoiser,
-    body_model: fncsmpl.SmplhModel,
-    masked_data: EgoTrainingData,
-    guidance_mode: GuidanceMode,
-    guidance_post: bool,
-    guidance_inner: bool,
-    floor_z: float,
-    hamer_detections: None | CorrespondedHamerDetections,
-    aria_detections: None | CorrespondedAriaHandWristPoseDetections,
-    num_samples: int,
-    device: torch.device,
-) -> network.EgoDenoiseTraj:
-
-    noise_constants = CosineNoiseScheduleConstants.compute(timesteps=1000).to(device=device)
-    alpha_bar_t = noise_constants.alpha_bar_t
-    alpha_t = noise_constants.alpha_t
-
-    # Initialize noise with proper shape
-    # import ipdb; ipdb.set_trace()
-    x_t_packed = torch.randn(
-        (num_samples, masked_data.joints_wrt_world.shape[1], denoiser_network.get_d_state()),
-        device=device,
-    )
-    x_t_list = [
-        network.EgoDenoiseTraj.unpack(
-            x_t_packed, include_hands=denoiser_network.config.include_hands
-        )
-    ]
-    ts = quadratic_ts()
-
-    seq_len = x_t_packed.shape[1]
-    window_size = 128
-    overlap_size = 32
-
-    # Create overlap weights for windowed processing
-    canonical_overlap_weights = torch.from_numpy(
-        np.minimum(
-            overlap_size,
-            np.minimum(
-                np.arange(1, seq_len + 1),
-                np.arange(1, seq_len + 1)[::-1],
-            ),
-        )
-        / overlap_size,
-    ).to(device).to(torch.float32)
-
-    for i in tqdm(range(len(ts) - 1)):
-        t = ts[i]
-        t_next = ts[i + 1]
-
-        with torch.inference_mode():
-            x_0_packed_pred = torch.zeros_like(x_t_packed)
-            overlap_weights = torch.zeros((1, seq_len, 1), device=x_t_packed.device)
-
-            # Process each window
-            for start_t in range(0, seq_len, window_size - overlap_size):
-                end_t = min(start_t + window_size, seq_len)
-                overlap_weights_slice = canonical_overlap_weights[None, :end_t - start_t, None]
-                overlap_weights[:, start_t:end_t, :] += overlap_weights_slice
-
-                # Forward pass with conditioning from masked data
-                x_0_packed_pred[:, start_t:end_t, :] += denoiser_network.forward(
-                    x_t_packed=x_t_packed[:, start_t:end_t, :],
-                    t=torch.tensor([t], device=device).expand((num_samples,)).float(),
-                    joints=masked_data.joints_wrt_world[:, start_t:end_t, :],
-                    visible_joints_mask=masked_data.visible_joints_mask[:, start_t:end_t, :],
-                    project_output_rotmats=False,
-                    mask=masked_data.mask[:, start_t:end_t],
-                ) * overlap_weights_slice
-
-            # Average overlapping regions
-            x_0_packed_pred /= overlap_weights
-
-            x_0_pred = network.EgoDenoiseTraj.unpack(
-                x_0_packed_pred,
-                include_hands=denoiser_network.config.include_hands,
-                project_rotmats=True,
-            )
-
-        # Apply guidance if needed
-        if guidance_mode != "off" and guidance_inner:
-            x_0_pred, _ = do_guidance_optimization(
-                T_world_root=SE3.from_rotation_and_translation(
-                    SO3.from_matrix(x_0_pred.R_world_root),
-                    x_0_pred.t_world_root
-                ).parameters().squeeze(0),
-                traj=x_0_pred,
-                body_model=body_model,
-                guidance_mode=guidance_mode,
-                phase="inner",
-                hamer_detections=hamer_detections,
-                aria_detections=aria_detections,
-            )
-        x_0_packed_pred = x_0_pred.pack()
-
-        if torch.any(torch.isnan(x_0_packed_pred)):
-            print("found nan", i)
-        sigma_t = torch.cat(
-            [
-                torch.zeros((1,), device=device),
-                torch.sqrt(
-                    (1.0 - alpha_bar_t[:-1]) / (1 - alpha_bar_t[1:]) * (1 - alpha_t)
-                )
-                * 0.8,
-            ]
-        )
-        # Update x_t using noise schedule
-        x_t_packed = (
-            torch.sqrt(alpha_bar_t[t_next]) * x_0_packed_pred
-            + (
-                torch.sqrt(1 - alpha_bar_t[t_next] - sigma_t[t] ** 2)
-                * (x_t_packed - torch.sqrt(alpha_bar_t[t]) * x_0_packed_pred)
-                / torch.sqrt(1 - alpha_bar_t[t] + 1e-1)
-            )
-            + sigma_t[t] * torch.randn_like(x_0_packed_pred)
-        )
-        x_t_list.append(
-            network.EgoDenoiseTraj.unpack(
-                x_t_packed, include_hands=denoiser_network.config.include_hands, project_rotmats=True
-            )
-        )
-
-    # Final guidance optimization if needed
-    if guidance_mode != "off" and guidance_post:
-        constrained_traj = x_t_list[-1]
-        constrained_traj, _ = do_guidance_optimization(
-            T_world_root=SE3.from_rotation_and_translation(
-                SO3.from_matrix(constrained_traj.R_world_root),
-                constrained_traj.t_world_root
-            ).parameters().squeeze(0),
-            traj=constrained_traj,
-            body_model=body_model,
-            guidance_mode=guidance_mode,
-            phase="post",
-            hamer_detections=hamer_detections,
-            aria_detections=aria_detections,
-        )
-        return constrained_traj
-    else:
-        return x_t_list[-1]
 
 def calculate_metrics(
     original_posed: fncsmpl.SmplhShapedAndPosed,
@@ -239,23 +105,40 @@ def calculate_metrics(
 
     # 1. T_world_root error
     # Translation error
-    trans_error = torch.norm(
-        original_posed.T_world_root[..., 4:7] -
-        inferred_posed.T_world_root[..., 4:7],
-        dim=-1
-    ).mean().item()
+    trans_error = (
+        torch.norm(
+            original_posed.T_world_root[..., 4:7]
+            - inferred_posed.T_world_root[..., 4:7],
+            dim=-1,
+        )
+        .mean()
+        .item()
+    )
 
     # Rotation error (geodesic distance)
     R1 = original_posed.T_world_root[..., :4]  # quaternions
     R2 = inferred_posed.T_world_root[..., :4]
-    rot_error = torch.arccos(
-        torch.abs(torch.sum(R1 * R2, dim=-1)).clamp(-1, 1)
-    ).mean().item() * 2.0  # multiply by 2 for full rotation distance
+    rot_error = (
+        torch.arccos(torch.abs(torch.sum(R1 * R2, dim=-1)).clamp(-1, 1)).mean().item()
+        * 2.0
+    )  # multiply by 2 for full rotation distance
 
     # 2. Joint position errors
     # Get original and inferred joint positions
-    orig_joints = torch.cat([original_posed.T_world_root[..., 4:7].unsqueeze(-2), original_posed.Ts_world_joint[..., :CFG.smplh.num_joints-1, 4:7]], dim=-2)
-    infer_joints = torch.cat([inferred_posed.T_world_root[..., 4:7].unsqueeze(-2), inferred_posed.Ts_world_joint[..., :CFG.smplh.num_joints-1, 4:7]], dim=-2)
+    orig_joints = torch.cat(
+        [
+            original_posed.T_world_root[..., 4:7].unsqueeze(-2),
+            original_posed.Ts_world_joint[..., : CFG.smplh.num_joints - 1, 4:7],
+        ],
+        dim=-2,
+    )
+    infer_joints = torch.cat(
+        [
+            inferred_posed.T_world_root[..., 4:7].unsqueeze(-2),
+            inferred_posed.Ts_world_joint[..., : CFG.smplh.num_joints - 1, 4:7],
+        ],
+        dim=-2,
+    )
 
     # Calculate per-joint errors
     joint_errors = torch.norm(orig_joints - infer_joints, dim=-1)  # [B, T, J]
@@ -273,14 +156,14 @@ def calculate_metrics(
         "translation_error_meters": trans_error,
         "rotation_error_radians": rot_error,
         "unmasked_mpjpe_mm": unmasked_mpjpe,
-        "masked_mpjpe_mm": masked_mpjpe
+        "masked_mpjpe_mm": masked_mpjpe,
     }
+
 
 def main(
     config: Args,
     device: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu"),
 ) -> network.EgoDenoiseTraj:
-
     # Load data and models
     traj_data = np.load(config.npz_path)
     body_model = fncsmpl.SmplhModel.load(config.smplh_npz_path).to(device)
@@ -289,13 +172,13 @@ def main(
     # Prepare input tensors
     # import ipdb; ipdb.set_trace()
 
-    Ts_world_cpf = torch.from_numpy(traj_data['Ts_world_cpf']).to(device)
-    Ts_world_root = torch.from_numpy(traj_data['Ts_world_root']).to(device)
-    body_quats = torch.from_numpy(traj_data['body_quats']).to(device)
-    left_hand_quats = torch.from_numpy(traj_data['left_hand_quats']).to(device)
-    right_hand_quats = torch.from_numpy(traj_data['right_hand_quats']).to(device)
-    contacts = torch.from_numpy(traj_data['contacts']).to(device)
-    betas = torch.from_numpy(traj_data['betas']).to(device)
+    Ts_world_cpf = torch.from_numpy(traj_data.Ts_world_cpf).to(device)
+    Ts_world_root = torch.from_numpy(traj_data.Ts_world_root).to(device)
+    body_quats = torch.from_numpy(traj_data.body_quats).to(device)
+    left_hand_quats = torch.from_numpy(traj_data.left_hand_quats).to(device)
+    right_hand_quats = torch.from_numpy(traj_data.right_hand_quats).to(device)
+    contacts = torch.from_numpy(traj_data.contacts).to(device)
+    betas = torch.from_numpy(traj_data.betas).to(device)
 
     # Create posed data
     local_quats = torch.cat([body_quats, left_hand_quats, right_hand_quats], dim=-2)
@@ -304,11 +187,8 @@ def main(
 
     # Create masked training data
     masked_data = create_masked_training_data(
-            posed=posed,
-            Ts_world_cpf=Ts_world_cpf,
-            contacts=contacts,
-            betas=betas,
-            mask_ratio=config.mask_ratio
+        data=data
+        mask_ratio=config.mask_ratio,
     )
 
     # Run sampling with masked data
@@ -355,14 +235,19 @@ def main(
         left_hand_quats=left_hand_quats,
         right_hand_quats=right_hand_quats,
     )
-    T_world_cpf = fncsmpl_extensions.get_T_world_cpf_from_root_pose(fk_outputs, T_world_root)
+    T_world_cpf = fncsmpl_extensions.get_T_world_cpf_from_root_pose(
+        fk_outputs, T_world_root
+    )
 
     denoised_ego_data = EgoTrainingData(
         T_world_root=T_world_root.squeeze(0).cpu(),
         contacts=denoised_traj.contacts.squeeze(0).cpu(),
         betas=denoised_traj.betas.squeeze(0).cpu(),
         joints_wrt_world=fk_outputs.Ts_world_joint.squeeze(0).cpu(),
-        body_quats=SO3.from_matrix(denoised_traj.body_rotmats).wxyz.cpu()[:, :, :21, :].cpu().squeeze(0), #denoised_traj.body_quats.cpu(),
+        body_quats=SO3.from_matrix(denoised_traj.body_rotmats)
+        .wxyz.cpu()[:, :, :21, :]
+        .cpu()
+        .squeeze(0),  # denoised_traj.body_quats.cpu(),
         T_world_cpf=T_world_cpf.cpu().squeeze(0),
         height_from_floor=T_world_cpf[..., 6:7].cpu().squeeze(0),
         joints_wrt_cpf=(
@@ -386,20 +271,22 @@ def main(
         height_from_floor=Ts_world_cpf[..., 6:7].squeeze(0).cpu(),
         joints_wrt_cpf=(
             # unsqueeze so both shapes are (timesteps, joints, dim)
-        tf.SE3(Ts_world_cpf[1:, None, :]).inverse() @ posed.Ts_world_joint[0, 1:, :21, 4:7].to(Ts_world_cpf.device)
+            tf.SE3(Ts_world_cpf[1:, None, :]).inverse()
+            @ posed.Ts_world_joint[0, 1:, :21, 4:7].to(Ts_world_cpf.device)
         ),
         mask=torch.ones_like(contacts[0, :], dtype=torch.bool),
-        hand_quats=torch.cat([left_hand_quats, right_hand_quats], dim=-2).squeeze(0).cpu(),
+        hand_quats=torch.cat([left_hand_quats, right_hand_quats], dim=-2)
+        .squeeze(0)
+        .cpu(),
         visible_joints_mask=None,
     )
-
 
     # Calculate metrics between original and inferred trajectories
     metrics = calculate_metrics(
         original_posed=posed,
         denoised_traj=denoised_traj,
         masked_data=masked_data,
-        body_model=body_model
+        body_model=body_model,
     )
     # Print metrics
     print("\nTrajectory Metrics:")
@@ -407,8 +294,6 @@ def main(
     print(f"Rotation Error: {metrics['rotation_error_radians']:.3f} radians")
     print(f"Unmasked Joints MPJPE: {metrics['unmasked_mpjpe_mm']:.1f} mm")
     print(f"Masked Joints MPJPE: {metrics['masked_mpjpe_mm']:.1f} mm")
-
-
 
     # import ipdb; ipdb.set_trace()
 
@@ -471,21 +356,14 @@ def main(
 
         # Save GT and inferred trajectories to separate files
         EgoTrainingData.visualize_ego_training_data(
-            gt_ego_data,
-            body_model,
-            output_path=str(gt_output_path)
+            gt_ego_data, body_model, output_path=str(gt_output_path)
         )
         EgoTrainingData.visualize_ego_training_data(
-            denoised_ego_data,
-            body_model,
-            output_path=str(inferred_output_path)
+            denoised_ego_data, body_model, output_path=str(inferred_output_path)
         )
 
         print(f"Saved ground truth video to: {gt_output_path}")
         print(f"Saved inferred video to: {inferred_output_path}")
-
-
-
 
 
 if __name__ == "__main__":

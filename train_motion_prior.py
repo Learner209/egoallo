@@ -2,6 +2,8 @@
 
 import os
 
+from torch._dynamo import eval_frame
+
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
@@ -34,6 +36,10 @@ from egoallo.config.train.train_config import EgoAlloTrainConfig
 
 import wandb
 import datetime
+import tempfile
+from egoallo.config.inference.inference_defaults import InferenceConfig
+from egoallo.scripts.test_amass import TestRunner
+import json
 
 
 def get_experiment_dir(experiment_name: str, version: int = 0) -> Path:
@@ -64,6 +70,7 @@ def run_training(
     # and just use `accelerate` for distibuted training.
     experiment_dir = get_experiment_dir(config.experiment_name)
     assert not experiment_dir.exists()
+    config.experiment_dir = experiment_dir
     accelerator = Accelerator(
         project_config=ProjectConfiguration(project_dir=str(experiment_dir)),
         dataloader_config=DataLoaderConfiguration(split_batches=True),
@@ -113,6 +120,7 @@ def run_training(
 
     # Setup.
     model = network.EgoDenoiser(config.model)
+
     train_loader = torch.utils.data.DataLoader(
         # dataset=AdaptiveAmassHdf5Dataset(config=config),
         dataset=EgoAmassHdf5Dataset(config=config, cache_files=True),
@@ -124,7 +132,7 @@ def run_training(
         collate_fn=collate_dataclass,
         drop_last=True,
     )
-    # breakpoint()
+
     optim = torch.optim.AdamW(  # type: ignore
         model.parameters(),
         lr=config.learning_rate,
@@ -216,7 +224,7 @@ def run_training(
             if not accelerator.is_main_process:
                 continue
 
-            if step % 100 == 0 and accelerator.is_main_process:
+            if step % 200 == 0 and accelerator.is_main_process:
                 mem_free, mem_total = torch.cuda.mem_get_info()
                 epoch_time = time.time() - epoch_start_time
                 # Build base log message with metrics
@@ -248,35 +256,55 @@ def run_training(
 
                 logger.info(log_msg)
 
-            log_ckpt_step = 3000
-            if step % log_ckpt_step == 0:
-                # Save checkpoint.
-                checkpoint_path = experiment_dir / f"checkpoints_{step}"
-                accelerator.save_state(str(checkpoint_path))
-                logger.info(f"Saved checkpoint to {checkpoint_path}")
-
-                # Delete previous checkpoint to only keep the latest one
-                if prev_checkpoint_path is not None:
-                    shutil.rmtree(prev_checkpoint_path)
-                prev_checkpoint_path = checkpoint_path
-
-            # Start timing next batch load
-            batch_start_time = time.time()
-
-            # Checkpointing.
-            steps_to_save = 5000
+            # Checkpointing and evaluation
+            steps_to_save = 200
             if step % steps_to_save == 0:
                 # Save checkpoint.
                 checkpoint_path = experiment_dir / f"checkpoints_{step}"
                 accelerator.save_state(str(checkpoint_path))
                 logger.info(f"Saved checkpoint to {checkpoint_path}")
 
-                # Keep checkpoints from only every 100k steps.
+                # Keep checkpoints from only every 100k steps
                 if prev_checkpoint_path is not None:
                     shutil.rmtree(prev_checkpoint_path)
                 prev_checkpoint_path = (
                     None if step % steps_to_save == 0 else checkpoint_path
                 )
+
+                # Create temporary directory for evaluation outputs
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    # Create inference config for evaluation
+                    inference_config = InferenceConfig(
+                        checkpoint_dir=checkpoint_path,
+                        output_dir=Path(temp_dir),
+                        device=device,
+                        visualize_traj=False,  # Don't generate videos during training
+                        compute_metrics=True,
+                        skip_eval_confirm=True,
+                        use_mean_body_shape=True,
+                    )
+
+                    # Run evaluation
+                    try:
+                        test_runner = TestRunner(inference_config)
+                        metrics = test_runner.run()
+
+                        assert metrics is not None
+                        # Log summary metrics to wandb
+                        for metric_name, metric_stats in metrics.summary.items():
+                            for stat_name, stat_value in metric_stats.items():
+                                wandb.log(
+                                    {f"eval/{metric_name}/{stat_name}": stat_value},
+                                    step=step,
+                                )
+                                logger.info(
+                                    f"Step {step}, Loss: {log_outputs['train_loss']:.6f}, Eval: {metric_name} {stat_name}: {stat_value:.4f}"
+                                )
+
+                    except Exception as e:
+                        logger.error(f"Evaluation failed at step {step}: {str(e)}")
+                        logger.exception("Detailed error:")
+
                 del checkpoint_path
 
         # End of epoch
@@ -292,4 +320,5 @@ def run_training(
 
 
 if __name__ == "__main__":
+    # breakpoint()
     tyro.cli(run_training)

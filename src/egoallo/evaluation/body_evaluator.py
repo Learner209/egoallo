@@ -1,4 +1,5 @@
 import datetime
+import logging
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Dict, Optional, Tuple
@@ -7,9 +8,12 @@ import numpy as np
 import torch
 import yaml
 from tqdm.auto import tqdm
-from egoallo.transforms import SO3
 
 from egoallo import fncsmpl
+from egoallo.evaluation.metrics import EgoAlloEvaluationMetrics
+from egoallo.transforms import SO3
+from egoallo.utilities import procrustes_align
+from egoallo.utils.setup_logger import setup_logger
 
 from .base import BaseEvaluator
 from .constants import (
@@ -29,10 +33,8 @@ from .types import (
     ProcrustesOutput,
     RootTransforms,
 )
-from egoallo.utilities import procrustes_align
-from egoallo.utils.setup_logger import setup_logger
 
-logger = setup_logger(output="logs/evaluation", name=__name__)
+logger = setup_logger(output="logs/evaluation", name=__name__, level=logging.INFO)
 
 
 class BodyEvaluator(BaseEvaluator):
@@ -47,7 +49,9 @@ class BodyEvaluator(BaseEvaluator):
         pred_Ts_world_joint: BatchedJointTransforms,
     ) -> FloatArray:
         """Compute foot skate metric in millimeters."""
-        num_samples, time = pred_Ts_world_joint.shape[:2]  # pred_Ts_world_joint: [N, T, J, 7]
+        num_samples, time = pred_Ts_world_joint.shape[
+            :2
+        ]  # pred_Ts_world_joint: [N, T, J, 7]
 
         # Adjust position to floor
         pred_Ts_world_joint = pred_Ts_world_joint.clone()
@@ -55,8 +59,12 @@ class BodyEvaluator(BaseEvaluator):
 
         foot_indices = torch.tensor(FOOT_INDICES, device=self.device)  # [4]
         foot_positions = pred_Ts_world_joint[:, :, foot_indices, 4:7]  # [N, T, 4, 3]
-        foot_positions_diff = foot_positions[:, 1:, :, :2] - foot_positions[:, :-1, :, :2]  # [N, T-1, 4, 2]
-        foot_positions_diff_norm = torch.sum(torch.abs(foot_positions_diff), dim=-1)  # [N, T-1, 4]
+        foot_positions_diff = (
+            foot_positions[:, 1:, :, :2] - foot_positions[:, :-1, :, :2]
+        )  # [N, T-1, 4, 2]
+        foot_positions_diff_norm = torch.sum(
+            torch.abs(foot_positions_diff), dim=-1
+        )  # [N, T-1, 4]
 
         H_thresh = torch.tensor(
             FOOT_HEIGHT_THRESHOLDS,
@@ -68,9 +76,10 @@ class BodyEvaluator(BaseEvaluator):
         foot_positions_diff_norm *= foot_contact  # [N, T-1, 4]
 
         exponent = 2 - 2 ** (foot_positions[:, 1:, :, 2] / H_thresh)  # [N, T-1, 4]
-        fs_per_sample = torch.sum(
-            torch.sum(foot_positions_diff_norm * exponent, dim=-1), dim=-1
-        ) * 1000.0  # Convert to mm
+        fs_per_sample = (
+            torch.sum(torch.sum(foot_positions_diff_norm * exponent, dim=-1), dim=-1)
+            * 1000.0
+        )  # Convert to mm
 
         return fs_per_sample.cpu().numpy()
 
@@ -87,13 +96,13 @@ class BodyEvaluator(BaseEvaluator):
         )
 
         foot_positions = pred_Ts_world_joint[:, :, foot_indices, 4:7]  # [N, T, 4, 3]
-        
+
         # Check which feet are in contact with ground per frame
         foot_contacts = foot_positions[..., 2] < H_thresh  # [N, T, 4]
-        
+
         # Count number of feet in contact per frame
         num_contacts_per_frame = torch.sum(foot_contacts, dim=-1)  # [N, T]
-        
+
         # Calculate ratio of frames with at least one foot contact
         contact_ratio = torch.mean((num_contacts_per_frame > 0).float(), dim=-1)  # [N]
 
@@ -134,7 +143,9 @@ class BodyEvaluator(BaseEvaluator):
             pred_Ts_world_joint[:, :, HEAD_JOINT_INDEX, 4:7]
             - label_Ts_world_joint[:, HEAD_JOINT_INDEX, 4:7]
         )
-        mean_errors = torch.mean(torch.linalg.norm(errors, dim=-1), dim=-1) * 1000.0  # Convert to mm
+        mean_errors = (
+            torch.mean(torch.linalg.norm(errors, dim=-1), dim=-1) * 1000.0
+        )  # Convert to mm
         return mean_errors.cpu().numpy()
 
     def compute_mpjpe(
@@ -157,8 +168,8 @@ class BodyEvaluator(BaseEvaluator):
         )  # [N, T, J+1, 7]
 
         pred_joint_positions = pred_Ts_world_joint[:, :, :, 4:7]  # [N, T, J+1, 3]
-        label_joint_positions = label_Ts_world_joint[:, :, 4:7].unsqueeze(0).repeat(
-            num_samples, 1, 1, 1
+        label_joint_positions = (
+            label_Ts_world_joint[:, :, 4:7].unsqueeze(0).repeat(num_samples, 1, 1, 1)
         )  # [N, T, J+1, 7]
 
         if per_frame_procrustes_align:
@@ -168,7 +179,9 @@ class BodyEvaluator(BaseEvaluator):
                 output="aligned_x",
             )
 
-        position_differences = pred_joint_positions - label_joint_positions  # [N, T, J+1, 3]
+        position_differences = (
+            pred_joint_positions - label_joint_positions
+        )  # [N, T, J+1, 3]
         pjpe = torch.linalg.norm(position_differences, dim=-1) * 1000.0  # [N, T, J+1]
         mpjpe = torch.mean(pjpe.reshape(num_samples, -1), dim=-1)  # [N]
 
@@ -183,13 +196,14 @@ class BodyEvaluator(BaseEvaluator):
     ) -> ProcrustesOutput:
         """Perform Procrustes alignment between point sets."""
         s, R, t = procrustes_align(points_y, points_x, fix_scale)
-        
+
         if output == "transforms":
             return s, R, t
         elif output == "aligned_x":
-            aligned_x = s[..., None, :] * torch.einsum(
-                "...ij,...nj->...ni", R, points_x
-            ) + t[..., None, :]
+            aligned_x = (
+                s[..., None, :] * torch.einsum("...ij,...nj->...ni", R, points_x)
+                + t[..., None, :]
+            )
             return aligned_x
 
     def evaluate_directory(
@@ -198,7 +212,7 @@ class BodyEvaluator(BaseEvaluator):
         use_mean_body_shape: bool = False,
         coco_regressor_path: Optional[PathLike] = None,
         skip_confirm: bool = False,
-    ) -> None:
+    ) -> EgoAlloEvaluationMetrics:
         """Evaluate all .pt files in directory."""
         dir_path = Path(dir_with_pt_files)
         assert dir_path.is_dir(), f"{dir_path} is not a directory."
@@ -217,13 +231,21 @@ class BodyEvaluator(BaseEvaluator):
 
         # Check existing metrics
         if out_disagg_pt_path.exists() or out_yaml_path.exists():
-            logger.info("Found existing metrics:")
-            logger.info(out_yaml_path.read_text())
+            logger.debug("Found existing metrics:")
+            logger.debug(out_yaml_path.read_text())
             if not skip_confirm:
                 confirm = input("Metrics already computed. Overwrite? (y/n) ")
                 if confirm.lower() != "y":
-                    logger.info("Aborting evaluation.")
-                    return
+                    logger.debug("Aborting evaluation.")
+                    return EgoAlloEvaluationMetrics(
+                        mpjpe=np.zeros(num_sequences),
+                        pampjpe=np.zeros(num_sequences),
+                        head_ori=np.zeros(num_sequences),
+                        head_trans=np.zeros(num_sequences),
+                        foot_skate=np.zeros(num_sequences),
+                        foot_contact=np.zeros(num_sequences),
+                        coco_mpjpe=None,
+                    )
 
         # Get PT files
         pt_paths = [
@@ -259,6 +281,7 @@ class BodyEvaluator(BaseEvaluator):
                 for key in metrics_list:
                     stats_per_subsequence[key][i] = metrics.get(key, np.nan)
 
+        # TODO: Remove this at release branches, just serve for debugging.
         # for i in tqdm(range(num_sequences)):
         #     metrics = self.process_file(
         #         pt_paths[i],
@@ -270,7 +293,7 @@ class BodyEvaluator(BaseEvaluator):
 
         # Save results
         torch.save(stats_per_subsequence, out_disagg_pt_path)
-        logger.info(f"Wrote disaggregated metrics to {out_disagg_pt_path}")
+        logger.debug(f"Wrote disaggregated metrics to {out_disagg_pt_path}")
 
         # Write summary
         summary = {
@@ -287,8 +310,24 @@ class BodyEvaluator(BaseEvaluator):
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         summary_text = yaml.dump(summary)
         out_yaml_path.write_text(f"# Written at {timestamp}\n\n{summary_text}")
-        logger.info(f"Wrote summary to {out_yaml_path}")
-        logger.info(summary_text)
+        logger.debug(f"Wrote summary to {out_yaml_path}")
+        logger.debug(summary_text)
+
+        # Create metrics object
+        metrics = EgoAlloEvaluationMetrics(
+            mpjpe=stats_per_subsequence["mpjpe"],
+            pampjpe=stats_per_subsequence["pampjpe"],
+            head_ori=stats_per_subsequence["head_ori"],
+            head_trans=stats_per_subsequence["head_trans"],
+            foot_skate=stats_per_subsequence["foot_skate"],
+            foot_contact=stats_per_subsequence["foot_contact"],
+            coco_mpjpe=stats_per_subsequence.get("coco_mpjpe"),
+        )
+
+        # Save metrics
+        metrics.save(Path(dir_with_pt_files), suffix)
+
+        return metrics
 
     def process_file(
         self,
@@ -299,20 +338,24 @@ class BodyEvaluator(BaseEvaluator):
         """Process a single PT file and compute metrics."""
         # Load file
         path = Path(pt_path)
-        if not path.suffix == '.pt':
+        if not path.suffix == ".pt":
             raise ValueError(f"Expected .pt file, got: {path.suffix}")
-        
+
         outputs = torch.load(path)
-        
+
         # Verify required keys exist
         required_keys = [
-            "groundtruth_betas", "groundtruth_T_world_root", "groundtruth_body_quats",
-            "sampled_betas", "sampled_T_world_root", "sampled_body_quats"
+            "groundtruth_betas",
+            "groundtruth_T_world_root",
+            "groundtruth_body_quats",
+            "sampled_betas",
+            "sampled_T_world_root",
+            "sampled_body_quats",
         ]
         missing_keys = [key for key in required_keys if key not in outputs]
         if missing_keys:
             raise KeyError(f"Missing required keys in {path}: {missing_keys}")
-        
+
         # Move tensors to device
         def to_device(x):
             return x.to(self.device) if isinstance(x, torch.Tensor) else x
@@ -321,7 +364,7 @@ class BodyEvaluator(BaseEvaluator):
         gt_betas = to_device(outputs["groundtruth_betas"])
         gt_T_world_root = to_device(outputs["groundtruth_T_world_root"])
         gt_body_quats = to_device(outputs["groundtruth_body_quats"])
-        
+
         gt_shaped = self.body_model.with_shape(gt_betas)
         gt_posed = gt_shaped.with_pose_decomposed(
             T_world_root=gt_T_world_root,
@@ -346,14 +389,20 @@ class BodyEvaluator(BaseEvaluator):
         )
         # Compute metrics
         metrics = {}
-        
+
         # Add batch dimension to predicted tensors if needed
         if len(sampled_posed.T_world_root.shape) == 2:  # [T, 7]
-            sampled_T_world_root = sampled_posed.T_world_root.unsqueeze(0)  # Add batch dim [1, T, 7]
-            sampled_Ts_world_joint = sampled_posed.Ts_world_joint[..., :21, :].unsqueeze(0)  # Add batch dim [1, T, 21, 7]
+            sampled_T_world_root = sampled_posed.T_world_root.unsqueeze(
+                0
+            )  # Add batch dim [1, T, 7]
+            sampled_Ts_world_joint = sampled_posed.Ts_world_joint[
+                ..., :21, :
+            ].unsqueeze(0)  # Add batch dim [1, T, 21, 7]
         else:
             sampled_T_world_root = sampled_posed.T_world_root  # Keep as [N, T, 7]
-            sampled_Ts_world_joint = sampled_posed.Ts_world_joint[..., :21, :]  # Keep as [N, T, 21, 7]
+            sampled_Ts_world_joint = sampled_posed.Ts_world_joint[
+                ..., :21, :
+            ]  # Keep as [N, T, 21, 7]
 
         metrics["mpjpe"] = float(
             self.compute_mpjpe(
@@ -403,7 +452,9 @@ class BodyEvaluator(BaseEvaluator):
 
         if coco_regressor is not None:
             gt_mesh = gt_posed.lbs()
-            gt_coco_joints = torch.einsum("ij,...jk->...ik", coco_regressor, gt_mesh.verts)
+            gt_coco_joints = torch.einsum(
+                "ij,...jk->...ik", coco_regressor, gt_mesh.verts
+            )
 
             num_samples = sampled_T_world_root.shape[0]
             sampled_coco_joints = []

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -15,23 +16,24 @@ from safetensors import safe_open
 from torch import Tensor
 
 from egoallo.config.train.train_config import EgoAlloTrainConfig
+from egoallo.utils.setup_logger import setup_logger
 
-from .network import EgoDenoiser, EgoDenoiserConfig
+from . import fncsmpl
+from . import transforms as tf
+from .data.dataclass import EgoTrainingData
+from .mapping import SMPLH_BODY_JOINTS
+from .network import EgoDenoiser, EgoDenoiserConfig, EgoDenoiseTraj
 from .tensor_dataclass import TensorDataclass
 from .transforms import SE3
-from .data.dataclass import EgoTrainingData
-from .network import EgoDenoiseTraj
-from . import transforms as tf
-from . import fncsmpl
-from .mapping import SMPLH_BODY_JOINTS
 
-from egoallo.utils.setup_logger import setup_logger
-logger = setup_logger(output=None, name=__name__)
+logger = setup_logger(output=None, name=__name__, level=logging.INFO)
 
 
-from egoallo.config import make_cfg, CONFIG_FILE
+from egoallo.config import CONFIG_FILE, make_cfg
+
 local_config_file = CONFIG_FILE
 CFG = make_cfg(config_name="defaults", config_file=local_config_file, cli_args=[])
+
 
 def load_denoiser(checkpoint_dir: Path) -> tuple[EgoDenoiser, EgoDenoiserConfig]:
     """Load a denoiser model."""
@@ -49,6 +51,8 @@ def load_denoiser(checkpoint_dir: Path) -> tuple[EgoDenoiser, EgoDenoiserConfig]
     model.load_state_dict(state_dict)
 
     return model, model_config
+
+
 def load_runtime_config(checkpoint_dir: Path) -> EgoAlloTrainConfig:
     experiment_dir = checkpoint_dir.parent
     config = yaml.load(
@@ -56,6 +60,7 @@ def load_runtime_config(checkpoint_dir: Path) -> EgoAlloTrainConfig:
     )
     assert isinstance(config, EgoAlloTrainConfig)
     return config
+
 
 @dataclass(frozen=True)
 class InferenceTrajectoryPaths:
@@ -181,48 +186,75 @@ class InferenceInputTransforms(TensorDataclass):
 
 
 def create_masked_training_data(
-    posed: fncsmpl.SmplhShapedAndPosed,
-    Ts_world_cpf: Float[Tensor, "timesteps 7"],
-    contacts: Float[Tensor, "timesteps 21"],
-    betas: Float[Tensor, "1 16"],
+    body_model: fncsmpl.SmplhModel,
+    data: EgoTrainingData,
     mask_ratio: float = 0.3,
+    device: torch.device = torch.device("cuda"),
 ) -> EgoTrainingData:
     """Create EgoTrainingData with MAE-style masking from posed SMPL-H model.
 
     Args:
-        posed: Posed SMPL-H model
-        Ts_world_cpf: World to CPF transforms
-        contacts: Contact states for each joint
-        betas: Body shape parameters
+        body_model: SMPL-H body model
+        data: Input EgoTrainingData
         mask_ratio: Ratio of joints to mask (default: 0.3)
+        device: Device to run computations on
+
+    Returns:
+        EgoTrainingData with masked joints
     """
-    device = posed.local_quats.device
+    # Move tensors to device
+    Ts_world_cpf = data.T_world_cpf.to(device)
+    Ts_world_root = data.T_world_root.to(device)
+    body_quats = data.body_quats.to(device)
+    contacts = data.contacts.to(device)
+    betas = data.betas.to(device)
+
+    # Handle hand quaternions
+    if data.hand_quats is not None:
+        hand_quats = data.hand_quats.to(device)
+        left_hand_quats = hand_quats[..., :15, :]
+        right_hand_quats = hand_quats[..., 15:30, :]
+    else:
+        batch_shape = body_quats.shape[:-2]
+        left_hand_quats = torch.zeros(*batch_shape, 15, 4, device=device)
+        left_hand_quats[..., 0] = 1.0
+        right_hand_quats = torch.zeros(*batch_shape, 15, 4, device=device)
+        right_hand_quats[..., 0] = 1.0
+
+    # Create posed data
+    local_quats = torch.cat([body_quats, left_hand_quats, right_hand_quats], dim=-2)
+    shaped_model = body_model.with_shape(betas)
+    posed = shaped_model.with_pose(Ts_world_root, local_quats)
+
     batch_size, timesteps = posed.local_quats.shape[:2]
     num_joints = CFG.smplh.num_joints  # Number of body joints
 
     # Get joint positions in world frame
-    root_pos = posed.T_world_root[..., 4:7].unsqueeze(-2) # (batch, timesteps, 1, 3)
-    joints_wrt_world = torch.cat([root_pos, posed.Ts_world_joint[..., :num_joints-1, 4:7]], dim=-2) # (batch, timesteps, num_joints, 3)
-    # breakpoint()
+    root_pos = posed.T_world_root[..., 4:7].unsqueeze(-2)  # (*batch, timesteps, 1, 3)
+    joints_wrt_world = torch.cat(
+        [root_pos, posed.Ts_world_joint[..., : num_joints - 1, 4:7]], dim=-2
+    )  # (*batch, timesteps, num_joints, 3)
 
     # Generate random mask for sequence
     num_masked = int(num_joints * mask_ratio)
-    visible_joints_mask = torch.ones((batch_size, timesteps, num_joints), dtype=torch.bool, device=device)
+    visible_joints_mask = torch.ones(
+        (batch_size, timesteps, num_joints), dtype=torch.bool, device=device
+    )
 
     # Randomly select joints to mask
     rand_indices = torch.randperm(num_joints)
     masked_indices = rand_indices[:num_masked]
-    visible_joints_mask[:, :, masked_indices] = False
+    visible_joints_mask[..., masked_indices] = False
 
-    # Print out what joints are masked in string.
+    # Print masked joints
     masked_joints_str = ", ".join(SMPLH_BODY_JOINTS[i] for i in masked_indices.tolist())
-    logger.info(f"Masked joints: {masked_joints_str}")
+    logger.debug(f"Masked joints: {masked_joints_str}")
 
+    # breakpoint()
     # Get joints in CPF frame
     joints_wrt_cpf = (
-        tf.SE3(Ts_world_cpf[..., None, :]).inverse()
-        @ joints_wrt_world
-   ) # (batch, timesteps, num_joints, 3)
+        tf.SE3(Ts_world_cpf[..., None, :]).inverse() @ joints_wrt_world
+    )  # (*batch, timesteps, num_joints, 3)
 
     return EgoTrainingData(
         T_world_root=tf.SE3(posed.T_world_root).parameters(),
@@ -234,6 +266,8 @@ def create_masked_training_data(
         height_from_floor=Ts_world_cpf[..., 6:7],
         joints_wrt_cpf=joints_wrt_cpf,
         mask=torch.ones((batch_size, timesteps), dtype=torch.bool, device=device),
-        hand_quats=posed.local_quats[..., 21:51, :],
+        hand_quats=posed.local_quats[..., 21:51, :]
+        if data.hand_quats is not None
+        else None,
         visible_joints_mask=visible_joints_mask,
     )

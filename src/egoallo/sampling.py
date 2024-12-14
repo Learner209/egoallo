@@ -6,7 +6,6 @@ import numpy as np
 import torch
 from jaxtyping import Float
 from torch import Tensor
-from tqdm.auto import tqdm
 
 from . import fncsmpl, network
 from .guidance_optimizer_jax import (
@@ -20,6 +19,7 @@ from .hand_detection_structs import (
 from .tensor_dataclass import TensorDataclass
 from .transforms import SE3, SO3
 from typing import TYPE_CHECKING
+
 if TYPE_CHECKING:
     from .data.amass import EgoTrainingData
 
@@ -85,8 +85,7 @@ def run_sampling_with_stitching(
         device=device,
     )
     x_t = network.EgoDenoiseTraj.unpack(
-        x_t_packed,
-        include_hands=denoiser_network.config.include_hands
+        x_t_packed, include_hands=denoiser_network.config.include_hands
     )
     x_t.T_world_root = Ts_world_cpf[1:]  # Use the transformed poses
     x_t_list = [x_t]
@@ -115,7 +114,7 @@ def run_sampling_with_stitching(
         .to(device)
         .to(torch.float32)
     )
-    for i in tqdm(range(len(ts) - 1)):
+    for i in range(len(ts) - 1):
         print(f"Sampling {i}/{len(ts) - 1}")
         t = ts[i]
         t_next = ts[i + 1]
@@ -237,13 +236,18 @@ def run_sampling_with_masked_data(
     num_samples: int,
     device: torch.device,
 ) -> network.EgoDenoiseTraj:
-
-    noise_constants = CosineNoiseScheduleConstants.compute(timesteps=1000).to(device=device)
+    noise_constants = CosineNoiseScheduleConstants.compute(timesteps=1000).to(
+        device=device
+    )
     alpha_bar_t = noise_constants.alpha_bar_t
     alpha_t = noise_constants.alpha_t
 
     x_t_packed = torch.randn(
-        (num_samples, masked_data.joints_wrt_world.shape[1], denoiser_network.get_d_state()),
+        (
+            num_samples,
+            masked_data.joints_wrt_world.shape[1],
+            denoiser_network.get_d_state(),
+        ),
         device=device,
     )
     x_t_list = [
@@ -257,18 +261,22 @@ def run_sampling_with_masked_data(
     window_size = 128
     overlap_size = 32
 
-    canonical_overlap_weights = torch.from_numpy(
-        np.minimum(
-            overlap_size,
+    canonical_overlap_weights = (
+        torch.from_numpy(
             np.minimum(
-                np.arange(1, seq_len + 1),
-                np.arange(1, seq_len + 1)[::-1],
-            ),
+                overlap_size,
+                np.minimum(
+                    np.arange(1, seq_len + 1),
+                    np.arange(1, seq_len + 1)[::-1],
+                ),
+            )
+            / overlap_size,
         )
-        / overlap_size,
-    ).to(device).to(torch.float32)
+        .to(device)
+        .to(torch.float32)
+    )
 
-    for i in tqdm(range(len(ts) - 1)):
+    for i in range(len(ts) - 1):
         t = ts[i]
         t_next = ts[i + 1]
 
@@ -278,17 +286,24 @@ def run_sampling_with_masked_data(
 
             for start_t in range(0, seq_len, window_size - overlap_size):
                 end_t = min(start_t + window_size, seq_len)
-                overlap_weights_slice = canonical_overlap_weights[None, :end_t - start_t, None]
+                overlap_weights_slice = canonical_overlap_weights[
+                    None, : end_t - start_t, None
+                ]
                 overlap_weights[:, start_t:end_t, :] += overlap_weights_slice
 
-                x_0_packed_pred[:, start_t:end_t, :] += denoiser_network.forward(
-                    x_t_packed=x_t_packed[:, start_t:end_t, :],
-                    t=torch.tensor([t], device=device).expand((num_samples,)),
-                    joints=masked_data.joints_wrt_world[:, start_t:end_t, :],
-                    visible_joints_mask=masked_data.visible_joints_mask[:, start_t:end_t, :],
-                    project_output_rotmats=False,
-                    mask=masked_data.mask[:, start_t:end_t],
-                ) * overlap_weights_slice
+                x_0_packed_pred[:, start_t:end_t, :] += (
+                    denoiser_network.forward(
+                        x_t_packed=x_t_packed[:, start_t:end_t, :],
+                        t=torch.tensor([t], device=device).expand((num_samples,)),
+                        joints=masked_data.joints_wrt_world[:, start_t:end_t, :],
+                        visible_joints_mask=masked_data.visible_joints_mask[
+                            :, start_t:end_t, :
+                        ],
+                        project_output_rotmats=False,
+                        mask=masked_data.mask[:, start_t:end_t],
+                    )
+                    * overlap_weights_slice
+                )
 
             x_0_packed_pred /= overlap_weights
 
@@ -301,9 +316,10 @@ def run_sampling_with_masked_data(
         if guidance_mode != "off" and guidance_inner:
             x_0_pred, _ = do_guidance_optimization(
                 T_world_root=SE3.from_rotation_and_translation(
-                    SO3.from_matrix(x_0_pred.R_world_root),
-                    x_0_pred.t_world_root
-                ).parameters().squeeze(0),
+                    SO3.from_matrix(x_0_pred.R_world_root), x_0_pred.t_world_root
+                )
+                .parameters()
+                .squeeze(0),
                 traj=x_0_pred,
                 body_model=body_model,
                 guidance_mode=guidance_mode,
@@ -335,7 +351,9 @@ def run_sampling_with_masked_data(
         )
         x_t_list.append(
             network.EgoDenoiseTraj.unpack(
-                x_t_packed, include_hands=denoiser_network.config.include_hands, project_rotmats=True
+                x_t_packed,
+                include_hands=denoiser_network.config.include_hands,
+                project_rotmats=True,
             )
         )
 
@@ -344,8 +362,10 @@ def run_sampling_with_masked_data(
         constrained_traj, _ = do_guidance_optimization(
             T_world_root=SE3.from_rotation_and_translation(
                 SO3.from_matrix(constrained_traj.R_world_root),
-                constrained_traj.t_world_root
-            ).parameters().squeeze(0),
+                constrained_traj.t_world_root,
+            )
+            .parameters()
+            .squeeze(0),
             traj=constrained_traj,
             body_model=body_model,
             guidance_mode=guidance_mode,

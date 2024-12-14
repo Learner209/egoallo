@@ -42,29 +42,34 @@ class _ColorfulFormatter(logging.Formatter):
 
 # so that calling setup_logger multiple times won't add many handlers
 @functools.lru_cache()
-def setup_logger(output=None, distributed_rank=0, *, color=True, name="imagenet", abbrev_name=None):
+def setup_logger(output=None, distributed_rank=0, *, color=True, name="imagenet", abbrev_name=None, level=logging.DEBUG):
     """
-    Initialize the detectron2 logger and set its verbosity level to "INFO".
+    Initialize the detectron2 logger and set its verbosity level.
 
     Args:
         output (str): a file name or a directory to save log. If None, will not save log file.
             If ends with ".txt" or ".log", assumed to be a file name.
             Otherwise, logs will be saved to `output/log.txt`.
         name (str): the root module name of this logger
+        level: The logging level to use. Can be a logging constant (e.g. logging.DEBUG)
+            or string name (e.g. "DEBUG"). Defaults to logging.DEBUG.
 
     Returns:
         logging.Logger: a logger
     """
+    # Convert string level to logging constant if needed
+    if isinstance(level, str):
+        level = getattr(logging, level.upper())
+
     logger = logging.getLogger(name)
     if not logger.handlers:
-        logger.setLevel(logging.DEBUG)
+        logger.setLevel(level)
         logger.propagate = False
 
         if abbrev_name is None:
             abbrev_name = name
 
         plain_formatter = logging.Formatter(
-            # "[%(asctime)s.%(msecs)03d] %(filename)s:%(lineno)d: %(message)s",
             "[%(asctime)s.%(msecs)03d] %(pathname)s:%(lineno)d: %(message)s",
             datefmt="%m/%d %H:%M:%S"
         )
@@ -72,10 +77,9 @@ def setup_logger(output=None, distributed_rank=0, *, color=True, name="imagenet"
         # stdout logging: master only
         if distributed_rank == 0:
             ch = logging.StreamHandler(stream=sys.stdout)
-            ch.setLevel(logging.DEBUG)
+            ch.setLevel(level)
             if color:
                 formatter = _ColorfulFormatter(
-                    # colored("[%(asctime)s.%(msecs)03d]: ", "green") + "%(filename)s:%(lineno)d: " + "%(message)s",
                     "[%(asctime)s.%(msecs)03d]: " + "%(pathname)s:%(lineno)d: " + "%(message)s",
                     datefmt="%m/%d %H:%M:%S",
                     root_name=name,
@@ -97,7 +101,7 @@ def setup_logger(output=None, distributed_rank=0, *, color=True, name="imagenet"
             os.makedirs(os.path.dirname(filename), exist_ok=True)
 
             fh = logging.StreamHandler(_cached_log_stream(filename))
-            fh.setLevel(logging.DEBUG)
+            fh.setLevel(level)
             fh.setFormatter(plain_formatter)
             logger.addHandler(fh)
 
