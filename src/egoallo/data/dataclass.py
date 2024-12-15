@@ -105,8 +105,9 @@ class EgoTrainingData(TensorDataclass):
         timesteps = raw_fields["root_orient"].shape[0]
         # preprocessing 
         # 1. remove the first joint (root) from contacts.
-        if raw_fields['contacts'].shape == (timesteps, 52) or raw_fields['contacts'].shape == (timesteps, 22):
-            raw_fields['contacts'] = raw_fields['contacts'][:, 1:]
+        assert raw_fields['contacts'].shape == (timesteps, 52) or raw_fields['contacts'].shape == (timesteps, 22)
+        if raw_fields['contacts'].shape == (timesteps, 52):
+            raw_fields['contacts'] = raw_fields['contacts'][:, :22]
 
         betas = raw_fields["betas"] if raw_fields["betas"].ndim == 2 else raw_fields["betas"][None]
         # If betas is 10-dimensional, pad with zeros to make it 16-dimensional
@@ -118,9 +119,13 @@ class EgoTrainingData(TensorDataclass):
         assert raw_fields["root_orient"].shape == (timesteps, 3)
         assert raw_fields["pose_body"].shape == (timesteps, 63)
         assert raw_fields["pose_hand"].shape == (timesteps, 90)
+
         assert raw_fields["joints"].shape == (timesteps, 22, 3) or raw_fields["joints"].shape == (timesteps, 52, 3)
+
+        if raw_fields["joints"].shape == (timesteps, 52, 3):
+            raw_fields["joints"] = raw_fields["joints"][:, :22, :]
+
         assert betas.shape == (1, 16)
-        assert raw_fields['contacts'].shape == (timesteps, 21) or raw_fields['contacts'].shape == (timesteps, 51)
 
         T_world_root = torch.cat(
             [

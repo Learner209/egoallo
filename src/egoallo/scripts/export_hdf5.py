@@ -74,13 +74,13 @@ def main(
             for k, v in vars(train_data).items():
                 # No need to write the mask, which will always be ones when we
                 # load from the npz file!
-                if k == "mask" or k == "contacts":
-                    continue
                 if v is None:
                     continue
 
                 # Chunk into 32 timesteps at a time.
-                assert v.dtype == torch.float32, f"{k} {v.dtype}"
+                if k != "contacts" and k != "mask":
+                    assert v.dtype == torch.float32, f"{k} {v.dtype}"
+
                 if v.shape[0] == train_data.T_world_cpf.shape[0]:
                     chunks = (min(32, v.shape[0]),) + v.shape[1:]
                 else:
@@ -99,13 +99,13 @@ def main(
         # for i in range(torch.cuda.device_count())
         for i in range(25)
     ]
-    # for w in workers:
-    #     w.start()
-    # for w in workers:
-    #     w.join()
+    for w in workers:
+        w.start()
+    for w in workers:
+        w.join()
 
     # Single-threaded version
-    worker(0)
+    # worker(0)
     output_list_file.write_text("\n".join(file_list))
 
 

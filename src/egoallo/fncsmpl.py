@@ -366,7 +366,7 @@ class SmplhShapedAndPosed(TensorDataclass):
         weights = self.shaped_model.body_model.weights  # (verts, joints+1)
         
         # Remove root weights (first column) as we only want joint contacts
-        joint_weights = weights[:, 1:]  # (verts, joints)
+        joint_weights = weights[:, :]  # (verts, joints)
         
         # Instead of using einsum with singleton dimension, we can:
         # 1. Remove the singleton dimension from vertex_contacts_expanded
