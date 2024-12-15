@@ -35,7 +35,13 @@ dependencies = [
     "beartype",
     "PyOpenGl==3.1.5",
     "videoio",
+    "wandb",
+    "nvitop",
     "glm",
+    "jax_dataclasses",
+    "jaxlie",
+    "ipdb",
+    "git+https://github.com/brentyi/jaxls.git",
 ]
 
 [tool.setuptools.package-data]
