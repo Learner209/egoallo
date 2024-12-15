@@ -213,55 +213,19 @@ class BodyEvaluator(BaseEvaluator):
         coco_regressor_path: Optional[PathLike] = None,
         skip_confirm: bool = False,
     ) -> EgoAlloEvaluationMetrics:
-        """Evaluate all .pt files in directory."""
-        dir_path = Path(dir_with_pt_files)
-        assert dir_path.is_dir(), f"{dir_path} is not a directory."
-
-        # Setup output paths
-        suffix = "_meanbody" if use_mean_body_shape else ""
-        out_disagg_pt_path = dir_path / f"_eval_cached_disaggregated_metrics{suffix}.pt"
-        out_yaml_path = dir_path / f"_eval_cached_summary{suffix}.yaml"
-
-        # Load COCO regressor if provided
-        coco_regressor = None
-        if coco_regressor_path is not None:
-            coco_regressor = torch.load(coco_regressor_path)
-            assert coco_regressor.shape == (17, 6890), "Invalid COCO regressor shape"
-            coco_regressor = coco_regressor.to(self.device)
-
-        # Check existing metrics
-        if out_disagg_pt_path.exists() or out_yaml_path.exists():
-            logger.debug("Found existing metrics:")
-            logger.debug(out_yaml_path.read_text())
-            if not skip_confirm:
-                confirm = input("Metrics already computed. Overwrite? (y/n) ")
-                if confirm.lower() != "y":
-                    logger.debug("Aborting evaluation.")
-                    return EgoAlloEvaluationMetrics(
-                        mpjpe=np.zeros(num_sequences),
-                        pampjpe=np.zeros(num_sequences),
-                        head_ori=np.zeros(num_sequences),
-                        head_trans=np.zeros(num_sequences),
-                        foot_skate=np.zeros(num_sequences),
-                        foot_contact=np.zeros(num_sequences),
-                        coco_mpjpe=None,
-                    )
-
-        # Get PT files
-        pt_paths = [
-            p
-            for p in dir_path.glob("**/*.pt")
-            if not p.name.startswith("_eval_cached_")
-        ]
+        """Evaluate sequences in directory."""
+        pt_paths = sorted(Path(dir_with_pt_files).glob("*.pt"))
         num_sequences = len(pt_paths)
 
-        # Initialize metrics
-        metrics_list = BODY_METRICS.copy()
-        if coco_regressor is not None:
-            metrics_list.append("coco_mpjpe")
-
-        stats_per_subsequence: Dict[str, FloatArray] = {
-            metric: np.zeros(num_sequences) for metric in metrics_list
+        # Initialize metrics dictionary with new metrics
+        metrics_dict = {
+            metric: np.zeros(num_sequences) 
+            for metric in [
+                "mpjpe", "pampjpe", "head_ori", "head_trans",
+                "foot_skate", "foot_contact",
+                "body_rotmats_error", "betas_error",
+                "R_world_root_error", "t_world_root_error"
+            ]
         }
 
         # Process files
@@ -270,61 +234,54 @@ class BodyEvaluator(BaseEvaluator):
                 executor.submit(
                     self.process_file,
                     pt_paths[i],
-                    coco_regressor,
-                    use_mean_body_shape,
+                    use_mean_body_shape=use_mean_body_shape,
                 )
                 for i in range(num_sequences)
             ]
 
-            for i, future in enumerate(tqdm(futures, total=num_sequences)):
-                metrics = future.result()
-                for key in metrics_list:
-                    stats_per_subsequence[key][i] = metrics.get(key, np.nan)
+            for i, future in enumerate(futures):
+                result = future.result()
+                
+                # Store existing metrics
+                metrics_dict["mpjpe"][i] = result["mpjpe"]
+                metrics_dict["pampjpe"][i] = result["pampjpe"]
+                metrics_dict["head_ori"][i] = result["head_ori"]
+                metrics_dict["head_trans"][i] = result["head_trans"]
+                metrics_dict["foot_skate"][i] = result["foot_skate"]
+                metrics_dict["foot_contact"][i] = result["foot_contact"]
 
-        # TODO: Remove this at release branches, just serve for debugging.
-        # for i in tqdm(range(num_sequences)):
-        #     metrics = self.process_file(
-        #         pt_paths[i],
-        #         coco_regressor,
-        #         use_mean_body_shape,
-        #     )
-        #     for key in metrics_list:
-        #         stats_per_subsequence[key][i] = metrics.get(key, np.nan)
+                # Compute and store new metrics
+                # Load data from saved file
+                data = torch.load(pt_paths[i])
+                
+                # Body rotations error (matching training loss computation)
+                body_rotmats_error = torch.mean(
+                    (data["sampled_body_quats"] - data["groundtruth_body_quats"]).reshape(-1) ** 2
+                ).item()
+                metrics_dict["body_rotmats_error"][i] = body_rotmats_error
 
-        # Save results
-        torch.save(stats_per_subsequence, out_disagg_pt_path)
-        logger.debug(f"Wrote disaggregated metrics to {out_disagg_pt_path}")
+                # Body shape error
+                betas_error = torch.mean(
+                    (data["sampled_betas"] - data["groundtruth_betas"]) ** 2
+                ).item()
+                metrics_dict["betas_error"][i] = betas_error
 
-        # Write summary
-        summary = {
-            key: {
-                "average_sample_mean": float(np.nanmean(values)),
-                "stddev_sample": float(np.nanstd(values)),
-                "stderr_sample": float(
-                    np.nanstd(values) / np.sqrt(np.count_nonzero(~np.isnan(values)))
-                ),
-            }
-            for key, values in stats_per_subsequence.items()
-        }
+                # Root rotation error
+                R_world_root_error = torch.mean(
+                    (data["sampled_T_world_root"][..., :4] - 
+                     data["groundtruth_T_world_root"][..., :4]) ** 2
+                ).item()
+                metrics_dict["R_world_root_error"][i] = R_world_root_error
 
-        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        summary_text = yaml.dump(summary)
-        out_yaml_path.write_text(f"# Written at {timestamp}\n\n{summary_text}")
-        logger.debug(f"Wrote summary to {out_yaml_path}")
-        logger.debug(summary_text)
+                # Root translation error
+                t_world_root_error = torch.mean(
+                    (data["sampled_T_world_root"][..., 4:7] - 
+                     data["groundtruth_T_world_root"][..., 4:7]) ** 2
+                ).item()
+                metrics_dict["t_world_root_error"][i] = t_world_root_error
 
         # Create metrics object
-        metrics = EgoAlloEvaluationMetrics(
-            mpjpe=stats_per_subsequence["mpjpe"],
-            pampjpe=stats_per_subsequence["pampjpe"],
-            head_ori=stats_per_subsequence["head_ori"],
-            head_trans=stats_per_subsequence["head_trans"],
-            foot_skate=stats_per_subsequence["foot_skate"],
-            foot_contact=stats_per_subsequence["foot_contact"],
-            coco_mpjpe=stats_per_subsequence.get("coco_mpjpe"),
-        )
-
-        # Save metrics
+        metrics = EgoAlloEvaluationMetrics(**metrics_dict)
         metrics.save(Path(dir_with_pt_files), suffix)
 
         return metrics

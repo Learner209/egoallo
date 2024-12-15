@@ -24,13 +24,23 @@ if TYPE_CHECKING:
     from .data.amass import EgoTrainingData
 
 
-def quadratic_ts() -> np.ndarray:
+def quadratic_ts(timesteps: int) -> np.ndarray:
     """DDIM sampling schedule."""
     end_step = 0
-    start_step = 1000
+    start_step = timesteps
     x = np.arange(end_step, int(np.sqrt(start_step))) ** 2
     x[-1] = start_step
     return x[::-1]
+
+
+def linear_ts(timesteps: int) -> np.ndarray:
+    """
+    DDPM sampling schedule using linear timesteps.
+    Returns evenly spaced timesteps from `timesteps` to 0 in descending order.
+    """
+    start_step = timesteps
+    end_step = 0
+    return np.arange(start_step, end_step - 1, -1)
 
 
 class CosineNoiseScheduleConstants(TensorDataclass):
@@ -89,7 +99,7 @@ def run_sampling_with_stitching(
     )
     x_t.T_world_root = Ts_world_cpf[1:]  # Use the transformed poses
     x_t_list = [x_t]
-    ts = quadratic_ts()
+    ts = quadratic_ts(timesteps=1000)
 
     seq_len = x_t_packed.shape[1]
 
@@ -236,6 +246,7 @@ def run_sampling_with_masked_data(
     num_samples: int,
     device: torch.device,
 ) -> network.EgoDenoiseTraj:
+    # FIXME: currently the batch-size dimension of `masked_data` is not supported, as the num_samples `param` would conflict with batch_size dim of `masked_data`.
     noise_constants = CosineNoiseScheduleConstants.compute(timesteps=1000).to(
         device=device
     )
@@ -255,7 +266,7 @@ def run_sampling_with_masked_data(
             x_t_packed, include_hands=denoiser_network.config.include_hands
         )
     ]
-    ts = quadratic_ts()
+    ts = quadratic_ts(timesteps=1000)
 
     seq_len = x_t_packed.shape[1]
     window_size = 128
@@ -276,6 +287,7 @@ def run_sampling_with_masked_data(
         .to(torch.float32)
     )
 
+    # breakpoint()
     for i in range(len(ts) - 1):
         t = ts[i]
         t_next = ts[i + 1]
@@ -299,7 +311,7 @@ def run_sampling_with_masked_data(
                         visible_joints_mask=masked_data.visible_joints_mask[
                             :, start_t:end_t, :
                         ],
-                        project_output_rotmats=False,
+                        project_output_rotmats=True,
                         mask=masked_data.mask[:, start_t:end_t],
                     )
                     * overlap_weights_slice
@@ -349,6 +361,302 @@ def run_sampling_with_masked_data(
             )
             + sigma_t[t] * torch.randn_like(x_0_packed_pred)
         )
+        x_t_list.append(
+            network.EgoDenoiseTraj.unpack(
+                x_t_packed,
+                include_hands=denoiser_network.config.include_hands,
+                project_rotmats=True,
+            )
+        )
+
+    if guidance_mode != "off" and guidance_post:
+        constrained_traj = x_t_list[-1]
+        constrained_traj, _ = do_guidance_optimization(
+            T_world_root=SE3.from_rotation_and_translation(
+                SO3.from_matrix(constrained_traj.R_world_root),
+                constrained_traj.t_world_root,
+            )
+            .parameters()
+            .squeeze(0),
+            traj=constrained_traj,
+            body_model=body_model,
+            guidance_mode=guidance_mode,
+            phase="post",
+            hamer_detections=hamer_detections,
+            aria_detections=aria_detections,
+        )
+        return constrained_traj
+    else:
+        return x_t_list[-1]
+
+
+def run_sampling_with_masked_data_hard_coded_sliding_window(
+    denoiser_network: network.EgoDenoiser,
+    body_model: fncsmpl.SmplhModel,
+    masked_data: EgoTrainingData,
+    guidance_mode: GuidanceMode,
+    guidance_post: bool,
+    guidance_inner: bool,
+    floor_z: float,
+    hamer_detections: None | CorrespondedHamerDetections,
+    aria_detections: None | CorrespondedAriaHandWristPoseDetections,
+    num_samples: int,
+    device: torch.device,
+) -> network.EgoDenoiseTraj:
+    # Initialize noise schedule
+    noise_constants = CosineNoiseScheduleConstants.compute(timesteps=1000).to(
+        device=device
+    )
+    alpha_bar_t = noise_constants.alpha_bar_t
+    alpha_t = noise_constants.alpha_t
+
+    # Initialize random noise
+    x_t_packed = torch.randn(
+        (
+            num_samples,
+            masked_data.joints_wrt_world.shape[1],
+            denoiser_network.get_d_state(),
+        ),
+        device=device,
+    )
+    x_t_list = [
+        network.EgoDenoiseTraj.unpack(
+            x_t_packed, include_hands=denoiser_network.config.include_hands
+        )
+    ]
+    ts = quadratic_ts(timesteps=1000)
+
+    # Set fixed window size without overlap
+    window_size = 128
+    seq_len = x_t_packed.shape[1]
+
+    for i in range(len(ts) - 1):
+        t = ts[i]
+        t_next = ts[i + 1]
+
+        with torch.inference_mode():
+            x_0_packed_pred = torch.zeros_like(x_t_packed)
+
+            # Process each window without overlap
+            for start_t in range(0, seq_len, window_size):
+                end_t = min(start_t + window_size, seq_len)
+
+                # Simple window processing with weight=1
+                x_0_packed_pred[:, start_t:end_t, :] = denoiser_network.forward(
+                    x_t_packed=x_t_packed[:, start_t:end_t, :],
+                    t=torch.tensor([t], device=device).expand((num_samples,)),
+                    joints=masked_data.joints_wrt_world[:, start_t:end_t, :],
+                    visible_joints_mask=masked_data.visible_joints_mask[
+                        :, start_t:end_t, :
+                    ],
+                    project_output_rotmats=False,
+                    mask=masked_data.mask[:, start_t:end_t],
+                )
+
+            x_0_pred = network.EgoDenoiseTraj.unpack(
+                x_0_packed_pred,
+                include_hands=denoiser_network.config.include_hands,
+                project_rotmats=True,
+            )
+
+        # Apply guidance optimization if enabled
+        if guidance_mode != "off" and guidance_inner:
+            x_0_pred, _ = do_guidance_optimization(
+                T_world_root=SE3.from_rotation_and_translation(
+                    SO3.from_matrix(x_0_pred.R_world_root), x_0_pred.t_world_root
+                )
+                .parameters()
+                .squeeze(0),
+                traj=x_0_pred,
+                body_model=body_model,
+                guidance_mode=guidance_mode,
+                phase="inner",
+                hamer_detections=hamer_detections,
+                aria_detections=aria_detections,
+            )
+        x_0_packed_pred = x_0_pred.pack()
+
+        # Check for NaN values
+        if torch.any(torch.isnan(x_0_packed_pred)):
+            print("found nan", i)
+
+        # Compute sigma for noise schedule
+        sigma_t = torch.cat(
+            [
+                torch.zeros((1,), device=device),
+                torch.sqrt(
+                    (1.0 - alpha_bar_t[:-1]) / (1 - alpha_bar_t[1:]) * (1 - alpha_t)
+                )
+                * 0.8,
+            ]
+        )
+
+        # Update x_t
+        x_t_packed = (
+            torch.sqrt(alpha_bar_t[t_next]) * x_0_packed_pred
+            + (
+                torch.sqrt(1 - alpha_bar_t[t_next] - sigma_t[t] ** 2)
+                * (x_t_packed - torch.sqrt(alpha_bar_t[t]) * x_0_packed_pred)
+                / torch.sqrt(1 - alpha_bar_t[t] + 1e-1)
+            )
+            + sigma_t[t] * torch.randn_like(x_0_packed_pred)
+        )
+        x_t_list.append(
+            network.EgoDenoiseTraj.unpack(
+                x_t_packed,
+                include_hands=denoiser_network.config.include_hands,
+                project_rotmats=True,
+            )
+        )
+
+    # Apply post-guidance optimization if enabled
+    if guidance_mode != "off" and guidance_post:
+        constrained_traj = x_t_list[-1]
+        constrained_traj, _ = do_guidance_optimization(
+            T_world_root=SE3.from_rotation_and_translation(
+                SO3.from_matrix(constrained_traj.R_world_root),
+                constrained_traj.t_world_root,
+            )
+            .parameters()
+            .squeeze(0),
+            traj=constrained_traj,
+            body_model=body_model,
+            guidance_mode=guidance_mode,
+            phase="post",
+            hamer_detections=hamer_detections,
+            aria_detections=aria_detections,
+        )
+        return constrained_traj
+    else:
+        return x_t_list[-1]
+
+
+# Implementation of DDPM sampling
+def run_sampling_with_masked_data_ddpm(
+    denoiser_network: network.EgoDenoiser,
+    body_model: fncsmpl.SmplhModel,
+    masked_data: EgoTrainingData,
+    guidance_mode: GuidanceMode,
+    guidance_post: bool,
+    guidance_inner: bool,
+    floor_z: float,
+    hamer_detections: None | CorrespondedHamerDetections,
+    aria_detections: None | CorrespondedAriaHandWristPoseDetections,
+    num_samples: int,
+    device: torch.device,
+) -> network.EgoDenoiseTraj:
+    """
+    DDPM sampling version of run_sampling_with_masked_data.
+    Uses full stochastic sampling instead of DDIM's deterministic sampling.
+    """
+    # Initialize noise schedule - same as DDIM
+    noise_constants = CosineNoiseScheduleConstants.compute(timesteps=1000).to(
+        device=device
+    )
+    alpha_bar_t = noise_constants.alpha_bar_t
+    alpha_t = noise_constants.alpha_t
+
+    # Initialize random noise
+    x_t_packed = torch.randn(
+        (
+            num_samples,
+            masked_data.joints_wrt_world.shape[1],
+            denoiser_network.get_d_state(),
+        ),
+        device=device,
+    )
+    x_t_list = [
+        network.EgoDenoiseTraj.unpack(
+            x_t_packed, include_hands=denoiser_network.config.include_hands
+        )
+    ]
+    ts = linear_ts(timesteps=1000)
+
+    seq_len = x_t_packed.shape[1]
+    window_size = 128
+    overlap_size = 32
+
+    canonical_overlap_weights = (
+        torch.from_numpy(
+            np.minimum(
+                overlap_size,
+                np.minimum(
+                    np.arange(1, seq_len + 1),
+                    np.arange(1, seq_len + 1)[::-1],
+                ),
+            )
+            / overlap_size,
+        )
+        .to(device)
+        .to(torch.float32)
+    )
+
+    # breakpoint()
+    for i in range(len(ts) - 1):
+        t = ts[i]
+        t_next = ts[i + 1]
+
+        with torch.inference_mode():
+            x_0_packed_pred = torch.zeros_like(x_t_packed)
+            overlap_weights = torch.zeros((1, seq_len, 1), device=x_t_packed.device)
+
+            # Process windows with overlap
+            for start_t in range(0, seq_len, window_size - overlap_size):
+                end_t = min(start_t + window_size, seq_len)
+                overlap_weights_slice = canonical_overlap_weights[
+                    None, : end_t - start_t, None
+                ]
+                overlap_weights[:, start_t:end_t, :] += overlap_weights_slice
+
+                x_0_packed_pred[:, start_t:end_t, :] += (
+                    denoiser_network.forward(
+                        x_t_packed=x_t_packed[:, start_t:end_t, :],
+                        t=torch.tensor([t], device=device).expand((num_samples,)),
+                        joints=masked_data.joints_wrt_world[:, start_t:end_t, :],
+                        visible_joints_mask=masked_data.visible_joints_mask[
+                            :, start_t:end_t, :
+                        ],
+                        project_output_rotmats=False,
+                        mask=masked_data.mask[:, start_t:end_t],
+                    )
+                    * overlap_weights_slice
+                )
+
+            x_0_packed_pred /= overlap_weights
+
+            x_0_pred = network.EgoDenoiseTraj.unpack(
+                x_0_packed_pred,
+                include_hands=denoiser_network.config.include_hands,
+                project_rotmats=True,
+            )
+
+        if guidance_mode != "off" and guidance_inner:
+            x_0_pred, _ = do_guidance_optimization(
+                T_world_root=SE3.from_rotation_and_translation(
+                    SO3.from_matrix(x_0_pred.R_world_root), x_0_pred.t_world_root
+                )
+                .parameters()
+                .squeeze(0),
+                traj=x_0_pred,
+                body_model=body_model,
+                guidance_mode=guidance_mode,
+                phase="inner",
+                hamer_detections=hamer_detections,
+                aria_detections=aria_detections,
+            )
+        x_0_packed_pred = x_0_pred.pack()
+
+        if torch.any(torch.isnan(x_0_packed_pred)):
+            print("found nan", i)
+
+        # DDPM update equation
+        # x_t = sqrt(alpha_t) * x_0 + sqrt(1 - alpha_t) * noise
+        noise = torch.randn_like(x_0_packed_pred)
+        x_t_packed = (
+            torch.sqrt(alpha_t[t_next]) * x_0_packed_pred
+            + torch.sqrt(1 - alpha_t[t_next]) * noise
+        )
+
         x_t_list.append(
             network.EgoDenoiseTraj.unpack(
                 x_t_packed,

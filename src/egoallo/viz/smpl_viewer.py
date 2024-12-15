@@ -251,6 +251,11 @@ class SMPLViewer(BaseRenderer):
         output_path: str = "output.mp4",
     ) -> None:
         """Render SMPL sequence to video using ego_data for camera trajectory."""
+        # breakpoint()
+        assert (
+            ego_data.T_world_root.dim() == 2
+            # FIX: this is a hacky way to check the shape integrity of ego_data to ensure that the first dim is tiemsteps.
+        ), "The batch size of ego_data should be zero when visualizing it."
         device = body_model.weights.device
 
         # Prepare SMPL sequence as before
@@ -432,4 +437,3 @@ def visualize_ego_training_data(
     """
     viewer = SMPLViewer()
     viewer.render_sequence(ego_data, body_model, output_path)
-

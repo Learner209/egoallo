@@ -6,6 +6,7 @@ import torch
 import yaml
 from jaxtyping import Float, Bool, jaxtyped
 import typeguard
+import logging
 
 
 @jaxtyped(typechecker=typeguard.typechecked)
@@ -26,6 +27,12 @@ class EgoAlloEvaluationMetrics:
     foot_contact: Float[np.ndarray, "N"]  # Foot contact ratio
     coco_mpjpe: Optional[Float[np.ndarray, "N"]] = None  # Optional COCO joint error
 
+    # New metrics matching training losses
+    body_rotmats_error: Float[np.ndarray, "N"]  # Body rotation error
+    betas_error: Float[np.ndarray, "N"]  # Body shape error
+    R_world_root_error: Float[np.ndarray, "N"]  # Root rotation error
+    t_world_root_error: Float[np.ndarray, "N"]  # Root translation error
+
     # File paths for saved data
     metrics_file: Optional[Path] = None
     summary_file: Optional[Path] = None
@@ -41,6 +48,10 @@ class EgoAlloEvaluationMetrics:
             "head_trans",
             "foot_skate",
             "foot_contact",
+            "body_rotmats_error",
+            "betas_error",
+            "R_world_root_error",
+            "t_world_root_error"
         ]:
             values = getattr(self, field)
             if values is not None:
@@ -96,4 +107,48 @@ class EgoAlloEvaluationMetrics:
             metrics_file=metrics_file,
             summary_file=summary_file if summary_file.exists() else None,
         )
+
+    def print_metrics(self, logger=None, level: str = "info", verbose: bool = False) -> None:
+        """Print metrics information using the provided logger.
+        
+        Args:
+            logger: Optional logger object. If None, uses print()
+            level: Logging level ('debug', 'info', 'warning', etc.). Defaults to 'info'
+            verbose: If True, prints raw metrics in addition to summary. Defaults to False
+        """
+        if logger is None:
+            logger = logging.getLogger(__name__)
+            if not logger.handlers:
+                logger.addHandler(logging.StreamHandler())
+                logger.setLevel(logging.INFO)
+        
+        log_func = getattr(logger, level.lower())
+        
+        # Print summary statistics
+        log_func("=== EgoAllo Evaluation Metrics Summary ===")
+        summary_data = self.summary
+        for metric_name, stats in summary_data.items():
+            log_func(f"\n{metric_name}:")
+            for stat_name, value in stats.items():
+                log_func(f"  {stat_name}: {value:.4f}")
+                
+        # Print raw metrics if verbose
+        if verbose:
+            log_func("\n=== Raw Metrics ===")
+            for field in ["mpjpe", "pampjpe", "head_ori", "head_trans", 
+                         "foot_skate", "foot_contact",
+                         "body_rotmats_error", "betas_error",
+                         "R_world_root_error", "t_world_root_error"]:
+                values = getattr(self, field)
+                if values is not None:
+                    log_func(f"\n{field}:")
+                    log_func(f"  shape: {values.shape}")
+                    log_func(f"  min: {np.nanmin(values):.4f}")
+                    log_func(f"  max: {np.nanmax(values):.4f}")
+                    
+            if self.coco_mpjpe is not None:
+                log_func("\ncoco_mpjpe:")
+                log_func(f"  shape: {self.coco_mpjpe.shape}")
+                log_func(f"  min: {np.nanmin(self.coco_mpjpe):.4f}")
+                log_func(f"  max: {np.nanmax(self.coco_mpjpe):.4f}")
 

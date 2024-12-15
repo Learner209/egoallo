@@ -31,6 +31,8 @@ from egoallo.sampling import (
     CosineNoiseScheduleConstants,
     quadratic_ts,
     run_sampling_with_masked_data,
+    run_sampling_with_masked_data_hard_coded_sliding_window,
+    run_sampling_with_masked_data_ddpm,
 )
 from egoallo.transforms import SE3, SO3
 from egoallo.utils.setup_logger import setup_logger
@@ -100,6 +102,7 @@ class SequenceProcessor:
 
         # Run denoising with guidance
         denoised_traj = run_sampling_with_masked_data(
+            # denoised_traj = run_sampling_with_masked_data_ddpm(
             denoiser_network=denoiser,
             body_model=self.body_model,
             masked_data=masked_data,
@@ -153,8 +156,8 @@ class SequenceProcessor:
                 dim=-2,
             )[..., :22, :]
         )
-        # breakpoint()
         Ts_cpf_joints = tf.SE3(T_world_cpf[:, :, None, :]).inverse() @ (Ts_world_joints)
+        # breakpoint()
         denoised_data = EgoTrainingData(
             T_world_root=T_world_root,
             contacts=denoised_traj.contacts,
@@ -238,8 +241,6 @@ class TestRunner:
             output_path,
         )
 
-        logger.info(f"Saved sequence to {output_path}")
-
     def _process_batch(
         self,
         batch: EgoTrainingData,
@@ -252,6 +253,7 @@ class TestRunner:
         for seq_idx in range(batch.T_world_cpf.shape[0]):
             # try:
             # Process sequence
+            # breakpoint()
             result = processor.process_sequence(
                 batch, self.denoiser, self.config, self.model_config, self.device
             )
@@ -260,14 +262,13 @@ class TestRunner:
             if self.config.visualize_traj:
                 timestamp = time.strftime("%Y%m%d-%H%M%S")
                 gt_path, inferred_path = visualizer.save_visualization(
-                    result.gt_data,
-                    result.denoised_data,
+                    result.gt_data[seq_idx],
+                    result.denoised_data[seq_idx],
                     self.body_model,
                     output_dir,
                     timestamp,
                 )
-                logger.info(f"Saved ground truth video to: {gt_path}")
-                logger.info(f"Saved inferred video to: {inferred_path}")
+                logger.info(f"gt_path: {gt_path}, pred_path: {inferred_path}")
 
             # Save sequence data
             output_path = output_dir / f"sequence_{batch_idx}_{seq_idx}.pt"
@@ -325,7 +326,8 @@ def main(inference_config: InferenceConfig) -> None:
     """Main entry point."""
     try:
         runner = TestRunner(inference_config)
-        runner.run()
+        eval_metrics = runner.run()
+        eval_metrics.print_metrics(logger=logger, level="info")
     except Exception as e:
         logger.error(f"Test run failed: {str(e)}")
         raise
