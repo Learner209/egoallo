@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Dict, Optional, Union
+from egoallo import fncsmpl
 
 import torch
 from torch import Tensor
@@ -11,12 +12,8 @@ from .utils import get_device, ensure_path
 
 class BaseEvaluator(ABC):
     """Base class for pose evaluators."""
-    
-    def __init__(
-        self,
-        body_model_path: PathLike,
-        device: Optional[Device] = None
-    ):
+
+    def __init__(self, body_model_path: PathLike, device: Optional[Device] = None):
         """
         Initialize the evaluator.
 
@@ -26,10 +23,12 @@ class BaseEvaluator(ABC):
         """
         self.device = get_device(device)
         self.body_model_path = ensure_path(body_model_path)
-        self.body_model = self._load_body_model(self.body_model_path)
+        self.body_model: fncsmpl.SmplhModel = self._load_body_model(
+            self.body_model_path
+        )
 
     @abstractmethod
-    def _load_body_model(self, model_path: Path) -> torch.nn.Module:
+    def _load_body_model(self, model_path: Path) -> fncsmpl.SmplhModel:
         """Load the body model from file."""
         pass
 
@@ -43,13 +42,13 @@ class BaseEvaluator(ABC):
     ) -> ProcrustesOutput:
         """
         Perform Procrustes alignment between point sets.
-        
+
         Args:
             points_y: Target points
             points_x: Source points
             output: Output mode ('transforms' or 'aligned_x')
             fix_scale: Whether to fix scale to 1
-            
+
         Returns:
             Either transformation parameters or aligned points
         """

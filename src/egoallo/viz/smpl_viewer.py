@@ -21,12 +21,14 @@ from egoallo.fncsmpl import (
     SmplhShapedAndPosed,
     SmplMesh,
 )
+from egoallo.fncsmpl_extensions import get_T_world_cpf
 
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from egoallo.data.dataclass import EgoTrainingData
     from egoallo.fncsmpl import SmplhModel
+    from egoallo.network import EgoDenoiseTraj
 
 # On some systems, EGL does not start properly if OpenGL was already initialized, that's why it's better
 # to keep EGLContext import on top
@@ -246,25 +248,23 @@ class SMPLViewer(BaseRenderer):
 
     def render_sequence(
         self,
-        ego_data: EgoTrainingData,
+        denoised_traj: EgoDenoiseTraj,
         body_model: SmplhModel,
         output_path: str = "output.mp4",
     ) -> None:
-        """Render SMPL sequence to video using ego_data for camera trajectory."""
-        # breakpoint()
+        """Render SMPL sequence to video using denoised trajectory data."""
         assert (
-            ego_data.T_world_root.dim() == 2
-            # FIX: this is a hacky way to check the shape integrity of ego_data to ensure that the first dim is tiemsteps.
-        ), "The batch size of ego_data should be zero when visualizing it."
+            denoised_traj.R_world_root.dim() == 3
+        ), "The batch size should be zero when visualizing."
         device = body_model.weights.device
 
-        # Prepare SMPL sequence as before
-        shaped: SmplhShaped = body_model.with_shape(ego_data.betas.to(device))
-        posed: SmplhShapedAndPosed = shaped.with_pose_decomposed(
-            T_world_root=ego_data.T_world_root.to(device),
-            body_quats=ego_data.body_quats.to(device),
-        )
+        # Prepare SMPL sequence
+        T_world_root = SE3.from_rotation_and_translation(
+            SO3.from_matrix(denoised_traj.R_world_root),
+            denoised_traj.t_world_root,
+        ).parameters()
 
+        posed = denoised_traj.apply_to_body(body_model)
         global_root_orient_aa = SO3(posed.T_world_root[..., :4]).log()
         pose = torch.cat(
             [
@@ -275,15 +275,16 @@ class SMPLViewer(BaseRenderer):
             ],
             dim=-1,
         )
-
+        mesh = posed.lbs()
+        T_world_cpf = SE3(get_T_world_cpf(mesh))
         # Convert SMPL data to sequence
         sequence = []
-        for i in range(ego_data.T_world_root.shape[0]):
+        for i in range(T_world_root.shape[0]):
             sequence.append(
                 {
                     "pose": pose[i].cpu().numpy(),
-                    "shape": ego_data.betas[0, :10].cpu().numpy(),
-                    "translation": ego_data.T_world_root[i, 4:].cpu().numpy(),
+                    "shape": denoised_traj.betas[0, :10].cpu().numpy(),
+                    "translation": T_world_root[i, 4:].cpu().numpy(),
                 }
             )
 
@@ -306,17 +307,15 @@ class SMPLViewer(BaseRenderer):
         )
 
         # Render frames
+        # breakpoint()
         with (
             VideoWriter(
                 output_path, resolution=self.config.resolution, fps=self.config.fps
             ) as vw,
             AsyncPBOCapture(self.config.resolution, queue_size=100) as capturing,
         ):
-            for i in tqdm(
-                range(ego_data.T_world_root.shape[0] - 1), desc="Rendering frames"
-            ):
+            for i in tqdm(range(T_world_root.shape[0] - 1), desc="Rendering frames"):
                 # Get current camera pose from ego_data
-                T_world_cpf = SE3(wxyz_xyz=ego_data.T_world_cpf[i])
                 T_world_cam = T_world_cpf @ camera_offset
 
                 # Update camera and render frame
@@ -425,15 +424,17 @@ class SMPLViewer(BaseRenderer):
 
 
 def visualize_ego_training_data(
-    ego_data: EgoTrainingData, body_model: SmplhModel, output_path: str = "output.mp4"
+    denoised_traj: EgoDenoiseTraj,
+    body_model: SmplhModel,
+    output_path: str = "output.mp4",
 ) -> None:
     """
-    Main visualization function for EgoTrainingData.
+    Main visualization function for denoised trajectories.
 
     Args:
-        ego_data: Training data containing pose sequences
+        denoised_traj: Denoised trajectory containing pose sequences
         body_model: SMPL body model for mesh generation
         output_path: Path to save the output video
     """
     viewer = SMPLViewer()
-    viewer.render_sequence(ego_data, body_model, output_path)
+    viewer.render_sequence(denoised_traj, body_model, output_path)

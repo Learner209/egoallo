@@ -12,7 +12,7 @@ from .. import transforms as tf
 from ..tensor_dataclass import TensorDataclass
 from typing import Optional
 
-from ..network import EgoDenoiserConfig
+from ..network import EgoDenoiseTraj, EgoDenoiserConfig
 from ..viz.smpl_viewer import visualize_ego_training_data as viz_ego_data
 
 from jaxtyping import Float, jaxtyped
@@ -129,7 +129,7 @@ class EgoTrainingData(TensorDataclass):
 
     @staticmethod
     def visualize_ego_training_data(
-        data: "EgoTrainingData",
+        data: EgoDenoiseTraj,
         body_model: fncsmpl.SmplhModel,
         output_path: str = "output.mp4",
     ):

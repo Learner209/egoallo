@@ -40,7 +40,7 @@ logger = setup_logger(output="logs/evaluation", name=__name__, level=logging.INF
 class BodyEvaluator(BaseEvaluator):
     """Evaluates body pose metrics between predicted and ground truth data."""
 
-    def _load_body_model(self, model_path: Path) -> torch.nn.Module:
+    def _load_body_model(self, model_path: Path) -> fncsmpl.SmplhModel:
         """Load the SMPL body model."""
         return fncsmpl.SmplhModel.load(model_path).to(self.device)
 
@@ -210,23 +210,22 @@ class BodyEvaluator(BaseEvaluator):
         self,
         dir_with_pt_files: PathLike,
         use_mean_body_shape: bool = False,
-        coco_regressor_path: Optional[PathLike] = None,
-        skip_confirm: bool = False,
+        suffix: str = "",
+        skip_confirm: bool = True,
     ) -> EgoAlloEvaluationMetrics:
         """Evaluate sequences in directory."""
         pt_paths = sorted(Path(dir_with_pt_files).glob("*.pt"))
         num_sequences = len(pt_paths)
 
-        # Initialize metrics dictionary with new metrics
-        metrics_dict = {
-            metric: np.zeros(num_sequences) 
-            for metric in [
-                "mpjpe", "pampjpe", "head_ori", "head_trans",
-                "foot_skate", "foot_contact",
-                "body_rotmats_error", "betas_error",
-                "R_world_root_error", "t_world_root_error"
-            ]
-        }
+        # Get metric names from EgoAlloEvaluationMetrics fields
+        metric_fields = [
+            field
+            for field in EgoAlloEvaluationMetrics.__dataclass_fields__
+            if field not in ["metrics_file", "summary_file", "coco_mpjpe"]
+        ]
+
+        # Initialize metrics dictionary
+        metrics_dict = {metric: np.zeros(num_sequences) for metric in metric_fields}
 
         # Process files
         with ThreadPoolExecutor() as executor:
@@ -234,6 +233,7 @@ class BodyEvaluator(BaseEvaluator):
                 executor.submit(
                     self.process_file,
                     pt_paths[i],
+                    None,
                     use_mean_body_shape=use_mean_body_shape,
                 )
                 for i in range(num_sequences)
@@ -241,44 +241,10 @@ class BodyEvaluator(BaseEvaluator):
 
             for i, future in enumerate(futures):
                 result = future.result()
-                
-                # Store existing metrics
-                metrics_dict["mpjpe"][i] = result["mpjpe"]
-                metrics_dict["pampjpe"][i] = result["pampjpe"]
-                metrics_dict["head_ori"][i] = result["head_ori"]
-                metrics_dict["head_trans"][i] = result["head_trans"]
-                metrics_dict["foot_skate"][i] = result["foot_skate"]
-                metrics_dict["foot_contact"][i] = result["foot_contact"]
 
-                # Compute and store new metrics
-                # Load data from saved file
-                data = torch.load(pt_paths[i])
-                
-                # Body rotations error (matching training loss computation)
-                body_rotmats_error = torch.mean(
-                    (data["sampled_body_quats"] - data["groundtruth_body_quats"]).reshape(-1) ** 2
-                ).item()
-                metrics_dict["body_rotmats_error"][i] = body_rotmats_error
-
-                # Body shape error
-                betas_error = torch.mean(
-                    (data["sampled_betas"] - data["groundtruth_betas"]) ** 2
-                ).item()
-                metrics_dict["betas_error"][i] = betas_error
-
-                # Root rotation error
-                R_world_root_error = torch.mean(
-                    (data["sampled_T_world_root"][..., :4] - 
-                     data["groundtruth_T_world_root"][..., :4]) ** 2
-                ).item()
-                metrics_dict["R_world_root_error"][i] = R_world_root_error
-
-                # Root translation error
-                t_world_root_error = torch.mean(
-                    (data["sampled_T_world_root"][..., 4:7] - 
-                     data["groundtruth_T_world_root"][..., 4:7]) ** 2
-                ).item()
-                metrics_dict["t_world_root_error"][i] = t_world_root_error
+                # Store metrics
+                for metric in metric_fields:
+                    metrics_dict[metric][i] = result[metric]
 
         # Create metrics object
         metrics = EgoAlloEvaluationMetrics(**metrics_dict)
@@ -322,6 +288,14 @@ class BodyEvaluator(BaseEvaluator):
         gt_T_world_root = to_device(outputs["groundtruth_T_world_root"])
         gt_body_quats = to_device(outputs["groundtruth_body_quats"])
 
+        # Check for NaN values in ground truth
+        if torch.isnan(gt_betas).any():
+            raise ValueError("NaN values found in groundtruth_betas")
+        if torch.isnan(gt_T_world_root).any():
+            raise ValueError("NaN values found in groundtruth_T_world_root")
+        if torch.isnan(gt_body_quats).any():
+            raise ValueError("NaN values found in groundtruth_body_quats")
+
         gt_shaped = self.body_model.with_shape(gt_betas)
         gt_posed = gt_shaped.with_pose_decomposed(
             T_world_root=gt_T_world_root,
@@ -333,6 +307,15 @@ class BodyEvaluator(BaseEvaluator):
         sampled_T_world_root = to_device(outputs["sampled_T_world_root"])
         sampled_body_quats = to_device(outputs["sampled_body_quats"])
 
+        # Check for NaN values in predictions
+        if torch.isnan(sampled_betas).any():
+            raise ValueError("NaN values found in sampled_betas")
+        if torch.isnan(sampled_T_world_root).any():
+            raise ValueError("NaN values found in sampled_T_world_root")
+        if torch.isnan(sampled_body_quats).any():
+            raise ValueError("NaN values found in sampled_body_quats")
+
+        assert not use_mean_body_shape
         if use_mean_body_shape:
             mean_betas = torch.zeros_like(sampled_betas.mean(dim=1, keepdim=True))
             sampled_shaped = self.body_model.with_shape(mean_betas)
@@ -407,6 +390,37 @@ class BodyEvaluator(BaseEvaluator):
             ).mean()
         )
 
+        # Betas error
+        metrics["betas_error"] = self.compute_masked_error(
+            gt=gt_betas,
+            pred=mean_betas.squeeze(1),
+            unsqueeze_gt=True,
+            unsqueeze_pred=True,
+        )
+
+        # Body rotation error
+        metrics["body_rotmats_error"] = self.compute_masked_error(
+            gt=gt_body_quats,
+            pred=sampled_body_quats.mean(dim=0),
+            unsqueeze_gt=True,
+            unsqueeze_pred=True,
+        )
+
+        # Root transform errors
+        metrics["R_world_root_error"] = self.compute_masked_error(
+            gt=gt_T_world_root[..., :4],
+            pred=sampled_T_world_root.mean(dim=0)[..., :4],
+            unsqueeze_gt=True,
+            unsqueeze_pred=True,
+        )
+
+        metrics["t_world_root_error"] = self.compute_masked_error(
+            gt=gt_T_world_root[..., 4:],
+            pred=sampled_T_world_root.mean(dim=0)[..., 4:],
+            unsqueeze_gt=True,
+            unsqueeze_pred=True,
+        )
+
         if coco_regressor is not None:
             gt_mesh = gt_posed.lbs()
             gt_coco_joints = torch.einsum(
@@ -434,3 +448,42 @@ class BodyEvaluator(BaseEvaluator):
         # logger.info(f"Computed metrics for {path}: {metrics}")
 
         return metrics
+
+    def compute_masked_error(
+        self,
+        gt: torch.Tensor,
+        pred: torch.Tensor,
+        mask: Optional[torch.Tensor] = None,
+        norm_dim: int = -1,
+        unsqueeze_gt: bool = True,
+        unsqueeze_pred: bool = True,
+    ) -> float:
+        """Compute masked error between ground truth and predicted tensors.
+
+        Args:
+            gt: Ground truth tensor
+            pred: Predicted tensor
+            mask: Optional mask tensor. If None, creates all-ones mask
+            norm_dim: Dimension along which to compute norm
+            unsqueeze_gt: Whether to unsqueeze gt to [b t d]
+            unsqueeze_pred: Whether to unsqueeze pred to [b t d]
+
+        Returns:
+            Masked mean error as float
+        """
+        # Reshape tensors to [b t d] format if needed
+        if unsqueeze_gt:
+            gt = gt.unsqueeze(0) if gt.dim() == 2 else gt.unsqueeze(1)
+        if unsqueeze_pred:
+            pred = pred.unsqueeze(0) if pred.dim() == 2 else pred.unsqueeze(1)
+
+        # Create mask if not provided
+        if mask is None:
+            mask = torch.ones(
+                (gt.shape[0], gt.shape[1]), dtype=torch.bool, device=self.device
+            )
+        mask_sum = mask.sum()
+
+        # Compute error
+        diff = torch.mean((gt - pred) ** 2, dim=norm_dim)  # [b t]
+        return float((diff * mask).sum() / mask_sum)

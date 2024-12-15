@@ -64,6 +64,7 @@ def get_experiment_dir(experiment_name: str, version: int = 0) -> Path:
 def run_training(
     config: EgoAlloTrainConfig,
     restore_checkpoint_dir: Path | None = None,
+    debug_mode: bool = False,
 ) -> None:
     # Set up experiment directory + HF accelerate.
     # We're getting to manage logging, checkpoint directories, etc manually,
@@ -122,8 +123,8 @@ def run_training(
     model = network.EgoDenoiser(config.model)
 
     train_loader = torch.utils.data.DataLoader(
-        dataset=AdaptiveAmassHdf5Dataset(config=config),
-        # dataset=EgoAmassHdf5Dataset(config=config, cache_files=True),
+        # dataset=AdaptiveAmassHdf5Dataset(config=config),
+        dataset=EgoAmassHdf5Dataset(config=config, cache_files=True),
         batch_size=config.batch_size,
         shuffle=True,
         num_workers=config.num_workers,
@@ -214,12 +215,16 @@ def run_training(
                     step=step,
                 )
 
-            accelerator.backward(loss)
-            if accelerator.sync_gradients:
-                accelerator.clip_grad_norm_(model.parameters(), config.max_grad_norm)
-            optim.step()
-            scheduler.step()
-            optim.zero_grad(set_to_none=True)
+            # Wrap optimization steps in debug_mode check
+            if not debug_mode:
+                accelerator.backward(loss)
+                if accelerator.sync_gradients:
+                    accelerator.clip_grad_norm_(
+                        model.parameters(), config.max_grad_norm
+                    )
+                optim.step()
+                scheduler.step()
+                optim.zero_grad(set_to_none=True)
 
             if not accelerator.is_main_process:
                 continue
@@ -258,7 +263,7 @@ def run_training(
 
             # Checkpointing and evaluation
             steps_to_save = 200
-            if step % steps_to_save == 0:
+            if step % steps_to_save == 0 and step != 0:
                 # Save checkpoint.
                 checkpoint_path = experiment_dir / f"checkpoints_{step}"
                 accelerator.save_state(str(checkpoint_path))

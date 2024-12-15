@@ -33,7 +33,7 @@ dependencies = [
     "termcolor",
     "jax[cuda12]",
     "beartype",
-    "PyOpenGl==3.1.5",
+    "PyOpenGL==3.1.5",
     "videoio",
     "wandb",
     "nvitop",

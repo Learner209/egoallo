@@ -157,7 +157,7 @@ class TrainingLossComputer:
             torch.sqrt(alpha_bar_t) * x_0_packed + torch.sqrt(1.0 - alpha_bar_t) * eps
         )
 
-        # define per-timestep weightting scheme and construct weighting function.
+        # define per-time step weighting scheme and construct weighting function.
         weight_t = self.weight_t[t].to(device)
         assert weight_t.shape == (batch,)
 
