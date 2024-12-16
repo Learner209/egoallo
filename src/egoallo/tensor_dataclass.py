@@ -73,3 +73,170 @@ class TensorDataclass:
                 return val
 
         return _map_impl(fn, self)
+
+    def check_shapes(self, other: "TensorDataclass") -> bool:
+        """Check if two TensorDataclass instances have the same shape across all attributes.
+
+        Args:
+            other: The other TensorDataclass instance to compare with.
+
+        Returns:
+            True if all corresponding attributes have the same shape, False otherwise.
+        """
+
+        def _check_shapes_impl(val1: Any, val2: Any) -> bool:
+            if isinstance(val1, torch.Tensor) and isinstance(val2, torch.Tensor):
+                return val1.shape == val2.shape
+            elif isinstance(val1, TensorDataclass) and isinstance(
+                val2, TensorDataclass
+            ):
+                return all(
+                    _check_shapes_impl(v1, v2)
+                    for v1, v2 in zip(vars(val1).values(), vars(val2).values())
+                )
+            elif isinstance(val1, (list, tuple)) and isinstance(val2, (list, tuple)):
+                return all(_check_shapes_impl(v1, v2) for v1, v2 in zip(val1, val2))
+            elif isinstance(val1, dict) and isinstance(val2, dict):
+                return all(
+                    _check_shapes_impl(val1[k], val2[k])
+                    for k in val1.keys() & val2.keys()
+                )
+            else:
+                return (
+                    True  # Non-tensor attributes are considered to have the same shape
+                )
+
+        return _check_shapes_impl(self, other)
+
+    def get_batch_size(self) -> int | None:
+        """Get the batch dimension (first dimension) that is consistent across all tensors.
+
+        Returns:
+            int | None: The batch size if tensors exist, None if no tensors found
+        """
+        # FIXME: the current implementation ignores the scenario where the preceding batch_size dimensions would be null, be aware of this bug.
+        batch_size = None
+
+        def _get_batch_size_impl(val: Any) -> int | None:
+            nonlocal batch_size
+
+            if isinstance(val, torch.Tensor):
+                if len(val.shape) > 0:  # Skip 0-dim tensors
+                    if batch_size is None:
+                        batch_size = val.shape[0]
+                    elif batch_size != val.shape[0]:
+                        raise ValueError(
+                            f"Inconsistent batch sizes found: {batch_size} vs {val.shape[0]}"
+                        )
+                    return val.shape[0]
+            elif isinstance(val, TensorDataclass):
+                for v in vars(val).values():
+                    _get_batch_size_impl(v)
+            elif isinstance(val, (list, tuple)):
+                for v in val:
+                    _get_batch_size_impl(v)
+            elif isinstance(val, dict):
+                for v in val.values():
+                    _get_batch_size_impl(v)
+            return None
+
+        _get_batch_size_impl(self)
+        return batch_size
+
+    def __getitem__(self, index) -> Self:
+        """Implements native Python slicing for TensorDataclass.
+
+        Supports numpy/torch-style indexing including:
+        - Single index: data[0]
+        - Multiple indices: data[0,1]
+        - Slices: data[0:10]
+        - Mixed indexing: data[0, :10, 2:4]
+        - Ellipsis: data[..., 0]
+
+        Args:
+            index: Index specification. Can be int, slice, tuple, or ellipsis.
+
+        Returns:
+            A new TensorDataclass with sliced data.
+
+        Examples:
+            >>> data = TensorDataclass(...)
+            >>> # Single index
+            >>> first_item = data[0]
+            >>> # Multiple indices
+            >>> specific_item = data[0, 10]
+            >>> # Slice
+            >>> first_ten = data[:10]
+            >>> # Mixed indexing
+            >>> subset = data[0, :10, 2:4]
+        """
+        # Convert single index to tuple for uniform handling
+        if not isinstance(index, tuple):
+            index = (index,)
+
+        def _getitem_impl[GetItemT](val: GetItemT, idx: tuple) -> GetItemT:
+            if isinstance(val, torch.Tensor):
+                try:
+                    return val[idx]
+                except IndexError as e:
+                    raise IndexError(
+                        f"Invalid index {idx} for tensor of shape {val.shape}"
+                    ) from e
+            elif isinstance(val, TensorDataclass):
+                return type(val)(**_getitem_impl(vars(val), idx))
+            elif isinstance(val, (list, tuple)):
+                return type(val)(_getitem_impl(v, idx) for v in val)
+            elif isinstance(val, dict):
+                assert type(val) is dict  # No subclass support
+                return {k: _getitem_impl(v, idx) for k, v in val.items()}  # type: ignore
+            else:
+                return val
+
+        return _getitem_impl(self, index)
+
+    def __setitem__(self, index, value) -> None:
+        """Implements setting values using native Python slicing.
+
+        Args:
+            index: Index specification (same as __getitem__)
+            value: Value to set. Must be compatible with the dataclass structure.
+
+        Raises:
+            ValueError: If value structure doesn't match the dataclass
+            TypeError: If value types are incompatible
+        """
+        if not isinstance(index, tuple):
+            index = (index,)
+
+        def _setitem_impl(target: Any, idx: tuple, val: Any) -> None:
+            if isinstance(target, torch.Tensor):
+                if not isinstance(val, torch.Tensor):
+                    raise TypeError(f"Cannot set tensor with value of type {type(val)}")
+                try:
+                    target[idx] = val
+                except IndexError as e:
+                    raise IndexError(
+                        f"Invalid index {idx} for tensor of shape {target.shape}"
+                    ) from e
+            elif isinstance(target, TensorDataclass):
+                if not isinstance(val, TensorDataclass):
+                    raise TypeError(
+                        f"Cannot set TensorDataclass with value of type {type(val)}"
+                    )
+                for k, v in vars(target).items():
+                    _setitem_impl(v, idx, getattr(val, k))
+            elif isinstance(target, (list, tuple)):
+                if not isinstance(val, (list, tuple)):
+                    raise TypeError(
+                        f"Cannot set {type(target)} with value of type {type(val)}"
+                    )
+                for t, v in zip(target, val):
+                    _setitem_impl(t, idx, v)
+            elif isinstance(target, dict):
+                if not isinstance(val, dict):
+                    raise TypeError(f"Cannot set dict with value of type {type(val)}")
+                for k in target:
+                    if k in val:
+                        _setitem_impl(target[k], idx, val[k])
+
+        _setitem_impl(self, index, value)

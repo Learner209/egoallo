@@ -4,7 +4,8 @@ import time
 
 import numpy as np
 import torch
-from jaxtyping import Float
+from jaxtyping import Float, jaxtyped
+import typeguard
 from torch import Tensor
 from tqdm.auto import tqdm
 
@@ -59,6 +60,7 @@ class CosineNoiseScheduleConstants(TensorDataclass):
         )
 
 
+@jaxtyped(typechecker=typeguard.typechecked)
 def run_sampling_with_stitching(
     denoiser_network: network.EgoDenoiser,
     body_model: fncsmpl.SmplhModel,
@@ -122,8 +124,9 @@ def run_sampling_with_stitching(
         .to(device)
         .to(torch.float32)
     )
-    for i in tqdm(range(len(ts) - 1)):
-        print(f"Sampling {i}/{len(ts) - 1}")
+    # for i in tqdm(range(len(ts) - 1)):
+    for i in range(len(ts) - 1):
+        # print(f"Sampling {i}/{len(ts) - 1}")
         t = ts[i]
         t_next = ts[i + 1]
 

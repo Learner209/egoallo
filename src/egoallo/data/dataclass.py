@@ -11,7 +11,9 @@ from torch import Tensor
 
 from .. import fncsmpl, fncsmpl_extensions
 from .. import transforms as tf
+from ..network import EgoDenoiseTraj
 from ..tensor_dataclass import TensorDataclass
+from ..viz.smpl_viewer import visualize_ego_training_data as viz_ego_data
 
 
 @jaxtyped(typechecker=typeguard.typechecked)
@@ -123,6 +125,20 @@ class EgoTrainingData(TensorDataclass):
             ).cpu(),
             mask=torch.ones((timesteps - 1,), dtype=torch.bool),
             hand_quats=hand_quats[1:].cpu() if include_hands else None,
+        )
+
+    @staticmethod
+    def visualize_ego_training_data(
+        data: EgoTrainingData,
+        denoised_traj: EgoDenoiseTraj,
+        body_model: fncsmpl.SmplhModel,
+        output_path: str = "output.mp4",
+    ):
+        viz_ego_data(
+            data=data,
+            denoised_traj=denoised_traj,
+            body_model=body_model,
+            output_path=output_path,
         )
 
 
