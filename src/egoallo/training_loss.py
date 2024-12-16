@@ -151,6 +151,7 @@ class TrainingLossComputer:
         assert self.noise_constants.alpha_bar_t.shape == (
             unwrapped_model.config.max_t + 1,
         )
+        breakpoint()
         alpha_bar_t = self.noise_constants.alpha_bar_t[t, None, None]
         assert alpha_bar_t.shape == (batch, 1, 1)
         x_t_packed = (

@@ -227,24 +227,33 @@ class BodyEvaluator(BaseEvaluator):
         # Initialize metrics dictionary
         metrics_dict = {metric: np.zeros(num_sequences) for metric in metric_fields}
 
-        # Process files
-        with ThreadPoolExecutor() as executor:
-            futures = [
-                executor.submit(
-                    self.process_file,
-                    pt_paths[i],
-                    None,
-                    use_mean_body_shape=use_mean_body_shape,
-                )
-                for i in range(num_sequences)
-            ]
+        # Single-threaded processing
+        for i in range(num_sequences):
+            result = self.process_file(
+                pt_paths[i], None, use_mean_body_shape=use_mean_body_shape
+            )
+            # Store metrics
+            for metric in metric_fields:
+                metrics_dict[metric][i] = result[metric]
 
-            for i, future in enumerate(futures):
-                result = future.result()
+        # # Multi-threaded processing (original version)
+        # with ThreadPoolExecutor() as executor:
+        #     futures = [
+        #         executor.submit(
+        #             self.process_file,
+        #             pt_paths[i],
+        #             None,
+        #             use_mean_body_shape=use_mean_body_shape,
+        #         )
+        #         for i in range(num_sequences)
+        #     ]
 
-                # Store metrics
-                for metric in metric_fields:
-                    metrics_dict[metric][i] = result[metric]
+        #     for i, future in enumerate(futures):
+        #         result = future.result()
+
+        #         # Store metrics
+        #         for metric in metric_fields:
+        #             metrics_dict[metric][i] = result[metric]
 
         # Create metrics object
         metrics = EgoAlloEvaluationMetrics(**metrics_dict)
@@ -399,9 +408,15 @@ class BodyEvaluator(BaseEvaluator):
         )
 
         # Body rotation error
+        # breakpoint()
         metrics["body_rotmats_error"] = self.compute_masked_error(
-            gt=gt_body_quats,
-            pred=sampled_body_quats.mean(dim=0),
+            gt=SO3.exp(gt_body_quats)
+            .as_matrix()
+            .reshape(*gt_body_quats.shape[:-1], -1),
+            pred=SO3.exp(sampled_body_quats)
+            .as_matrix()
+            .mean(dim=0)
+            .reshape(*gt_body_quats.shape[:-1], -1),
             unsqueeze_gt=True,
             unsqueeze_pred=True,
         )

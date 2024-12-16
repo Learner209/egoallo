@@ -93,8 +93,8 @@ class SequenceProcessor:
     ) -> EgoDenoiseTraj:
         """Process a single sequence and return denoised trajectory."""
         # Run denoising with guidance
-        denoised_traj = run_sampling_with_masked_data_ddpm(
-            # denoised_traj = run_sampling_with_masked_data_ddpm_hard_coded(
+        # denoised_traj = run_sampling_with_masked_data_ddpm(
+        denoised_traj = run_sampling_with_masked_data_ddpm_hard_coded(
             denoiser_network=denoiser,
             body_model=self.body_model,
             masked_data=batch,
@@ -163,7 +163,7 @@ class TestRunner:
         # Convert rotation matrices to quaternions for saving
         body_quats = SO3.from_matrix(denoised_traj.body_rotmats[0]).wxyz
 
-        breakpoint()
+        # breakpoint()
         torch.save(
             {
                 # Ground truth data

@@ -263,7 +263,7 @@ def run_training(
 
             # Checkpointing and evaluation
             steps_to_save = 200
-            if step % steps_to_save == 0 and step != 0:
+            if step % steps_to_save == 0:
                 # Save checkpoint.
                 checkpoint_path = experiment_dir / f"checkpoints_{step}"
                 accelerator.save_state(str(checkpoint_path))
@@ -286,12 +286,14 @@ def run_training(
                         visualize_traj=False,  # Don't generate videos during training
                         compute_metrics=True,
                         skip_eval_confirm=True,
-                        use_mean_body_shape=True,
+                        use_mean_body_shape=False,  # use_mean_body_shape would fail assertion
                     )
 
                     # Run evaluation
                     try:
                         test_runner = TestRunner(inference_config)
+                        # TODO: just for debugging.
+                        test_runner.denoiser = accelerator.unwrap_model(model)
                         metrics = test_runner.run()
 
                         assert metrics is not None
