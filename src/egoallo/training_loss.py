@@ -151,7 +151,6 @@ class TrainingLossComputer:
         assert self.noise_constants.alpha_bar_t.shape == (
             unwrapped_model.config.max_t + 1,
         )
-        breakpoint()
         alpha_bar_t = self.noise_constants.alpha_bar_t[t, None, None]
         assert alpha_bar_t.shape == (batch, 1, 1)
         x_t_packed = (
@@ -225,7 +224,6 @@ class TrainingLossComputer:
             x_0_packed_pred, include_hands=unwrapped_model.config.include_hands
         )
         # breakpoint()
-        # import ipdb; ipdb.set_trace()
 
         # Add joint position loss calculation
         # Get predicted joint positions through forward kinematics
@@ -234,8 +232,8 @@ class TrainingLossComputer:
         )  # (b, t, 22, 3)
         pred_joints = torch.cat(
             [
-                x_0_posed.Ts_world_joint[..., : num_joints - 1, 4:7],
                 x_0_posed.T_world_root[..., 4:7].unsqueeze(dim=-2),
+                x_0_posed.Ts_world_joint[..., : num_joints - 1, 4:7],
             ],
             dim=-2,
         )  # (b, t, 22, 3)

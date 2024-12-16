@@ -14,6 +14,7 @@ from ..network import EgoDenoiserConfig
 
 
 from egoallo.config import make_cfg, CONFIG_FILE
+
 local_config_file = CONFIG_FILE
 CFG = make_cfg(config_name="defaults", config_file=local_config_file, cli_args=[])
 
@@ -79,7 +80,6 @@ class EgoAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         random_variable_len_proportion: float = 0.3,
         random_variable_len_min: int = 16,
     ) -> None:
-
         min_subseq_len = None
 
         self.config = config
@@ -94,7 +94,10 @@ class EgoAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
             datasets.extend(AMASS_SPLITS[split])
 
         self._slice_strategy: Literal[
-            "deterministic", "random_uniform_len", "random_variable_len"
+            "deterministic",
+            "random_uniform_len",
+            "random_variable_len",
+            "full_sequence",
         ] = slice_strategy
 
         self._random_variable_len_proportion = random_variable_len_proportion
@@ -164,7 +167,10 @@ class EgoAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         assert total_t >= self._subseq_len
 
         # Determine slice indexing.
-        mask = torch.ones((self._subseq_len if self._slice_strategy != "full_sequence" else total_t), dtype=torch.bool)
+        mask = torch.ones(
+            (self._subseq_len if self._slice_strategy != "full_sequence" else total_t),
+            dtype=torch.bool,
+        )
 
         if self._slice_strategy == "full_sequence":
             start_t, end_t = 0, total_t
@@ -218,7 +224,11 @@ class EgoAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
                 array = v[start_t:end_t]
 
             # Only pad if not using full_sequence
-            if self._slice_strategy != "full_sequence" and array.shape[0] != self._subseq_len and k != "betas":
+            if (
+                self._slice_strategy != "full_sequence"
+                and array.shape[0] != self._subseq_len
+                and k != "betas"
+            ):
                 array = np.concatenate(
                     [
                         array,
@@ -235,14 +245,18 @@ class EgoAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         if "hand_quats" not in kwargs:
             kwargs["hand_quats"] = None
 
-        subseq_len = self._subseq_len if self._slice_strategy != "full_sequence" else total_t
+        subseq_len = (
+            self._subseq_len if self._slice_strategy != "full_sequence" else total_t
+        )
         # Generate MAE-style masking
         num_joints = CFG.smplh.num_joints
         device = kwargs["joints_wrt_world"].device
 
         # Generate random mask for sequence
         num_masked = int(num_joints * self.config.mask_ratio)
-        visible_joints_mask = torch.ones((subseq_len, num_joints), dtype=torch.bool, device=device)
+        visible_joints_mask = torch.ones(
+            (subseq_len, num_joints), dtype=torch.bool, device=device
+        )
 
         # * Randomly select joints to mask, all data within a timestep is masked together, across batch is different.
         rand_indices = torch.randperm(num_joints)
@@ -252,9 +266,13 @@ class EgoAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         # Get original joints_wrt_world
         joints_wrt_world = kwargs["joints_wrt_world"]  # shape: [time, 22, 3]
         if self._slice_strategy != "full_sequence":
-            assert joints_wrt_world.shape == (self._subseq_len, num_joints, 3), f"Expected shape: {(self._subseq_len, num_joints, 3)}, got: {joints_wrt_world.shape}"
+            assert (
+                joints_wrt_world.shape == (self._subseq_len, num_joints, 3)
+            ), f"Expected shape: {(self._subseq_len, num_joints, 3)}, got: {joints_wrt_world.shape}"
         else:
-            assert joints_wrt_world.shape == (total_t, num_joints, 3), f"Expected shape: {(total_t, num_joints, 3)}, got: {joints_wrt_world.shape}"
+            assert (
+                joints_wrt_world.shape == (total_t, num_joints, 3)
+            ), f"Expected shape: {(total_t, num_joints, 3)}, got: {joints_wrt_world.shape}"
 
         # Create visible_joints tensor containing only unmasked joints
         # visible_joints = joints_wrt_world[visible_joints_mask].reshape(subseq_len, num_joints - num_masked, 3)
@@ -262,7 +280,9 @@ class EgoAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         # Update kwargs with new MAE-style masking tensors
         # kwargs["visible_joints"] = visible_joints
         kwargs["visible_joints_mask"] = visible_joints_mask
-        kwargs["joints_wrt_world"] = joints_wrt_world  # Keep original joints for computing loss
+        kwargs["joints_wrt_world"] = (
+            joints_wrt_world  # Keep original joints for computing loss
+        )
         # breakpoint()
 
         # Close the file if we opened it.
@@ -288,13 +308,17 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         self._hdf5_path = config.dataset_hdf5_path
         self._subseq_len = config.subseq_len
         self._slice_strategy = config.dataset_slice_strategy
-        self._random_variable_len_proportion = config.dataset_slice_random_variable_len_proportion
+        self._random_variable_len_proportion = (
+            config.dataset_slice_random_variable_len_proportion
+        )
         self._random_variable_len_min = 16
         self._mask_ratio = config.mask_ratio
 
         # Initialize groups and cache
         with h5py.File(self._hdf5_path, "r") as hdf5_file:
-            self.min_seq_len = self._subseq_len  # Removed conditioning on previous window
+            self.min_seq_len = (
+                self._subseq_len
+            )  # Removed conditioning on previous window
             self._groups = self._initialize_groups(hdf5_file)
             self._group_lengths = self._calculate_group_lengths(hdf5_file)
             self._cum_len = np.cumsum(self._group_lengths)
@@ -316,15 +340,23 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         all_paths = self.config.dataset_files_path.read_text().splitlines()
 
         # Filter paths that start with any of the split names
-        split_prefixes = [split + '/' for split in self.config.train_splits]
+        split_prefixes = [split + "/" for split in self.config.train_splits]
         groups = [
-            p for p in all_paths
-            if any(p.startswith(prefix) for prefix in split_prefixes) and
-            cast(h5py.Dataset, cast(h5py.Group, hdf5_file[p])["T_world_root"]).shape[0] >= self.min_seq_len
+            p
+            for p in all_paths
+            if any(p.startswith(prefix) for prefix in split_prefixes)
+            and cast(
+                h5py.Dataset, cast(h5py.Group, hdf5_file[p])["T_world_root"]
+            ).shape[0]
+            >= self.min_seq_len
         ]
 
-        assert len(groups) > 0, f"No valid groups found for splits: {self.config.train_splits}"
-        assert len(cast(h5py.Group, hdf5_file[groups[0]]).keys()) > 0, f"First group {groups[0]} has no keys"
+        assert (
+            len(groups) > 0
+        ), f"No valid groups found for splits: {self.config.train_splits}"
+        assert (
+            len(cast(h5py.Group, hdf5_file[groups[0]]).keys()) > 0
+        ), f"First group {groups[0]} has no keys"
 
         return groups
 
@@ -338,7 +370,8 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
             list[int]: List of lengths for each group.
         """
         return [
-            cast(h5py.Dataset, cast(h5py.Group, hdf5_file[g])["T_world_root"]).shape[0] - self._subseq_len
+            cast(h5py.Dataset, cast(h5py.Group, hdf5_file[g])["T_world_root"]).shape[0]
+            - self._subseq_len
             for g in self._groups
         ]
 
@@ -351,7 +384,9 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         Returns:
             EgoTrainingData: Data object containing the requested item.
         """
-        global_index = index * self._subseq_len  # Directly using global index without previous window conditioning
+        global_index = (
+            index * self._subseq_len
+        )  # Directly using global index without previous window conditioning
         group_index, slice_index = self._find_group_and_slice_index(global_index)
 
         group = self._groups[group_index]
@@ -374,7 +409,9 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
 
         # Generate random mask for sequence
         num_masked = int(num_joints * self._mask_ratio)
-        visible_joints_mask = torch.ones((self._subseq_len, num_joints), dtype=torch.bool, device=device)
+        visible_joints_mask = torch.ones(
+            (self._subseq_len, num_joints), dtype=torch.bool, device=device
+        )
 
         # * Randomly select joints to mask, all data within a timestep is masked together, across batch is different.
         rand_indices = torch.randperm(num_joints)
@@ -383,25 +420,36 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
 
         # Get original joints_wrt_world
         # Combine root position from T_world_root with other joints to get full 22 joints
-        assert kwargs["joints_wrt_world"].shape == (self._subseq_len, num_joints-1, 3)
+        assert kwargs["joints_wrt_world"].shape == (self._subseq_len, num_joints - 1, 3)
         root_pos = kwargs["T_world_root"][..., 4:7]  # Get translation part [time, 3]
-        joints_wrt_world = torch.cat([
-            root_pos.unsqueeze(1),  # Add joint dimension: [time, 1, 3]
-            kwargs["joints_wrt_world"]  # [time, 21, 3]
-        ], dim=1)  # Final shape: [time, 22, 3]
-        assert joints_wrt_world.shape == (self._subseq_len, num_joints, 3), f"Expected shape: {(self._subseq_len, num_joints, 3)}, got: {joints_wrt_world.shape}"
+        joints_wrt_world = torch.cat(
+            [
+                root_pos.unsqueeze(1),  # Add joint dimension: [time, 1, 3]
+                kwargs["joints_wrt_world"],  # [time, 21, 3]
+            ],
+            dim=1,
+        )  # Final shape: [time, 22, 3]
+        assert (
+            joints_wrt_world.shape == (self._subseq_len, num_joints, 3)
+        ), f"Expected shape: {(self._subseq_len, num_joints, 3)}, got: {joints_wrt_world.shape}"
 
         # Create visible_joints tensor containing only unmasked joints
-        visible_joints = joints_wrt_world[visible_joints_mask].reshape(self._subseq_len, num_joints - num_masked, 3)
+        visible_joints = joints_wrt_world[visible_joints_mask].reshape(
+            self._subseq_len, num_joints - num_masked, 3
+        )
 
         # Update kwargs with new MAE-style masking tensors
         # kwargs["visible_joints"] = visible_joints
         kwargs["visible_joints_mask"] = visible_joints_mask
-        kwargs["joints_wrt_world"] = joints_wrt_world  # Keep original joints for computing loss
+        kwargs["joints_wrt_world"] = (
+            joints_wrt_world  # Keep original joints for computing loss
+        )
 
         return EgoTrainingData(**kwargs)
 
-    def _load_sequence_data(self, group: str, start_t: int, end_t: int, total_t: int) -> dict[str, Any]:
+    def _load_sequence_data(
+        self, group: str, start_t: int, end_t: int, total_t: int
+    ) -> dict[str, Any]:
         """Load sequence data from HDF5 file or cache.
 
         Args:
@@ -430,16 +478,23 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
 
             # Pad if necessary
             if array.shape[0] != self._subseq_len:
-                array = np.concatenate([
-                    array,
-                    np.repeat(array[-1:,], self._subseq_len - array.shape[0], axis=0)
-                ], axis=0)
+                array = np.concatenate(
+                    [
+                        array,
+                        np.repeat(
+                            array[-1:,], self._subseq_len - array.shape[0], axis=0
+                        ),
+                    ],
+                    axis=0,
+                )
 
             kwargs[k] = torch.from_numpy(array)
 
         return kwargs
 
-    def _get_npz_group(self, group: str) -> Union[h5py.Group, dict[str, np.ndarray[Any, Any]]]:
+    def _get_npz_group(
+        self, group: str
+    ) -> Union[h5py.Group, dict[str, np.ndarray[Any, Any]]]:
         """Get NPZ group from cache or HDF5 file.
 
         Args:
@@ -465,8 +520,10 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         Returns:
             tuple[int, int]: Tuple containing group index and slice index.
         """
-        group_index = np.searchsorted(self._cum_len, global_index, side='right')
-        slice_index = global_index - (self._cum_len[group_index - 1] if group_index > 0 else 0)
+        group_index = np.searchsorted(self._cum_len, global_index, side="right")
+        slice_index = global_index - (
+            self._cum_len[group_index - 1] if group_index > 0 else 0
+        )
         return int(group_index), int(slice_index)
 
     def __len__(self) -> int:
