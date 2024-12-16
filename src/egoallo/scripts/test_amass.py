@@ -93,8 +93,7 @@ class SequenceProcessor:
     ) -> EgoDenoiseTraj:
         """Process a single sequence and return denoised trajectory."""
         # Run denoising with guidance
-        # denoised_traj = run_sampling_with_masked_data_ddpm(
-        denoised_traj = run_sampling_with_masked_data_ddpm_hard_coded(
+        denoised_traj = run_sampling_with_masked_data(
             denoiser_network=denoiser,
             body_model=self.body_model,
             masked_data=batch,
@@ -107,9 +106,6 @@ class SequenceProcessor:
             num_samples=1,
             device=self.device,
         )
-        denoised_traj.betas = denoised_traj.betas.mean(
-            dim=1, keepdim=True
-        )  # average across time dimensions
         return denoised_traj
 
 
@@ -134,7 +130,7 @@ class TestRunner:
         )
 
         # runtime_config.dataset_slice_strategy = "full_sequence"
-        runtime_config.train_splits = ("val",)  # Sorry for the naming
+        runtime_config.train_splits = ("test",)  # Sorry for the naming
         self.test_dataset = EgoAmassHdf5Dataset(runtime_config, cache_files=False)
         self.dataloader = DataLoader(
             self.test_dataset,
@@ -161,7 +157,7 @@ class TestRunner:
     ) -> None:
         """Save sequence data for evaluation."""
         # Convert rotation matrices to quaternions for saving
-        body_quats = SO3.from_matrix(denoised_traj.body_rotmats[0]).wxyz
+        body_quats = SO3.from_matrix(denoised_traj.body_rotmats).wxyz
 
         # breakpoint()
         torch.save(
@@ -171,10 +167,10 @@ class TestRunner:
                 "groundtruth_T_world_root": batch.T_world_root[seq_idx, :].cpu(),
                 "groundtruth_body_quats": batch.body_quats[seq_idx, ..., :21, :].cpu(),
                 # Denoised trajectory data
-                "sampled_betas": denoised_traj.betas[0].cpu(),
+                "sampled_betas": denoised_traj.betas.mean(dim=1, keepdim=True).cpu(),
                 "sampled_T_world_root": SE3.from_rotation_and_translation(
-                    SO3.from_matrix(denoised_traj.R_world_root[0]),
-                    denoised_traj.t_world_root[0],
+                    SO3.from_matrix(denoised_traj.R_world_root),
+                    denoised_traj.t_world_root,
                 )
                 .parameters()
                 .cpu(),
@@ -227,6 +223,7 @@ class TestRunner:
         return evaluator.evaluate_directory(
             dir_with_pt_files=dir_with_pt_files,
             use_mean_body_shape=self.config.use_mean_body_shape,
+            # Initialize experiment.
             skip_confirm=self.config.skip_eval_confirm,
         )
         # except Exception as e:

@@ -410,10 +410,8 @@ class BodyEvaluator(BaseEvaluator):
         # Body rotation error
         # breakpoint()
         metrics["body_rotmats_error"] = self.compute_masked_error(
-            gt=SO3.exp(gt_body_quats)
-            .as_matrix()
-            .reshape(*gt_body_quats.shape[:-1], -1),
-            pred=SO3.exp(sampled_body_quats)
+            gt=SO3(gt_body_quats).as_matrix().reshape(*gt_body_quats.shape[:-1], -1),
+            pred=SO3(sampled_body_quats)
             .as_matrix()
             .mean(dim=0)
             .reshape(*gt_body_quats.shape[:-1], -1),

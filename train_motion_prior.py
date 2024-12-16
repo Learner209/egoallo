@@ -98,12 +98,6 @@ def run_training(
 
     device = accelerator.device
 
-    if config.debug:
-        import ipdb
-
-        ipdb.set_trace()
-
-    # Initialize experiment.
     if accelerator.is_main_process:
         training_utils.ipdb_safety_net()
 
@@ -263,7 +257,7 @@ def run_training(
 
             # Checkpointing and evaluation
             steps_to_save = 5000
-            if step % steps_to_save == 0 and step != 0:
+            if step % steps_to_save == 0:
                 # Save checkpoint.
                 checkpoint_path = experiment_dir / f"checkpoints_{step}"
                 accelerator.save_state(str(checkpoint_path))
