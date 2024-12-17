@@ -5,6 +5,7 @@ import torch
 import torch.utils.data
 import typeguard
 from jaxtyping import Bool, Float, jaxtyped, Array
+from egoallo.transforms import SO3, SE3
 from torch import Tensor
 
 from .. import fncsmpl, fncsmpl_extensions
@@ -82,6 +83,7 @@ class EgoTrainingData(TensorDataclass):
         assert raw_fields["pose_body"].shape == (timesteps, 63)
         assert raw_fields["pose_hand"].shape == (timesteps, 90)
         assert raw_fields["joints"].shape == (timesteps, 22, 3)
+        assert raw_fields["betas"].shape == (16,) or raw_fields["betas"].shape == (10,)
 
         T_world_root = torch.cat(
             [
@@ -137,6 +139,32 @@ class EgoTrainingData(TensorDataclass):
             data,
             body_model=body_model,
             output_path=output_path,
+        )
+
+    def to_denoise_traj(self) -> EgoDenoiseTraj:
+        """Convert EgoTrainingData instance to EgoDenoiseTraj instance."""
+        batch, time = self.T_world_root.shape[:2]
+
+        # Extract rotation and translation from T_world_root
+        R_world_root = SO3(self.T_world_root[..., :4]).as_matrix()
+        t_world_root = self.T_world_root[..., 4:7]
+
+        # Convert body quaternions to rotation matrices
+        body_rotmats = SO3(self.body_quats).as_matrix()
+
+        # Handle hand data if present
+        hand_rotmats = None
+        if self.hand_quats is not None:
+            hand_rotmats = SO3(self.hand_quats).as_matrix()
+
+        # Create and return EgoDenoiseTraj instance
+        return EgoDenoiseTraj(
+            betas=self.betas.expand((batch, time, 16)),
+            body_rotmats=body_rotmats,
+            contacts=self.contacts,
+            hand_rotmats=hand_rotmats,
+            R_world_root=R_world_root,
+            t_world_root=t_world_root,
         )
 
 

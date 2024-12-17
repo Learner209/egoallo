@@ -18,7 +18,7 @@ from egoallo import fncsmpl, fncsmpl_extensions
 from egoallo import transforms as tf
 from egoallo.config import CONFIG_FILE, make_cfg
 from egoallo.config.inference.inference_defaults import InferenceConfig
-from egoallo.data.amass import EgoAlloTrainConfig, EgoAmassHdf5Dataset
+from egoallo.data.amass_dataset import EgoAlloTrainConfig, EgoAmassHdf5Dataset
 from egoallo.data.dataclass import EgoTrainingData, collate_dataclass
 from egoallo.evaluation.body_evaluator import BodyEvaluator
 from egoallo.evaluation.metrics import EgoAlloEvaluationMetrics
@@ -50,7 +50,7 @@ class DataVisualizer:
 
     @staticmethod
     def save_visualization(
-        gt_data: EgoTrainingData,
+        gt_traj: EgoDenoiseTraj,
         denoised_traj: EgoDenoiseTraj,
         body_model: fncsmpl.SmplhModel,
         output_dir: Path,
@@ -66,8 +66,7 @@ class DataVisualizer:
         inferred_path = output_dir / f"inferred_traj_{timestamp}.mp4"
 
         # Visualize ground truth
-        # FIXME: the visualizeation utilities now accepts the `EgoDenoiseTraj` object, a `EgoTrainingData` object is used here.
-        # EgoTrainingData.visualize_ego_training_data(gt_data, body_model, str(gt_path))
+        EgoTrainingData.visualize_ego_training_data(gt_traj, body_model, str(gt_path))
 
         EgoTrainingData.visualize_ego_training_data(
             denoised_traj, body_model, str(inferred_path)
@@ -90,7 +89,7 @@ class SequenceProcessor:
         inference_config: InferenceConfig,
         model_config: EgoDenoiserConfig,
         device: torch.device,
-    ) -> EgoDenoiseTraj:
+    ) -> Tuple[EgoDenoiseTraj, EgoDenoiseTraj]:
         """Process a single sequence and return denoised trajectory."""
         # Run denoising with guidance
         denoised_traj = run_sampling_with_masked_data(
@@ -106,7 +105,8 @@ class SequenceProcessor:
             num_samples=1,
             device=self.device,
         )
-        return denoised_traj
+        gt_traj = batch.to_denoise_traj()
+        return gt_traj, denoised_traj
 
 
 class TestRunner:
@@ -150,23 +150,32 @@ class TestRunner:
 
     def _save_sequence_data(
         self,
-        batch: EgoTrainingData,
+        gt_traj: EgoDenoiseTraj,
         denoised_traj: EgoDenoiseTraj,
         seq_idx: int,
         output_path: Path,
     ) -> None:
         """Save sequence data for evaluation."""
         # Convert rotation matrices to quaternions for saving
-        body_quats = SO3.from_matrix(denoised_traj.body_rotmats).wxyz
+        denoised_body_quats = SO3.from_matrix(denoised_traj.body_rotmats).wxyz
+        gt_body_quats = SO3.from_matrix(gt_traj.body_rotmats).wxyz
 
         # breakpoint()
         torch.save(
             {
                 # Ground truth data
-                "groundtruth_betas": batch.betas[seq_idx, :].cpu(),
-                "groundtruth_T_world_root": batch.T_world_root[seq_idx, :].cpu(),
-                "groundtruth_body_quats": batch.body_quats[seq_idx, ..., :21, :].cpu(),
-                # Denoised trajectory data
+                "groundtruth_betas": gt_traj.betas[seq_idx, :]
+                .mean(dim=0, keepdim=True)
+                .cpu(),
+                "groundtruth_T_world_root": SE3.from_rotation_and_translation(
+                    SO3.from_matrix(gt_traj.R_world_root[seq_idx]),
+                    gt_traj.t_world_root[seq_idx],
+                )
+                .parameters()
+                .cpu(),
+                "groundtruth_body_quats": gt_body_quats[
+                    seq_idx, :21, :
+                ].cpu(),  # Denoised trajectory data
                 "sampled_betas": denoised_traj.betas.mean(dim=1, keepdim=True).cpu(),
                 "sampled_T_world_root": SE3.from_rotation_and_translation(
                     SO3.from_matrix(denoised_traj.R_world_root),
@@ -174,7 +183,7 @@ class TestRunner:
                 )
                 .parameters()
                 .cpu(),
-                "sampled_body_quats": body_quats[..., :21, :].cpu(),
+                "sampled_body_quats": denoised_body_quats[..., :21, :].cpu(),
             },
             output_path,
         )
@@ -190,7 +199,7 @@ class TestRunner:
         """Process a batch of sequences."""
         for seq_idx in range(batch.T_world_cpf.shape[0]):
             # Process sequence to get denoised trajectory
-            denoised_traj = processor.process_sequence(
+            gt_traj, denoised_traj = processor.process_sequence(
                 batch, self.denoiser, self.config, self.model_config, self.device
             )
 
@@ -198,7 +207,7 @@ class TestRunner:
             if self.config.visualize_traj:
                 timestamp = time.strftime("%Y%m%d-%H%M%S")
                 gt_path, inferred_path = visualizer.save_visualization(
-                    batch[seq_idx],
+                    gt_traj[seq_idx],
                     denoised_traj[seq_idx],
                     self.body_model,
                     output_dir,
@@ -208,7 +217,7 @@ class TestRunner:
 
             # Save sequence data
             output_path = output_dir / f"sequence_{batch_idx}_{seq_idx}.pt"
-            self._save_sequence_data(batch, denoised_traj, seq_idx, output_path)
+            self._save_sequence_data(gt_traj, denoised_traj, seq_idx, output_path)
 
     def _compute_metrics(
         self, dir_with_pt_files: Path

@@ -264,7 +264,15 @@ class SMPLViewer(BaseRenderer):
             denoised_traj.t_world_root,
         ).parameters()
 
+        # breakpoint()
+        denoised_traj = denoised_traj.map(
+            lambda x: x.unsqueeze(0)
+        )  # prepend a new axis to incorporate changes in `apply_to_body` function.
         posed = denoised_traj.apply_to_body(body_model)
+        posed = posed.map(
+            lambda x: x.squeeze(0)
+        )  # remove the first dim as a compensation for the denoised_traj unsqueeze operation.
+        denoised_traj = denoised_traj.map(lambda x: x.squeeze(0))  # restore the state
         global_root_orient_aa = SO3(posed.T_world_root[..., :4]).log()
         pose = torch.cat(
             [
@@ -277,6 +285,7 @@ class SMPLViewer(BaseRenderer):
         )
         mesh = posed.lbs()
         T_world_cpf = SE3(get_T_world_cpf(mesh))
+        # breakpoint()
         # Convert SMPL data to sequence
         sequence = []
         for i in range(T_world_root.shape[0]):

@@ -30,7 +30,7 @@ from jaxtyping import install_import_hook
 # Install hook before importing any modules you want to typecheck
 # with install_import_hook("egoallo", "typeguard.typechecked"):
 from egoallo import network, training_loss, training_utils
-from egoallo.data.amass import EgoAmassHdf5Dataset, AdaptiveAmassHdf5Dataset
+from egoallo.data.amass_dataset import EgoAmassHdf5Dataset, AdaptiveAmassHdf5Dataset
 from egoallo.data.dataclass import collate_dataclass
 from egoallo.config.train.train_config import EgoAlloTrainConfig
 
@@ -117,8 +117,8 @@ def run_training(
     model = network.EgoDenoiser(config.model)
 
     train_loader = torch.utils.data.DataLoader(
-        # dataset=AdaptiveAmassHdf5Dataset(config=config),
-        dataset=EgoAmassHdf5Dataset(config=config, cache_files=True),
+        dataset=AdaptiveAmassHdf5Dataset(config=config),
+        # dataset=EgoAmassHdf5Dataset(config=config, cache_files=True),
         batch_size=config.batch_size,
         shuffle=True,
         num_workers=config.num_workers,
@@ -257,7 +257,7 @@ def run_training(
 
             # Checkpointing and evaluation
             steps_to_save = 5000
-            if step % steps_to_save == 0:
+            if step % steps_to_save == 0 and step != 0:
                 # Save checkpoint.
                 checkpoint_path = experiment_dir / f"checkpoints_{step}"
                 accelerator.save_state(str(checkpoint_path))

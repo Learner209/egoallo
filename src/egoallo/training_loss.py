@@ -11,7 +11,7 @@ from egoallo.utils.setup_logger import setup_logger
 from torch.nn.parallel import DistributedDataParallel
 
 from . import network
-from .data.dataclass import EgoTrainingData
+from .data.dataclass import EgoDenoiseTraj, EgoTrainingData
 from .sampling import CosineNoiseScheduleConstants
 from .transforms import SO3
 
@@ -35,9 +35,9 @@ class TrainingLossConfig:
             "body_rotmats": 1.00,
             "contacts": 0.05,
             "hand_rotmats": 0.00,
-            "R_world_root": 0.5,
-            "t_world_root": 0.5,
-            "joints": 1.00,
+            "R_world_root": 0.1,
+            "t_world_root": 0.1,
+            "joints": 0.09,
             "foot_skating": 0.00,
             "velocity": 0.00,
         }.copy
@@ -114,28 +114,13 @@ class TrainingLossComputer:
         num_joints = CFG.smplh.num_joints
         # assert num_joints == 22
 
-        T_world_root = train_batch.T_world_root
-        R_world_root = SO3(T_world_root[..., :4]).as_matrix()
-        t_world_root = T_world_root[..., 4:7]
         if unwrapped_model.config.include_hands:
             assert train_batch.hand_quats is not None
-            x_0 = network.EgoDenoiseTraj(
-                betas=train_batch.betas.expand((batch, time, 16)),
-                body_rotmats=SO3(train_batch.body_quats).as_matrix(),
-                contacts=train_batch.contacts,
-                hand_rotmats=SO3(train_batch.hand_quats).as_matrix(),
-                R_world_root=R_world_root,
-                t_world_root=t_world_root,
-            )
+            x_0: EgoDenoiseTraj = train_batch.to_denoise_traj()
         else:
-            x_0 = network.EgoDenoiseTraj(
-                betas=train_batch.betas.expand((batch, time, 16)),
-                body_rotmats=SO3(train_batch.body_quats).as_matrix(),
-                contacts=train_batch.contacts,
-                hand_rotmats=None,
-                R_world_root=R_world_root,
-                t_world_root=t_world_root,
-            )
+            assert train_batch.hand_quats is None
+            x_0: EgoDenoiseTraj = train_batch.to_denoise_traj()
+
         x_0_packed = x_0.pack()
         device = x_0_packed.device
         assert x_0_packed.shape == (batch, time, unwrapped_model.get_d_state())
@@ -189,9 +174,10 @@ class TrainingLossComputer:
         hand_positions_wrt_cpf: Tensor | None = None
         if unwrapped_model.config.include_hands:
             # Joints 19 and 20 are the hand positions.
-            hand_positions_wrt_cpf = train_batch.joints_wrt_cpf[:, :, 19:21, :].reshape(
-                (batch, time, 6)
-            )
+            wrist_start_index = 20
+            hand_positions_wrt_cpf = train_batch.joints_wrt_cpf[
+                :, :, wrist_start_index : wrist_start_index + 2, :
+            ].reshape((batch, time, 6))
 
             # Exclude hand positions for some items in the batch. We'll just do
             # this by passing in zeros.
@@ -254,10 +240,10 @@ class TrainingLossComputer:
         invisible_joint_loss = (
             joint_loss
             * (
-                torch.ones_like(train_batch.visible_joints_mask[..., None])
-            )  # Use all joints instead of just invisible ones
+                (~train_batch.visible_joints_mask)[..., None]
+            )  # Use only invisible joints by inverting the visible joints mask
         ).sum(dim=(-2, -1)) / (  # Sum over joints (22) and xyz (3)
-            (torch.ones_like(train_batch.visible_joints_mask).sum(dim=-1) * 3)
+            ((~train_batch.visible_joints_mask).sum(dim=-1) * 3)
             + 1e-8  # Multiply by 3 for xyz channels
         )  # Result: (b, t)
 

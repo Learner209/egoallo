@@ -5,6 +5,8 @@ from functools import cache, cached_property
 from math import ceil
 from typing import Literal, assert_never, Optional
 from pathlib import Path
+from jaxtyping import jaxtyped
+import typeguard
 
 import numpy as np
 import torch
@@ -82,8 +84,13 @@ class EgoDenoiseTraj(TensorDataclass):
         device = self.betas.device
         dtype = self.betas.dtype
         assert self.hand_rotmats is not None
+        assert (
+            self.betas.dim() == 3
+        ), f"betas.shape is supposed to be (batch_size, timesteps, num_betas), get {self.betas.shape} instead."
 
-        shaped = body_model.with_shape(self.betas)
+        shaped = body_model.with_shape(
+            self.betas.mean(dim=1)
+        )  # betas averges across timestep dimensions.
         T_world_root = SE3.from_rotation_and_translation(
             SO3.from_matrix(self.R_world_root),
             self.t_world_root,
@@ -195,7 +202,7 @@ class EgoDenoiserConfig:
 
     # MAE parameters
     mask_ratio: float = 0.75  # Ratio of joints to mask during training
-    include_hands: bool = True
+    include_hands: bool = False
 
     # Model settings
     activation: Literal["gelu", "relu"] = "gelu"
@@ -209,7 +216,7 @@ class EgoDenoiserConfig:
     joint_cond_mode: Literal[
         "absolute", "absrel_jnts", "absrel", "absrel_global_deltas"
     ] = "absrel"
-    joint_emb_dim: int = 256
+    joint_emb_dim: int = 0  # FIXME: the joint_emb_dim is set to 0 since the joint emebddings is not incorporated into the code anymore.
 
     # Add SMPL-H model path configuration
     smplh_npz_path: Path = Path("data/smplh/neutral/model.npz")
@@ -252,9 +259,10 @@ class EgoDenoiserConfig:
 
         return d_cond
 
+    @jaxtyped(typechecker=typeguard.typechecked)
     def make_cond_with_masked_joints(
         self,
-        joints: Float[Tensor, "batch time num_joints 3"],
+        joints: Float[Tensor, "batch time 22 3"],
         visible_joints_mask: Bool[Tensor, "batch time 22"],
     ) -> Float[Tensor, "batch time d_cond"]:
         """Construct conditioning using joints with integrated visibility and embeddings.
@@ -302,7 +310,7 @@ class EgoDenoiserConfig:
                     joints_with_vis.reshape(
                         batch, time, -1
                     ),  # Joint positions with visibility
-                    index_embeddings.reshape(batch, time, -1),  # Joint embeddings
+                    # index_embeddings.reshape(batch, time, -1),  # Joint embeddings
                     # floor_height,  # Floor height
                 ],
                 dim=-1,
@@ -326,7 +334,7 @@ class EgoDenoiserConfig:
                 [
                     first_joint.reshape(batch, time, -1),
                     local_coords.reshape(batch, time, -1),
-                    index_embeddings.reshape(batch, time, -1),
+                    # index_embeddings.reshape(batch, time, -1),
                     # floor_height,
                 ],
                 dim=-1,
@@ -345,7 +353,7 @@ class EgoDenoiserConfig:
                 [
                     abs_pos.reshape(batch, time, -1),
                     rel_pos.reshape(batch, time, -1),
-                    index_embeddings.reshape(batch, time, -1),
+                    # index_embeddings.reshape(batch, time, -1),
                     # floor_height,
                 ],
                 dim=-1,
@@ -395,7 +403,7 @@ class EgoDenoiserConfig:
             cond = torch.cat(
                 [
                     joints_with_vis.reshape(batch, time, -1),  # Joints with visibility
-                    index_embeddings.reshape(batch, time, -1),  # Joint embeddings
+                    # index_embeddings.reshape(batch, time, -1),  # Joint embeddings
                     r_mat.reshape(batch, time, 9),  # Rotation matrix
                     t.reshape(batch, time, 3),  # Translation
                     # floor_height,  # Floor height
@@ -441,7 +449,7 @@ class EgoDenoiserConfig:
             cond = torch.cat(
                 [
                     visible_jnts.reshape(batch, time, -1),  # Joint positions
-                    index_embeddings.reshape(batch, time, -1),  # Joint embeddings
+                    # index_embeddings.reshape(batch, time, -1),  # Joint embeddings
                     # floor_height,  # Floor height
                 ],
                 dim=-1,
@@ -456,7 +464,7 @@ class EgoDenoiserConfig:
                 [
                     first_visible_jnt.reshape(batch, time, -1),
                     local_coords.reshape(batch, time, -1),
-                    index_embeddings.reshape(batch, time, -1),
+                    # index_embeddings.reshape(batch, time, -1),
                     # floor_height,
                 ],
                 dim=-1,
@@ -471,7 +479,7 @@ class EgoDenoiserConfig:
                 [
                     abs_pos.reshape(batch, time, -1),
                     rel_pos.reshape(batch, time, -1),
-                    index_embeddings.reshape(batch, time, -1),
+                    # index_embeddings.reshape(batch, time, -1),
                     # floor_height,
                 ],
                 dim=-1,
