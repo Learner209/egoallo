@@ -17,7 +17,7 @@ classifiers = [
 dependencies = [
     "torch>2.2",
     "viser>=0.2.11",
-    "typeguard",
+    "typeguard==2.13.3",
     "jaxtyping>=0.2.29",
     "einops",
     "rotary-embedding-torch",
