@@ -141,7 +141,7 @@ class EgoTrainingData(TensorDataclass):
             output_path=output_path,
         )
 
-    def to_denoise_traj(self) -> EgoDenoiseTraj:
+    def to_denoise_traj(self, include_hands: bool = True) -> EgoDenoiseTraj:
         """Convert EgoTrainingData instance to EgoDenoiseTraj instance."""
         batch, time = self.T_world_root.shape[:2]
 
@@ -154,7 +154,7 @@ class EgoTrainingData(TensorDataclass):
 
         # Handle hand data if present
         hand_rotmats = None
-        if self.hand_quats is not None:
+        if self.hand_quats is not None and include_hands:
             hand_rotmats = SO3(self.hand_quats).as_matrix()
 
         # Create and return EgoDenoiseTraj instance

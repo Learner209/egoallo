@@ -7,8 +7,9 @@ from typing import Any, Dict, Optional, Tuple, Union
 import numpy as np
 import torch
 from torch import Tensor
-from jaxtyping import Float
 
+from jaxtyping import Float, jaxtyped
+import typeguard
 from egoallo.utils.setup_logger import setup_logger
 from egoallo.data.motion_processing import MotionProcessor
 from egoallo.fncsmpl import SmplhModel, SmplhShaped, SmplhShapedAndPosed
@@ -308,6 +309,7 @@ class RICHDataProcessor:
 
         return body_params_tensor, None, contact_data
 
+    @jaxtyped(typechecker=typeguard.typechecked)
     def _convert_rotations(
         self,
         global_orient: Float[Tensor, "... 3"],
@@ -512,4 +514,3 @@ class RICHDataProcessor:
         """
         np.savez_compressed(output_path, **sequence_data)
         logger.info(f"Saved processed sequence to {output_path}")
-

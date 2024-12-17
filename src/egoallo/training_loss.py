@@ -4,19 +4,20 @@ import dataclasses
 from typing import Literal
 
 import torch.utils.data
-from jaxtyping import Bool, Float, Int
+import typeguard
+from jaxtyping import Bool, Float, Int, jaxtyped
+from numpy import unwrap
 from torch import Tensor
 from torch._dynamo import OptimizedModule
-from egoallo.utils.setup_logger import setup_logger
 from torch.nn.parallel import DistributedDataParallel
+
+from egoallo.config import CONFIG_FILE, make_cfg
+from egoallo.utils.setup_logger import setup_logger
 
 from . import network
 from .data.dataclass import EgoDenoiseTraj, EgoTrainingData
 from .sampling import CosineNoiseScheduleConstants
 from .transforms import SO3
-
-
-from egoallo.config import make_cfg, CONFIG_FILE
 
 local_config_file = CONFIG_FILE
 CFG = make_cfg(config_name="defaults", config_file=local_config_file, cli_args=[])
@@ -35,9 +36,9 @@ class TrainingLossConfig:
             "body_rotmats": 1.00,
             "contacts": 0.05,
             "hand_rotmats": 0.00,
-            "R_world_root": 0.1,
-            "t_world_root": 0.1,
-            "joints": 0.09,
+            "R_world_root": 0.25,
+            "t_world_root": 0.25,
+            "joints": 0.1,
             "foot_skating": 0.00,
             "velocity": 0.00,
         }.copy
@@ -70,6 +71,7 @@ class TrainingLossComputer:
         padding = 0.01
         self.weight_t = weight_t / weight_t[1] * (1.0 - padding) + padding
 
+    @jaxtyped(typechecker=typeguard.typechecked)
     def compute_geodesic_distance(
         self, R1: Float[Tensor, "... 3 3"], R2: Float[Tensor, "... 3 3"]
     ) -> Float[Tensor, "..."]:
@@ -95,6 +97,7 @@ class TrainingLossComputer:
         # Return geodesic distance
         return torch.acos(cos_theta)
 
+    @jaxtyped(typechecker=typeguard.typechecked)
     def compute_denoising_loss(
         self,
         model: network.EgoDenoiser | DistributedDataParallel | OptimizedModule,
@@ -116,10 +119,14 @@ class TrainingLossComputer:
 
         if unwrapped_model.config.include_hands:
             assert train_batch.hand_quats is not None
-            x_0: EgoDenoiseTraj = train_batch.to_denoise_traj()
+            x_0: EgoDenoiseTraj = train_batch.to_denoise_traj(
+                include_hands=unwrapped_model.config.include_hands
+            )
         else:
-            assert train_batch.hand_quats is None
-            x_0: EgoDenoiseTraj = train_batch.to_denoise_traj()
+            # assert train_batch.hand_quats is None
+            x_0: EgoDenoiseTraj = train_batch.to_denoise_traj(
+                include_hands=unwrapped_model.config.include_hands
+            )
 
         x_0_packed = x_0.pack()
         device = x_0_packed.device
@@ -146,6 +153,7 @@ class TrainingLossComputer:
         weight_t = self.weight_t[t].to(device)
         assert weight_t.shape == (batch,)
 
+        @jaxtyped(typechecker=typeguard.typechecked)
         def weight_and_mask_loss(
             loss_per_step: Float[Tensor, "b t d"],
             # bt stands for "batch time"
@@ -258,11 +266,12 @@ class TrainingLossComputer:
         foot_contacts = x_0.contacts[..., foot_indices]  # (batch, time, 4)
         foot_skating_mask = (
             foot_contacts[:, 1:] * train_batch.mask[:, 1:, None]
-        )  # (batch, time-1, 4)
+        ).bool()  # (batch, time-1, 4)
 
         # Compute foot skating loss for each foot joint
         foot_skating_losses = []
         for i in range(len(foot_indices)):
+            # breakpoint()
             foot_loss = weight_and_mask_loss(
                 foot_velocities[..., i, :].pow(2),  # (batch, time-1, 3)
                 bt_mask=foot_skating_mask[..., i],  # (batch, time-1)

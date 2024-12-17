@@ -6,9 +6,10 @@ import numpy as np
 import numpy.typing as npt
 import torch
 import trimesh
+import typeguard
 import viser
 import viser.transforms as vtf
-from jaxtyping import Float
+from jaxtyping import Float, jaxtyped
 from plyfile import PlyData
 from torch import Tensor
 
@@ -128,6 +129,7 @@ def add_splat_to_viser(
     )
 
 
+@jaxtyped(typechecker=typeguard.typechecked)
 def visualize_traj_and_hand_detections(
     server: viser.ViserServer,
     T_world_root: Float[Tensor, "timesteps 7"],

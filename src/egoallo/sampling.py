@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import time
-from tqdm import tqdm
+from typing import TYPE_CHECKING
 
 import numpy as np
 import torch
-from jaxtyping import Float
+import typeguard
+from jaxtyping import Float, jaxtyped
 from torch import Tensor
+from tqdm import tqdm
 
 from . import fncsmpl, network
 from .guidance_optimizer_jax import (
@@ -19,7 +21,6 @@ from .hand_detection_structs import (
 )
 from .tensor_dataclass import TensorDataclass
 from .transforms import SE3, SO3
-from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .data.amass import EgoTrainingData
@@ -44,6 +45,7 @@ def linear_ts(timesteps: int) -> np.ndarray:
     return np.arange(start_step, end_step - 1, -1)
 
 
+@jaxtyped(typechecker=typeguard.typechecked)
 class CosineNoiseScheduleConstants(TensorDataclass):
     alpha_t: Float[Tensor, "T"]
     r"""$1 - \beta_t$"""
@@ -73,6 +75,7 @@ class CosineNoiseScheduleConstants(TensorDataclass):
         )
 
 
+@jaxtyped(typechecker=typeguard.typechecked)
 def run_sampling_with_stitching(
     denoiser_network: network.EgoDenoiser,
     body_model: fncsmpl.SmplhModel,
@@ -234,6 +237,7 @@ def run_sampling_with_stitching(
         return x_t_list[-1]
 
 
+@jaxtyped(typechecker=typeguard.typechecked)
 def run_sampling_with_masked_data(
     denoiser_network: network.EgoDenoiser,
     body_model: fncsmpl.SmplhModel,
@@ -392,6 +396,7 @@ def run_sampling_with_masked_data(
 
 
 # Implementation of DDPM sampling
+@jaxtyped(typechecker=typeguard.typechecked)
 def run_sampling_with_masked_data_ddpm(
     denoiser_network: network.EgoDenoiser,
     body_model: fncsmpl.SmplhModel,
@@ -551,6 +556,7 @@ def run_sampling_with_masked_data_ddpm(
         return x_t_list[-1]
 
 
+@jaxtyped(typechecker=typeguard.typechecked)
 def run_sampling_with_masked_data_ddpm_hard_coded(
     denoiser_network: network.EgoDenoiser,
     body_model: fncsmpl.SmplhModel,

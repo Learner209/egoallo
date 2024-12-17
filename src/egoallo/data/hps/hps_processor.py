@@ -7,10 +7,11 @@ import pickle
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
+from jaxtyping import Float, jaxtyped
+import typeguard
 import numpy as np
 import torch
 from torch import Tensor, device
-from jaxtyping import Float
 
 from egoallo.utils.setup_logger import setup_logger
 from egoallo.data.motion_processing import MotionProcessor
@@ -86,6 +87,7 @@ class HPSProcessor:
             trajectory_data[last_key]["time"],
         )
 
+    @jaxtyped(typechecker=typeguard.typechecked)
     def _convert_rotations(
         self,
         root_orient: Float[Tensor, "... 3"],

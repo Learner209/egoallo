@@ -20,11 +20,11 @@ In contrast to other SMPL wrappers:
   rigid transforms.
 """
 
-from __future__ import annotations
+# TODO: this import may interfere with jaxtyping's runtime checking. comment out not.
+# from __future__ import annotations
 
 from pathlib import Path
 
-import smplx
 import numpy as np
 import torch
 import typeguard
@@ -43,15 +43,15 @@ class SmplhModel(TensorDataclass):
 
     faces: Int[Tensor, "faces 3"]
     """Vertex indices for mesh faces."""
-    J_regressor: Float[Tensor, "joints+1 verts"]
+    J_regressor: Float[Tensor, "joints_plus_1 verts"]
     """Linear map from vertex to joint positions.
     For SMPL-H, 1 root + 21 body joints + 2 * 15 hand joints."""
     parent_indices: tuple[int, ...]
     """Defines kinematic tree. Index of -1 signifies that a joint is defined
     relative to the root."""
-    weights: Float[Tensor, "verts joints+1"]
+    weights: Float[Tensor, "verts joints_plus_1 "]
     """LBS weights."""
-    posedirs: Float[Tensor, "verts 3 joints*9"]
+    posedirs: Float[Tensor, "verts 3 joints_times_9"]
     """Pose blend shape bases."""
     v_template: Float[Tensor, "verts 3"]
     """Canonical mesh verts."""
@@ -63,7 +63,7 @@ class SmplhModel(TensorDataclass):
     """Right hand PCA components. Optional."""
 
     @staticmethod
-    def load(model_path: Path, num_pca_comps: int = 6) -> SmplhModel:
+    def load(model_path: Path, num_pca_comps: int = 6) -> "SmplhModel":
         """Load a body model from an NPZ or PKL file.
 
         Args:
@@ -129,6 +129,7 @@ class SmplhModel(TensorDataclass):
         )
 
     @classmethod
+    @jaxtyped(typechecker=typeguard.typechecked)
     def pca_to_aa(
         cls,
         hand_pose_pca: Float[Tensor, "*#batch num_pca"],
@@ -152,6 +153,7 @@ class SmplhModel(TensorDataclass):
         # Reshape to (batch_size, 15, 3) format
         return hand_pose.reshape(*hand_pose.shape[:-1], 15, 3)
 
+    @jaxtyped(typechecker=typeguard.typechecked)
     def convert_hand_poses(
         self,
         left_hand_pca: Float[Tensor, "*#batch num_pca"] | None = None,
@@ -183,7 +185,8 @@ class SmplhModel(TensorDataclass):
         """Get the number of joints in this model."""
         return len(self.parent_indices)
 
-    def with_shape(self, betas: Float[Tensor, "*#batch n_betas"]) -> SmplhShaped:
+    @jaxtyped(typechecker=typeguard.typechecked)
+    def with_shape(self, betas: Float[Tensor, "*#batch n_betas"]) -> "SmplhShaped":
         """Compute a new body model, with betas applied."""
         num_betas = betas.shape[-1]
         assert num_betas <= self.shapedirs.shape[-1]
@@ -225,13 +228,14 @@ class SmplhShaped(TensorDataclass):
     """Position of each shaped body joint relative to its parent. Does not
     include root."""
 
+    @jaxtyped(typechecker=typeguard.typechecked)
     def with_pose_decomposed(
         self,
         T_world_root: Float[Tensor, "*#batch 7"],
         body_quats: Float[Tensor, "*#batch 21 4"],
         left_hand_quats: Float[Tensor, "*#batch 15 4"] | None = None,
         right_hand_quats: Float[Tensor, "*#batch 15 4"] | None = None,
-    ) -> SmplhShapedAndPosed:
+    ) -> "SmplhShapedAndPosed":
         """Pose our SMPL-H body model. Returns a set of joint and vertex outputs."""
 
         num_joints = self.body_model.get_num_joints()
@@ -248,11 +252,12 @@ class SmplhShaped(TensorDataclass):
         assert local_quats.shape[-2:] == (num_joints, 4)
         return self.with_pose(T_world_root, local_quats)
 
+    @jaxtyped(typechecker=typeguard.typechecked)
     def with_pose(
         self,
         T_world_root: Float[Tensor, "*#batch 7"],
         local_quats: Float[Tensor, "*#batch joints 4"],
-    ) -> SmplhShapedAndPosed:
+    ) -> "SmplhShapedAndPosed":
         """Pose our SMPL-H body model. Returns a set of joint and vertex outputs."""
 
         # Forward kinematics.
@@ -287,9 +292,10 @@ class SmplhShapedAndPosed(TensorDataclass):
     Ts_world_joint: Float[Tensor, "*#batch joints 7"]
     """Absolute transform for each joint. Does not include the root."""
 
+    @jaxtyped(typechecker=typeguard.typechecked)
     def with_new_T_world_root(
         self, T_world_root: Float[Tensor, "*#batch 7"]
-    ) -> SmplhShapedAndPosed:
+    ) -> "SmplhShapedAndPosed":
         return SmplhShapedAndPosed(
             shaped_model=self.shaped_model,
             T_world_root=T_world_root,
@@ -301,7 +307,7 @@ class SmplhShapedAndPosed(TensorDataclass):
             ).parameters(),
         )
 
-    def lbs(self) -> SmplMesh:
+    def lbs(self) -> "SmplMesh":
         """Compute a mesh with LBS."""
         num_joints = self.local_quats.shape[-2]
         verts_with_blend = self.shaped_model.verts_zero + einsum(
@@ -355,6 +361,7 @@ class SmplhShapedAndPosed(TensorDataclass):
             faces=self.shaped_model.body_model.faces,
         )
 
+    @jaxtyped(typechecker=typeguard.typechecked)
     def compute_joint_contacts(
         self, vertex_contacts: Float[Tensor, "*#batch verts"]
     ) -> Float[Tensor, "*#batch joints"]:
@@ -403,6 +410,7 @@ class SmplMesh(TensorDataclass):
     """Faces for mesh."""
 
 
+@jaxtyped(typechecker=typeguard.typechecked)
 def forward_kinematics(
     T_world_root: Float[Tensor, "*#batch 7"],
     Rs_parent_joint: Float[Tensor, "*#batch joints 4"],

@@ -23,14 +23,16 @@ import jaxlie
 import jaxls
 import numpy as onp
 import torch
+import typeguard
 from jax import numpy as jnp
-from jaxtyping import Float, Int
+from jaxtyping import Float, Int, jaxtyped
 from torch import Tensor
 
 from . import fncsmpl, fncsmpl_jax, network
 from .transforms._so3 import SO3
 
 
+@jaxtyped(typechecker=typeguard.typechecked)
 def do_guidance_optimization(
     T_world_root: Float[Tensor, "time 7"],
     traj: network.EgoDenoiseTraj,
@@ -320,10 +322,9 @@ def _optimize(
 
     # Assume body shape is time-invariant.
     shaped_body = body.with_shape(jnp.mean(betas, axis=0))
-    
+
     init_posed = shaped_body.with_pose(
-        T_world_root=T_world_root,
-        local_quats=init_quats
+        T_world_root=T_world_root, local_quats=init_quats
     )
 
     foot_joint_indices = jnp.array([6, 7, 9, 10])

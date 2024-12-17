@@ -8,8 +8,9 @@ from pathlib import Path
 
 import numpy as np
 import torch
+import typeguard
 import yaml
-from jaxtyping import Float
+from jaxtyping import Float, jaxtyped
 from projectaria_tools.core import mps  # type: ignore
 from projectaria_tools.core.data_provider import create_vrs_data_provider
 from safetensors import safe_open
@@ -130,6 +131,7 @@ class InferenceTrajectoryPaths:
         )
 
 
+@jaxtyped(typechecker=typeguard.typechecked)
 class InferenceInputTransforms(TensorDataclass):
     """Some relevant transforms for inference."""
 
@@ -185,6 +187,7 @@ class InferenceInputTransforms(TensorDataclass):
         )
 
 
+@jaxtyped(typechecker=typeguard.typechecked)
 def create_masked_training_data(
     body_model: fncsmpl.SmplhModel,
     data: EgoTrainingData,

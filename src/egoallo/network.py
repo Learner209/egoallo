@@ -1,27 +1,25 @@
 from __future__ import annotations
+
 from dataclasses import dataclass
-from pathlib import Path
 from functools import cache, cached_property
 from math import ceil
-from typing import Literal, assert_never, Optional
 from pathlib import Path
-from jaxtyping import jaxtyped
-import typeguard
+from typing import Literal, Optional, assert_never
 
 import numpy as np
 import torch
+import typeguard
 from einops import rearrange
 from jaxtyping import Bool, Float, Int, jaxtyped
-import typeguard
 from loguru import logger
 from rotary_embedding_torch import RotaryEmbedding
 from torch import Tensor, nn
 
+from egoallo.config import CONFIG_FILE, make_cfg
+
 from .fncsmpl import SmplhModel, SmplhShapedAndPosed
 from .tensor_dataclass import TensorDataclass
 from .transforms import SE3, SO3
-
-from egoallo.config import make_cfg, CONFIG_FILE
 
 local_config_file = CONFIG_FILE
 CFG = make_cfg(config_name="defaults", config_file=local_config_file, cli_args=[])
@@ -31,6 +29,7 @@ from egoallo.utils.setup_logger import setup_logger
 logger = setup_logger(output=None, name=__name__)
 
 
+@jaxtyped(typechecker=typeguard.typechecked)
 def project_rotmats_via_svd(
     rotmats: Float[Tensor, "*batch 3 3"],
 ) -> Float[Tensor, "*batch 3 3"]:
@@ -83,26 +82,35 @@ class EgoDenoiseTraj(TensorDataclass):
         """Apply the trajectory data to a SMPL-H body model."""
         device = self.betas.device
         dtype = self.betas.dtype
-        assert self.hand_rotmats is not None
-        assert (
-            self.betas.dim() == 3
-        ), f"betas.shape is supposed to be (batch_size, timesteps, num_betas), get {self.betas.shape} instead."
+        # assert self.hand_rotmats is not None
 
         shaped = body_model.with_shape(
-            self.betas.mean(dim=1)
+            self.betas
         )  # betas averges across timestep dimensions.
         T_world_root = SE3.from_rotation_and_translation(
             SO3.from_matrix(self.R_world_root),
             self.t_world_root,
         ).parameters()
-        posed = shaped.with_pose(
+
+        posed = shaped.with_pose_decomposed(
             T_world_root=T_world_root,
-            local_quats=SO3.from_matrix(
-                torch.cat([self.body_rotmats, self.hand_rotmats], dim=-3)
-            ).wxyz,
+            body_quats=SO3.from_matrix(self.body_rotmats).wxyz,
+            left_hand_quats=SO3.from_matrix(self.hand_rotmats[:, :15]).wxyz
+            if self.hand_rotmats is not None
+            else None,
+            right_hand_quats=SO3.from_matrix(self.hand_rotmats[:, 15:30]).wxyz
+            if self.hand_rotmats is not None
+            else None,
         )
+        # posed = shaped.with_pose(
+        #     T_world_root=T_world_root,
+        #     local_quats=SO3.from_matrix(
+        #         torch.cat([self.body_rotmats, self.hand_rotmats], dim=-3)
+        #     ).wxyz,
+        # )
         return posed
 
+    @jaxtyped(typechecker=typeguard.typechecked)
     def pack(self) -> Float[Tensor, "*batch timesteps d_state"]:
         """Pack trajectory into a single flattened vector."""
         (*batch, time, num_joints, _, _) = self.body_rotmats.shape
@@ -123,6 +131,7 @@ class EgoDenoiseTraj(TensorDataclass):
         return torch.cat(tensors_to_pack, dim=-1)
 
     @classmethod
+    @jaxtyped(typechecker=typeguard.typechecked)
     def unpack(
         cls,
         x: Float[Tensor, "*batch timesteps d_state"],
@@ -419,6 +428,7 @@ class EgoDenoiserConfig:
         assert cond.shape == (batch, time, self.d_cond)
         return cond
 
+    @jaxtyped(typechecker=typeguard.typechecked)
     def make_cond(
         self,
         visible_jnts: Float[Tensor, "batch time num_visible_joints 3"],
@@ -651,6 +661,7 @@ class EgoDenoiser(nn.Module):
     def get_d_state(self) -> int:
         return EgoDenoiseTraj.get_packed_dim(self.config.include_hands)
 
+    @jaxtyped(typechecker=typeguard.typechecked)
     def forward(
         self,
         x_t_packed: Float[Tensor, "batch time state_dim"],
@@ -658,7 +669,7 @@ class EgoDenoiser(nn.Module):
         *,
         project_output_rotmats: bool,
         joints: Float[Tensor, "batch time num_joints 3"],
-        visible_joints_mask: Bool[Tensor, "batch time 21"],
+        visible_joints_mask: Bool[Tensor, "batch time 22"],
         mask: Bool[Tensor, "batch time"] | None,
         cond_dropout_keep_mask: Bool[Tensor, "batch"] | None = None,
     ) -> Float[Tensor, "batch time state_dim"]:
@@ -791,6 +802,7 @@ class EgoDenoiser(nn.Module):
         return packed_output
 
 
+@jaxtyped(typechecker=typeguard.typechecked)
 @cache
 def make_positional_encoding(
     d_latent: int, length: int, dtype: torch.dtype
@@ -807,9 +819,10 @@ def make_positional_encoding(
     return pe
 
 
+@jaxtyped(typechecker=typeguard.typechecked)
 def fourier_encode(
     x: Float[Tensor, "*batch channels"], freqs: int
-) -> Float[Tensor, "*batch channels+2*freqs*channels"]:
+) -> Float[Tensor, "*batch channels_plus_2_mul_freqs_mul_channels"]:
     """Apply Fourier encoding to a tensor."""
     *batch_axes, x_dim = x.shape
     coeffs = 2.0 ** torch.arange(freqs, device=x.device)  # shape: (freqs,)
@@ -889,6 +902,7 @@ class TransformerBlock(nn.Module):
         self.mlp1 = nn.Linear(config.d_feedforward, config.d_latent)
         self.config = config
 
+    @jaxtyped(typechecker=typeguard.typechecked)
     def forward(
         self,
         x: Float[Tensor, "batch tokens d_latent"],

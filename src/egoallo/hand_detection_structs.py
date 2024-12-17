@@ -12,7 +12,8 @@ from typing import Protocol, TypedDict, cast
 
 import numpy as np
 import torch
-from jaxtyping import Float, Int
+import typeguard
+from jaxtyping import Float, Int, jaxtyped
 from projectaria_tools.core import mps
 from projectaria_tools.core.mps.utils import get_nearest_wrist_and_palm_pose
 from torch import Tensor
@@ -49,6 +50,7 @@ class SavedHamerOutputs(TypedDict):
     T_cpf_cam: np.ndarray  # wxyz_xyz
 
 
+@jaxtyped(typechecker=typeguard.typechecked)
 class AriaHandWristPoseWrtWorld(TensorDataclass):
     confidence: Float[Tensor, "n_detections"]
     wrist_position: Float[Tensor, "n_detections 3"]
@@ -65,6 +67,7 @@ class CorrespondedAriaHandWristPoseDetections(TensorDataclass):
     detections_right_concat: AriaHandWristPoseWrtWorld | None
 
     @staticmethod
+    @jaxtyped(typechecker=typeguard.typechecked)
     def load(
         wrist_and_palm_poses_csv_path: Path,
         target_timestamps_sec: tuple[float, ...],
@@ -75,6 +78,7 @@ class CorrespondedAriaHandWristPoseDetections(TensorDataclass):
             wrist_normal_device: np.ndarray
             palm_normal_device: np.ndarray
 
+        @jaxtyped(typechecker=typeguard.typechecked)
         class OneSide(Protocol):
             confidence: float
             wrist_position_device: np.ndarray
@@ -172,6 +176,7 @@ class CorrespondedAriaHandWristPoseDetections(TensorDataclass):
         )
 
 
+@jaxtyped(typechecker=typeguard.typechecked)
 class SingleHandHamerOutputWrtCameraConcatenated(TensorDataclass):
     verts: Float[Tensor, "n_detections n_verts 3"]
     keypoints_3d: Float[Tensor, "n_detections n_keypoints 3"]
@@ -180,6 +185,7 @@ class SingleHandHamerOutputWrtCameraConcatenated(TensorDataclass):
     indices: Int[Tensor, "n_detections"]
 
 
+@jaxtyped(typechecker=typeguard.typechecked)
 class CorrespondedHamerDetections(TensorDataclass):
     mano_faces_right: Tensor
     mano_faces_left: Tensor
@@ -230,6 +236,7 @@ class CorrespondedHamerDetections(TensorDataclass):
         )
 
     @staticmethod
+    @jaxtyped(typechecker=typeguard.typechecked)
     def load(
         hand_pkl_path: Path,
         target_timestamps_sec: tuple[float, ...],
