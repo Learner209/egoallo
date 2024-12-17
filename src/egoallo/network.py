@@ -430,7 +430,8 @@ class EgoDenoiserConfig:
             assert_never(self.joint_cond_mode)
 
         # Apply Fourier encoding
-        cond = fourier_encode(cond, freqs=self.fourier_enc_freqs)
+        if self.use_fourier_in_masked_joints:
+            cond = fourier_encode(cond, freqs=self.fourier_enc_freqs)
         assert cond.shape == (batch, time, self.d_cond)
         return cond
 
