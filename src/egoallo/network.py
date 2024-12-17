@@ -230,6 +230,11 @@ class EgoDenoiserConfig:
     # Add SMPL-H model path configuration
     smplh_npz_path: Path = Path("data/smplh/neutral/model.npz")
 
+    # Add new config parameter
+    use_fourier_in_masked_joints: bool = (
+        True  # Whether to apply Fourier encoding in make_cond_with_masked_joints
+    )
+
     @cached_property
     def d_cond(self) -> int:
         """Dimensionality of conditioning vector."""
@@ -263,8 +268,9 @@ class EgoDenoiserConfig:
         else:
             assert_never(self.joint_cond_mode)
 
-        # Apply Fourier encoding
-        d_cond = d_cond * (2 * self.fourier_enc_freqs + 1)
+        # Apply Fourier encoding multiplier only if enabled
+        if self.use_fourier_in_masked_joints:
+            d_cond = d_cond * (2 * self.fourier_enc_freqs + 1)
 
         return d_cond
 

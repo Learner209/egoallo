@@ -41,6 +41,9 @@ class EgoAlloTrainConfig:
     warmup_steps: int = 1000
     max_grad_norm: float = 1.0
 
+    # Network arch.
+    use_fourier_in_masked_joints: bool = True
+
     # debug
     debug: bool = False
 
@@ -49,4 +52,5 @@ class EgoAlloTrainConfig:
             mask_ratio=self.mask_ratio,
             joint_cond_mode=self.joint_cond_mode,
             smplh_npz_path=self.smplh_npz_path,
+            use_fourier_in_masked_joints=self.use_fourier_in_masked_joints,
         )
