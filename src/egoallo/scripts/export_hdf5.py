@@ -20,9 +20,9 @@ import faulthandler
 
 def main(
     smplh_npz_path: Path = Path("./assets/smpl_based_model/smplh/neutral/model.npz"),
-    data_npz_dirs: list[Path] = [Path("data/amass.bak/processed")],
-    output_file: Path = Path("data/amass.bak/processed.hdf5"),
-    output_list_file: Path = Path("data/amass.bak/processed.txt"),
+    data_npz_dirs: list[Path] = [Path("")],
+    output_file: Path = Path(""),
+    output_list_file: Path = Path(""),
     include_hands: bool = True,
 ) -> None:
     body_model = fncsmpl.SmplhModel.load(smplh_npz_path)
@@ -65,7 +65,9 @@ def main(
                     group_name = str(npz_path).partition(str(data_npz_dir) + "/")[2]
                     break
             else:
-                raise ValueError(f"NPZ file {npz_path} not found in any input directory")
+                raise ValueError(
+                    f"NPZ file {npz_path} not found in any input directory"
+                )
 
             print(f"Writing to group {group_name} on {device_idx}...")
             group = output_hdf5.create_group(group_name)
@@ -94,18 +96,18 @@ def main(
                 f"{time.time() - start_time} seconds",
             )
 
-    # workers = [
-    #     threading.Thread(target=worker, args=(0,))
-    #     # for i in range(torch.cuda.device_count())
-    #     for i in range(25)
-    # ]
-    # for w in workers:
-    #     w.start()
-    # for w in workers:
-    #     w.join()
+    workers = [
+        threading.Thread(target=worker, args=(0,))
+        # for i in range(torch.cuda.device_count())
+        for i in range(25)
+    ]
+    for w in workers:
+        w.start()
+    for w in workers:
+        w.join()
 
     # Single-threaded version
-    worker(0)
+    # worker(0)
     output_list_file.write_text("\n".join(file_list))
 
 

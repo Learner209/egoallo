@@ -13,6 +13,8 @@ class EgoAlloTrainConfig:
     smplh_npz_path: Path = Path("./data/smplh/neutral/model.npz")
 
     mask_ratio: float = 0.75
+    random_sample_mask_ratio: bool = False
+    """If True, randomly sample mask ratio between 0.5-0.9 for each batch"""
     joint_cond_mode: Literal[
         "absolute", "absrel_jnts", "absrel", "absrel_global_deltas"
     ] = "absrel"

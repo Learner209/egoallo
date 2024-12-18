@@ -16,7 +16,6 @@ from pathlib import Path
 from typing import Literal
 import time
 
-import tensorboardX
 import torch.optim.lr_scheduler
 import torch.utils.data
 import tyro
@@ -33,6 +32,8 @@ from egoallo import network, training_loss, training_utils
 from egoallo.data.amass_dataset import EgoAmassHdf5Dataset, AdaptiveAmassHdf5Dataset
 from egoallo.data.dataclass import collate_dataclass
 from egoallo.config.train.train_config import EgoAlloTrainConfig
+from egoallo.utils.utils import make_source_code_snapshot
+from egoallo.utils.setup_logger import setup_logger
 
 import wandb
 import datetime
@@ -110,6 +111,11 @@ def run_training(
         (experiment_dir / "run_config.yaml").write_text(yaml.dump(config))
         (experiment_dir / "model_config.yaml").write_text(yaml.dump(config.model))
 
+        source_code_log_dir = experiment_dir / "logs"
+
+        llogger = setup_logger(output=None, name=__name__)
+        make_source_code_snapshot(source_code_log_dir, logger=llogger)
+
         # Write logs to file.
         logger.add(experiment_dir / "trainlog.log", rotation="100 MB")
 
@@ -117,8 +123,8 @@ def run_training(
     model = network.EgoDenoiser(config.model)
 
     train_loader = torch.utils.data.DataLoader(
-        # dataset=AdaptiveAmassHdf5Dataset(config=config),
-        dataset=EgoAmassHdf5Dataset(config=config, cache_files=True),
+        dataset=AdaptiveAmassHdf5Dataset(config=config),
+        # dataset=EgoAmassHdf5Dataset(config=config, cache_files=True),
         batch_size=config.batch_size,
         shuffle=True,
         num_workers=config.num_workers,
@@ -187,28 +193,6 @@ def run_training(
             # Add learning rate to outputs
             log_outputs["learning_rate"] = scheduler.get_last_lr()[0]
 
-            # Log metrics to wandb instead of tensorboard
-            if accelerator.is_main_process:
-                # Log all outputs
-                wandb.log(log_outputs, step=step)
-
-                # Log additional training metrics
-                wandb.log(
-                    {
-                        "batch_loading_time": batch_load_time,
-                        "iterations_per_sec": loop_metrics.iterations_per_sec,
-                        "batch_time": loop_metrics.batch_time,
-                        "forward_time": loop_metrics.forward_time,
-                        "backward_time": loop_metrics.backward_time,
-                        "optimizer_time": loop_metrics.optimizer_time,
-                        "gpu_utilization": loop_metrics.gpu_utilization,
-                        "gpu_memory_used": loop_metrics.gpu_memory_used,
-                        "total_batch_size": loop_metrics.total_batch_size,
-                        "per_gpu_batch_size": loop_metrics.per_gpu_batch_size,
-                    },
-                    step=step,
-                )
-
             # Wrap optimization steps in debug_mode check
             if not debug_mode:
                 accelerator.backward(loss)
@@ -223,10 +207,8 @@ def run_training(
             if not accelerator.is_main_process:
                 continue
 
-            if step % 200 == 0 and accelerator.is_main_process:
-                mem_free, mem_total = torch.cuda.mem_get_info()
+            if step % 400 == 0 and accelerator.is_main_process:
                 epoch_time = time.time() - epoch_start_time
-                # Build base log message with metrics
                 log_msg = (
                     f"step: {step} ({loop_metrics.iterations_per_sec:.2f} it/sec)"
                     f" epoch: {epoch} (time: {epoch_time:.1f}s)"

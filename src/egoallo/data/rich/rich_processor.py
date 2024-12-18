@@ -427,7 +427,7 @@ class RICHDataProcessor:
                 torch.cat(
                     [
                         posed.T_world_root[..., None, 4:7],
-                        posed.Ts_world_joint[..., 4:7],
+                        posed.Ts_world_joint[..., :21, 4:7],
                     ],
                     dim=-2,
                 )
@@ -435,6 +435,10 @@ class RICHDataProcessor:
                 .cpu()
                 .numpy()
             )
+            assert joints.ndim == 3 and joints.shape[-2:] == (
+                22,
+                3,
+            ), f"joints shape is {joints.shape}"
             all_joints.append(joints)
 
             # Process contacts
@@ -449,6 +453,9 @@ class RICHDataProcessor:
                 .cpu()
                 .numpy()
             )
+            assert joint_contacts.ndim == 1 and joint_contacts.shape[0] == (
+                52
+            ), f"joints contacts's shape is {joint_contacts.shape}"
             all_contacts.append(joint_contacts)
 
         # Stack sequences
@@ -488,14 +495,20 @@ class RICHDataProcessor:
         align_rot = self.motion_processor.compute_alignment_rotation(forward_dir)
 
         # Prepare sequence data
+        assert body_params["betas"].ndim == 2 and body_params["betas"].shape == (
+            1,
+            10,
+        )  # only the RICH dataset betas is of shape (10,)
         sequence_data = {
             "poses": poses,  # (N, 156)
             "trans": trans,  # (N, 3)
-            "betas": body_params["betas"].cpu().numpy(),  # (16,)
+            "betas": body_params["betas"][0].cpu().numpy(),  # (10,)
             "gender": gender,
             "fps": self.fps,
             "joints": joints,  # (N, 22, 3)
-            "contacts": contacts,
+            "contacts": contacts.astype(
+                np.float32
+            ),  # contacts server as a boolean label, but for compatiblity with `load_from_npz` function, convert it to flaot32
             "pose_hand": poses[:, 66:],  # (N, 90)
             "root_orient": poses[:, :3],  # (N, 3)
             "pose_body": poses[:, 3:66],  # (N, 63)

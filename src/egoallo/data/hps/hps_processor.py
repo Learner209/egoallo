@@ -12,6 +12,7 @@ import typeguard
 import numpy as np
 import torch
 from torch import Tensor, device
+from numpy import ndarray as Array
 
 from egoallo.utils.setup_logger import setup_logger
 from egoallo.data.motion_processing import MotionProcessor
@@ -141,6 +142,7 @@ class HPSProcessor:
             subject = sequence_name.split("_")[1]
         else:
             subject = sequence_name.split("_")[0]
+
         betas = (
             torch.from_numpy(
                 np.array(
@@ -152,6 +154,9 @@ class HPSProcessor:
             .float()
             .to(self.device)
         )
+        assert (
+            betas.dim() == 1 and betas.shape[-1] == 10
+        ), f"betas shape is {betas.shape}"  # HPS dataset betas shape is (10,)
 
         # Convert sequence data to tensors
         poses = torch.from_numpy(seq_data["poses"]).float().to(self.device)
@@ -197,6 +202,11 @@ class HPSProcessor:
             .numpy()
         )
 
+        assert joints.ndim == 3 and joints.shape[-2:] == (
+            22,
+            3,
+        ), f"joints shape is {joints.shape}"
+
         # Process floor height and contacts
         # floor_height = self.motion_processor.detect_floor_height(
         #     joints,
@@ -205,6 +215,7 @@ class HPSProcessor:
         floor_height, contacts = self.motion_processor.process_floor_and_contacts(
             joints, self.joint_indices
         )
+        contacts: Float[Array, "*#batch timesteps 22"] = contacts[..., :22]
 
         # Adjust heights
         trans[:, 2] -= floor_height
@@ -219,7 +230,9 @@ class HPSProcessor:
             "poses": poses.cpu().numpy(),
             "trans": trans.cpu().numpy(),
             "betas": betas.cpu().numpy(),
-            "contacts": contacts,
+            "contacts": contacts.astype(
+                np.float32
+            ),  # contacts server as a boolean label, but for compatiblity with `load_from_npz` function, convert it to flaot32
             "gender": gender,
             "fps": self.fps,
             "joints": joints,

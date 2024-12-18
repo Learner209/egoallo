@@ -10,6 +10,7 @@ import numpy as np
 import torch
 from torch import Tensor
 from jaxtyping import Float, jaxtyped
+from numpy import ndarray as Array
 import typeguard
 
 from egoallo.utils.setup_logger import setup_logger
@@ -111,8 +112,13 @@ class AMASSProcessor:
         self, seq_path: Path, min_frames: int = 30
     ) -> Optional[Dict[str, Any]]:
         """Process a single AMASS sequence."""
+        required_keys = ["mocap_framerate", "poses", "betas", "trans"]
         # Load sequence data
         seq_data = dict(np.load(seq_path, allow_pickle=True))
+
+        for required_key in required_keys:
+            if required_key not in seq_data.keys():
+                return None
 
         # Get sequence info
         gender = seq_data.get("gender", "invalid").item()
@@ -129,6 +135,9 @@ class AMASSProcessor:
         betas = (
             torch.from_numpy(seq_data["betas"][:16]).float().to(self.device)
         )  # (16,)
+        assert (
+            betas.dim() == 1 and betas.shape[0] == 16
+        ), f"betas.shape is {betas.shape}"
 
         num_frames = len(poses)
         if num_frames < min_frames:
@@ -162,7 +171,7 @@ class AMASSProcessor:
             torch.cat(
                 [
                     posed.T_world_root[..., None, 4:7],  # Root position
-                    posed.Ts_world_joint[..., 4:7],  # Other joint positions
+                    posed.Ts_world_joint[..., :21, 4:7],  # Other joint positions
                 ],
                 dim=-2,
             )
@@ -171,10 +180,16 @@ class AMASSProcessor:
             .numpy()
         )  # (N, 22, 3)
 
+        assert joints.ndim == 3 and joints.shape[-2:] == (
+            22,
+            3,
+        ), f"joints shape is {joints.shape}"
+
         # Process floor height and contacts
         floor_height, contacts = self.motion_processor.process_floor_and_contacts(
             joints, self.joint_indices
         )
+        contacts: Float[Array, "*#batch timesteps 22"] = contacts[..., :22]
         # import ipdb; ipdb.set_trace()
 
         # Adjust heights
@@ -223,7 +238,9 @@ class AMASSProcessor:
             "gender": gender,
             "fps": fps,
             "joints": joints,
-            "contacts": contacts,
+            "contacts": contacts.astype(
+                np.float32
+            ),  # contacts server as a boolean label, but for compatiblity with `load_from_npz` function, convert it to flaot32
             "pose_hand": hand_pose.cpu().numpy(),
             "root_orient": root_orient.cpu().numpy(),
             "pose_body": body_pose.cpu().numpy(),
@@ -241,4 +258,3 @@ class AMASSProcessor:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         np.savez_compressed(output_path, **sequence_data)
         logger.info(f"Saved processed sequence to {output_path}")
-

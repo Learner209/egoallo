@@ -78,12 +78,24 @@ class EgoTrainingData(TensorDataclass):
             if v.dtype in (np.float32, np.float64)
         }
 
+        # FIXME: hacky way to solve the probelm temporarily.
+        raw_fields["contacts"] = torch.from_numpy(
+            np.load(path, allow_pickle=True)["contacts"].astype(np.float32)
+        ).float()
+
         timesteps = raw_fields["root_orient"].shape[0]
         assert raw_fields["root_orient"].shape == (timesteps, 3)
         assert raw_fields["pose_body"].shape == (timesteps, 63)
         assert raw_fields["pose_hand"].shape == (timesteps, 90)
-        assert raw_fields["joints"].shape == (timesteps, 22, 3)
+        assert raw_fields["joints"].shape == (timesteps, 22, 3) or raw_fields[
+            "joints"
+        ].shape == (timesteps, 52, 3)
         assert raw_fields["betas"].shape == (16,) or raw_fields["betas"].shape == (10,)
+
+        # FIXME: hacky way to solve the probelm temporarily.
+        # PostProcesing
+        if raw_fields["joints"].shape == (timesteps, 52, 3):
+            raw_fields["joints"] = raw_fields["joints"][:, :22, :]
 
         T_world_root = torch.cat(
             [

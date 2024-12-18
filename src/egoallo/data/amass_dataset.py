@@ -253,7 +253,8 @@ class EgoAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         device = kwargs["joints_wrt_world"].device
 
         # Generate random mask for sequence
-        num_masked = int(num_joints * self.config.mask_ratio)
+        mask_ratio = self._get_mask_ratio()
+        num_masked = int(num_joints * mask_ratio)
         visible_joints_mask = torch.ones(
             (subseq_len, num_joints), dtype=torch.bool, device=device
         )
@@ -283,8 +284,6 @@ class EgoAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         kwargs["joints_wrt_world"] = (
             joints_wrt_world  # Keep original joints for computing loss
         )
-        # breakpoint()
-
         # Close the file if we opened it.
         if hdf5_file is not None:
             hdf5_file.close()
@@ -293,6 +292,13 @@ class EgoAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
 
     def __len__(self) -> int:
         return self._approximated_length
+
+    def _get_mask_ratio(self) -> float:
+        """Get mask ratio - either fixed or randomly sampled"""
+        if self.config.random_sample_mask_ratio:
+            # Randomly sample between 0~mask_ratio
+            return np.random.uniform(0, self.config.mask_ratio)
+        return self.config.mask_ratio
 
 
 class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
@@ -408,7 +414,8 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         device = kwargs["joints_wrt_world"].device
 
         # Generate random mask for sequence
-        num_masked = int(num_joints * self._mask_ratio)
+        mask_ratio = self._get_mask_ratio()
+        num_masked = int(num_joints * mask_ratio)
         visible_joints_mask = torch.ones(
             (self._subseq_len, num_joints), dtype=torch.bool, device=device
         )
@@ -420,23 +427,10 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
 
         # Get original joints_wrt_world
         # Combine root position from T_world_root with other joints to get full 22 joints
-        assert kwargs["joints_wrt_world"].shape == (self._subseq_len, num_joints - 1, 3)
-        root_pos = kwargs["T_world_root"][..., 4:7]  # Get translation part [time, 3]
-        joints_wrt_world = torch.cat(
-            [
-                root_pos.unsqueeze(1),  # Add joint dimension: [time, 1, 3]
-                kwargs["joints_wrt_world"],  # [time, 21, 3]
-            ],
-            dim=1,
-        )  # Final shape: [time, 22, 3]
+        joints_wrt_world = kwargs["joints_wrt_world"]  # shape: [time, 22, 3]
         assert (
             joints_wrt_world.shape == (self._subseq_len, num_joints, 3)
         ), f"Expected shape: {(self._subseq_len, num_joints, 3)}, got: {joints_wrt_world.shape}"
-
-        # Create visible_joints tensor containing only unmasked joints
-        visible_joints = joints_wrt_world[visible_joints_mask].reshape(
-            self._subseq_len, num_joints - num_masked, 3
-        )
 
         # Update kwargs with new MAE-style masking tensors
         # kwargs["visible_joints"] = visible_joints
@@ -477,7 +471,7 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
                 array = v[start_t:end_t]
 
             # Pad if necessary
-            if array.shape[0] != self._subseq_len:
+            if array.shape[0] != self._subseq_len and k != "betas":
                 array = np.concatenate(
                     [
                         array,
@@ -534,3 +528,10 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         """
         _ = self._cum_len[-1] // self._subseq_len
         return _.item()
+
+    def _get_mask_ratio(self) -> float:
+        """Get mask ratio - either fixed or randomly sampled"""
+        if self.config.random_sample_mask_ratio:
+            # Randomly sample between 0~mask_ratio
+            return np.random.uniform(0, self.config.mask_ratio)
+        return self.config.mask_ratio

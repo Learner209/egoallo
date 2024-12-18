@@ -239,7 +239,6 @@ class EgoDenoiserConfig:
     def d_cond(self) -> int:
         """Dimensionality of conditioning vector."""
         num_joints = CFG.smplh.num_joints  # Assuming num_joints is 22
-        num_visible_joints = ceil((1 - self.mask_ratio) * num_joints)
 
         use_make_cond_with_masked_joints = True
         spatial_dim = 4 if use_make_cond_with_masked_joints else 3

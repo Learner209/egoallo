@@ -36,15 +36,17 @@ def process_sequence(args: tuple[AMASSProcessor, Path, Path]) -> Optional[str]:
         logger.info(f"Skipping {seq_path.name}, {output_path} - already processed")
         return str(rel_path)
 
-    try:
-        # Process sequence
-        sequence_data = processor.process_sequence(seq_path)
-        if sequence_data is not None:
-            processor.save_sequence(sequence_data, output_path)
-            rel_path = output_path.relative_to(output_path.parent.parent)
-            return str(rel_path)
-    except Exception as e:
-        logger.error(f"Error processing {seq_path}: {str(e)}")
+    # try:
+
+    # Process sequence
+    sequence_data = processor.process_sequence(seq_path)
+    if sequence_data is not None:
+        processor.save_sequence(sequence_data, output_path)
+        rel_path = output_path.relative_to(output_path.parent.parent)
+        return str(rel_path)
+
+    # except Exception as e:
+    #     logger.error(f"Error processing {seq_path}: {str(e)}")
 
     return None
 
@@ -115,14 +117,14 @@ def main(config: AMASSDatasetConfig) -> None:
     workers = [
         threading.Thread(target=worker, args=(i,)) for i in range(config.num_processes)
     ]
-    for w in workers:
-        w.start()
-    for w in workers:
-        w.join()
+    # for w in workers:
+    #     w.start()
+    # for w in workers:
+    #     w.join()
 
     # Single-threaded for debugging
-    # device_idx = 0
-    # worker(device_idx)
+    device_idx = 0
+    worker(device_idx)
 
     # Save file list
     config.output_list_file.write_text("\n".join(sorted(processed_files)))
@@ -140,4 +142,3 @@ if __name__ == "__main__":
 
     ipdb_safety_net()
     main(config)
-

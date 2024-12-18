@@ -377,7 +377,7 @@ class SmplhShapedAndPosed(TensorDataclass):
         weights = self.shaped_model.body_model.weights  # (verts, joints+1)
 
         # Remove root weights (first column) as we only want joint contacts
-        joint_weights = weights[:, 1:]  # (verts, joints)
+        joint_weights = weights  # (verts, joints)
 
         # Weighted sum of contact labels
         weighted_contacts = einsum(
@@ -391,7 +391,7 @@ class SmplhShapedAndPosed(TensorDataclass):
         joint_contacts = weighted_contacts / weight_sums
 
         # Threshold to get binary labels (optional, adjust threshold as needed)
-        # joint_contacts = (joint_contacts > 0.3).float()
+        joint_contacts = (joint_contacts > 0.5).float()
 
         return joint_contacts
 
