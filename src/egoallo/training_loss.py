@@ -36,11 +36,11 @@ class TrainingLossConfig:
             "body_rotmats": 1.00,
             "contacts": 0.05,
             "hand_rotmats": 0.00,
-            "R_world_root": 0.25,
-            "t_world_root": 0.25,
-            "joints": 0.1,
-            "foot_skating": 0.00,
-            "velocity": 0.00,
+            "R_world_root": 0.5,
+            "t_world_root": 0.5,
+            "joints": 0.25,
+            "foot_skating": 0.1,
+            "velocity": 0.01,
         }.copy
     )
     weight_loss_by_t: Literal["emulate_eps_pred"] = "emulate_eps_pred"
