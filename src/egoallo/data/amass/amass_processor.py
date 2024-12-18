@@ -189,7 +189,7 @@ class AMASSProcessor:
         floor_height, contacts = self.motion_processor.process_floor_and_contacts(
             joints, self.joint_indices
         )
-        contacts: Float[Array, "*#batch timesteps 22"] = contacts[..., :22]
+        contacts: Float[Array, "*batch timesteps 22"] = contacts[..., :22]
         # import ipdb; ipdb.set_trace()
 
         # Adjust heights

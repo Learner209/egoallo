@@ -215,7 +215,7 @@ class HPSProcessor:
         floor_height, contacts = self.motion_processor.process_floor_and_contacts(
             joints, self.joint_indices
         )
-        contacts: Float[Array, "*#batch timesteps 22"] = contacts[..., :22]
+        contacts: Float[Array, "*batch timesteps 22"] = contacts[..., :22]
 
         # Adjust heights
         trans[:, 2] -= floor_height

@@ -14,7 +14,8 @@ class EgoAlloTrainConfig:
 
     mask_ratio: float = 0.75
     random_sample_mask_ratio: bool = False
-    """If True, randomly sample mask ratio between 0.5-0.9 for each batch"""
+    """If True, randomly sample mask ratio between mask_ratio / 4 ~ mask_ratio for each batch"""
+
     joint_cond_mode: Literal[
         "absolute", "absrel_jnts", "absrel", "absrel_global_deltas"
     ] = "absrel"
@@ -35,6 +36,12 @@ class EgoAlloTrainConfig:
     train_splits: tuple[Literal["train", "val", "test", "just_humaneva"], ...] = (
         "train",
         "val",
+    )
+    data_collate_fn: Literal[
+        "DefaultBatchCollator", "ExtendedBatchCollator", "EgoTrainingDataBatchCollator"
+    ] = "EgoTrainingDataBatchCollator"
+    dataset_type: Literal["AdaptiveAmassHdf5Dataset", "VanillaEgoAmassHdf5Dataset"] = (
+        "AdaptiveAmassHdf5Dataset"
     )
 
     # Optimizer options.

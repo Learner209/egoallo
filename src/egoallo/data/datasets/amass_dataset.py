@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Any, Literal, assert_never, cast, Union
+from typing import TYPE_CHECKING, Any, Literal, Union, assert_never, cast
 
 import h5py
 import numpy as np
@@ -7,13 +7,12 @@ import torch
 import torch.utils
 import torch.utils.data
 
-from egoallo.config.train.train_config import EgoAlloTrainConfig
+if TYPE_CHECKING:
+    from egoallo.config.train.train_config import EgoAlloTrainConfig
 
-from .dataclass import EgoTrainingData
-from ..network import EgoDenoiserConfig
+from egoallo.config import CONFIG_FILE, make_cfg
 
-
-from egoallo.config import make_cfg, CONFIG_FILE
+from ..dataclass import EgoTrainingData
 
 local_config_file = CONFIG_FILE
 CFG = make_cfg(config_name="defaults", config_file=local_config_file, cli_args=[])
@@ -60,7 +59,7 @@ AMASS_SPLITS = {
 }
 
 
-class EgoAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
+class VanillaEgoAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
     """Dataset which loads from our preprocessed hdf5 file.
 
     Args:
@@ -75,8 +74,8 @@ class EgoAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
 
     def __init__(
         self,
-        config: EgoAlloTrainConfig,
-        cache_files: bool,
+        config: "EgoAlloTrainConfig",
+        cache_files: bool = True,
         random_variable_len_proportion: float = 0.3,
         random_variable_len_min: int = 16,
     ) -> None:
@@ -297,7 +296,7 @@ class EgoAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         """Get mask ratio - either fixed or randomly sampled"""
         if self.config.random_sample_mask_ratio:
             # Randomly sample between 0~mask_ratio
-            return np.random.uniform(0, self.config.mask_ratio)
+            return np.random.uniform(self.config.mask_ratio / 4, self.config.mask_ratio)
         return self.config.mask_ratio
 
 
@@ -533,5 +532,5 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         """Get mask ratio - either fixed or randomly sampled"""
         if self.config.random_sample_mask_ratio:
             # Randomly sample between 0~mask_ratio
-            return np.random.uniform(0, self.config.mask_ratio)
+            return np.random.uniform(self.config.mask_ratio / 4, self.config.mask_ratio)
         return self.config.mask_ratio

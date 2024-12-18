@@ -99,7 +99,7 @@ def main(
     workers = [
         threading.Thread(target=worker, args=(0,))
         # for i in range(torch.cuda.device_count())
-        for i in range(25)
+        for i in range(40)
     ]
     for w in workers:
         w.start()

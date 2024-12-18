@@ -188,17 +188,17 @@ class SmplhShapedAndPosed:
     shaped_model: SmplhShaped
     """Underlying shaped body model."""
 
-    T_world_root: Float[Array, "*#batch 7"]
+    T_world_root: Float[Array, "*batch 7"]
     """Root coordinate frame."""
 
-    local_quats: Float[Array, "*#batch joints 4"]
+    local_quats: Float[Array, "*batch joints 4"]
     """Local joint orientations."""
 
     Ts_world_joint: Float[Array, "joints 7"]
     """Absolute transform for each joint. Does not include the root."""
 
     def with_new_T_world_root(
-        self, T_world_root: Float[Array, "*#batch 7"]
+        self, T_world_root: Float[Array, "*batch 7"]
     ) -> SmplhShapedAndPosed:
         return SmplhShapedAndPosed(
             shaped_model=self.shaped_model,

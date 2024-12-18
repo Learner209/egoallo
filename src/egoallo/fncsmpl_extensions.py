@@ -13,7 +13,7 @@ import typeguard
 
 
 @jaxtyped(typechecker=typeguard.typechecked)
-def get_T_world_cpf(mesh: fncsmpl.SmplMesh) -> Float[Tensor, "*#batch 7"]:
+def get_T_world_cpf(mesh: fncsmpl.SmplMesh) -> Float[Tensor, "*batch 7"]:
     """Get the central pupil frame from a mesh. This assumes that we're using the SMPL-H model."""
 
     assert mesh.verts.shape[-2:] == (6890, 3), "Not using SMPL-H model!"
@@ -29,7 +29,7 @@ def get_T_world_cpf(mesh: fncsmpl.SmplMesh) -> Float[Tensor, "*#batch 7"]:
 
 
 @jaxtyped(typechecker=typeguard.typechecked)
-def get_T_head_cpf(shaped: fncsmpl.SmplhShaped) -> Float[Tensor, "*#batch 7"]:
+def get_T_head_cpf(shaped: fncsmpl.SmplhShaped) -> Float[Tensor, "*batch 7"]:
     """Get the central pupil frame with respect to the head (joint 14). This
     assumes that we're using the SMPL-H model."""
 

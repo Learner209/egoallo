@@ -18,7 +18,10 @@ from egoallo import fncsmpl, fncsmpl_extensions
 from egoallo import transforms as tf
 from egoallo.config import CONFIG_FILE, make_cfg
 from egoallo.config.inference.inference_defaults import InferenceConfig
-from egoallo.data.amass_dataset import EgoAlloTrainConfig, EgoAmassHdf5Dataset
+from egoallo.data import make_batch_collator, build_dataset
+from egoallo.config.train.train_config import (
+    EgoAlloTrainConfig,
+)
 from egoallo.data.dataclass import EgoTrainingData, collate_dataclass
 from egoallo.evaluation.body_evaluator import BodyEvaluator
 from egoallo.evaluation.metrics import EgoAlloEvaluationMetrics
@@ -131,13 +134,15 @@ class TestRunner:
 
         # runtime_config.dataset_slice_strategy = "full_sequence"
         runtime_config.train_splits = ("test",)  # Sorry for the naming
-        self.test_dataset = EgoAmassHdf5Dataset(runtime_config, cache_files=False)
-        self.dataloader = DataLoader(
-            self.test_dataset,
+
+        self.dataloader = torch.utils.data.DataLoader(
+            dataset=build_dataset(cfg=runtime_config)(config=runtime_config),
             batch_size=1,
             shuffle=False,
-            num_workers=0,
-            collate_fn=collate_dataclass,
+            num_workers=runtime_config.num_workers,
+            persistent_workers=runtime_config.num_workers > 0,
+            pin_memory=True,
+            collate_fn=make_batch_collator(runtime_config),
             drop_last=False,
         )
 
@@ -160,7 +165,6 @@ class TestRunner:
         denoised_body_quats = SO3.from_matrix(denoised_traj.body_rotmats).wxyz
         gt_body_quats = SO3.from_matrix(gt_traj.body_rotmats).wxyz
 
-        # breakpoint()
         torch.save(
             {
                 # Ground truth data
@@ -174,7 +178,7 @@ class TestRunner:
                 .parameters()
                 .cpu(),
                 "groundtruth_body_quats": gt_body_quats[
-                    seq_idx, :21, :
+                    seq_idx, ..., :21, :
                 ].cpu(),  # Denoised trajectory data
                 "sampled_betas": denoised_traj.betas.mean(dim=1, keepdim=True).cpu(),
                 "sampled_T_world_root": SE3.from_rotation_and_translation(

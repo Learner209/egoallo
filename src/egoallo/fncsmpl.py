@@ -132,9 +132,9 @@ class SmplhModel(TensorDataclass):
     @jaxtyped(typechecker=typeguard.typechecked)
     def pca_to_aa(
         cls,
-        hand_pose_pca: Float[Tensor, "*#batch num_pca"],
+        hand_pose_pca: Float[Tensor, "*batch num_pca"],
         hand_components: Float[Tensor, "num_pca 45"],
-    ) -> Float[Tensor, "*#batch 15 3"]:
+    ) -> Float[Tensor, "*batch 15 3"]:
         """Convert PCA coefficients to axis-angle rotations for hand poses.
 
         Args:
@@ -156,10 +156,10 @@ class SmplhModel(TensorDataclass):
     @jaxtyped(typechecker=typeguard.typechecked)
     def convert_hand_poses(
         self,
-        left_hand_pca: Float[Tensor, "*#batch num_pca"] | None = None,
-        right_hand_pca: Float[Tensor, "*#batch num_pca"] | None = None,
+        left_hand_pca: Float[Tensor, "*batch num_pca"] | None = None,
+        right_hand_pca: Float[Tensor, "*batch num_pca"] | None = None,
     ) -> tuple[
-        Float[Tensor, "*#batch 15 3"] | None, Float[Tensor, "*#batch 15 3"] | None
+        Float[Tensor, "*batch 15 3"] | None, Float[Tensor, "*batch 15 3"] | None
     ]:
         """Convert both hand PCA coefficients to axis-angle format.
 
@@ -186,7 +186,7 @@ class SmplhModel(TensorDataclass):
         return len(self.parent_indices)
 
     @jaxtyped(typechecker=typeguard.typechecked)
-    def with_shape(self, betas: Float[Tensor, "*#batch n_betas"]) -> "SmplhShaped":
+    def with_shape(self, betas: Float[Tensor, "*batch n_betas"]) -> "SmplhShaped":
         """Compute a new body model, with betas applied."""
         num_betas = betas.shape[-1]
         assert num_betas <= self.shapedirs.shape[-1]
@@ -195,15 +195,17 @@ class SmplhModel(TensorDataclass):
             betas,
             "verts xyz beta, ... beta -> ... verts xyz",
         )
+        assert isinstance(verts_with_shape, Float[Tensor, "*batch verts xyz"])
         root_and_joints_pred = einsum(
             self.J_regressor,
             verts_with_shape,
             "jointsp1 verts, ... verts xyz -> ... jointsp1 xyz",
         )
-        root_offset = root_and_joints_pred[..., 0:1, :]
+        assert isinstance(root_and_joints_pred, Float[Tensor, "*batch jointsp1 xyz"])
+        root_offset = root_and_joints_pred[..., 0:1, :]  # shape: (*batch 1 xyz)
         return SmplhShaped(
             body_model=self,
-            root_offset=root_offset.unsqueeze(-2),
+            root_offset=root_offset.squeeze(-2),
             verts_zero=verts_with_shape - root_offset,
             joints_zero=root_and_joints_pred[..., 1:, :] - root_offset,
             t_parent_joint=root_and_joints_pred[..., 1:, :]
@@ -221,20 +223,20 @@ class SmplhShaped(TensorDataclass):
     verts_zero: Float[Tensor, "*#batch verts 3"]
     """Vertices of shaped body _relative to the root joint_ at the zero
     configuration."""
-    joints_zero: Float[Tensor, "*#batch joints 3"]
+    joints_zero: Float[Tensor, "*batch joints 3"]
     """Joints of shaped body _relative to the root joint_ at the zero
     configuration."""
-    t_parent_joint: Float[Tensor, "*#batch joints 3"]
+    t_parent_joint: Float[Tensor, "*batch joints 3"]
     """Position of each shaped body joint relative to its parent. Does not
     include root."""
 
     @jaxtyped(typechecker=typeguard.typechecked)
     def with_pose_decomposed(
         self,
-        T_world_root: Float[Tensor, "*#batch 7"],
-        body_quats: Float[Tensor, "*#batch 21 4"],
-        left_hand_quats: Float[Tensor, "*#batch 15 4"] | None = None,
-        right_hand_quats: Float[Tensor, "*#batch 15 4"] | None = None,
+        T_world_root: Float[Tensor, "*batch 7"],
+        body_quats: Float[Tensor, "*batch 21 4"],
+        left_hand_quats: Float[Tensor, "*batch 15 4"] | None = None,
+        right_hand_quats: Float[Tensor, "*batch 15 4"] | None = None,
     ) -> "SmplhShapedAndPosed":
         """Pose our SMPL-H body model. Returns a set of joint and vertex outputs."""
 
@@ -255,8 +257,8 @@ class SmplhShaped(TensorDataclass):
     @jaxtyped(typechecker=typeguard.typechecked)
     def with_pose(
         self,
-        T_world_root: Float[Tensor, "*#batch 7"],
-        local_quats: Float[Tensor, "*#batch joints 4"],
+        T_world_root: Float[Tensor, "*batch 7"],
+        local_quats: Float[Tensor, "*batch joints 4"],
     ) -> "SmplhShapedAndPosed":
         """Pose our SMPL-H body model. Returns a set of joint and vertex outputs."""
 
@@ -283,18 +285,18 @@ class SmplhShapedAndPosed(TensorDataclass):
     shaped_model: SmplhShaped
     """Underlying shaped body model."""
 
-    T_world_root: Float[Tensor, "*#batch 7"]
+    T_world_root: Float[Tensor, "*batch 7"]
     """Root coordinate frame."""
 
-    local_quats: Float[Tensor, "*#batch joints 4"]
+    local_quats: Float[Tensor, "*batch joints 4"]
     """Local joint orientations."""
 
-    Ts_world_joint: Float[Tensor, "*#batch joints 7"]
+    Ts_world_joint: Float[Tensor, "*batch joints 7"]
     """Absolute transform for each joint. Does not include the root."""
 
     @jaxtyped(typechecker=typeguard.typechecked)
     def with_new_T_world_root(
-        self, T_world_root: Float[Tensor, "*#batch 7"]
+        self, T_world_root: Float[Tensor, "*batch 7"]
     ) -> "SmplhShapedAndPosed":
         return SmplhShapedAndPosed(
             shaped_model=self.shaped_model,
@@ -363,8 +365,8 @@ class SmplhShapedAndPosed(TensorDataclass):
 
     @jaxtyped(typechecker=typeguard.typechecked)
     def compute_joint_contacts(
-        self, vertex_contacts: Float[Tensor, "*#batch verts"]
-    ) -> Float[Tensor, "*#batch joints"]:
+        self, vertex_contacts: Float[Tensor, "*batch verts"]
+    ) -> Float[Tensor, "*batch joints"]:
         """Convert per-vertex contact labels to per-joint contact labels using skinning weights.
 
         Args:
@@ -403,7 +405,7 @@ class SmplMesh(TensorDataclass):
     posed_model: SmplhShapedAndPosed
     """Posed model that this mesh was computed for."""
 
-    verts: Float[Tensor, "*#batch verts 3"]
+    verts: Float[Tensor, "*batch verts 3"]
     """Vertices for mesh."""
 
     faces: Int[Tensor, "verts 3"]
@@ -412,11 +414,11 @@ class SmplMesh(TensorDataclass):
 
 @jaxtyped(typechecker=typeguard.typechecked)
 def forward_kinematics(
-    T_world_root: Float[Tensor, "*#batch 7"],
-    Rs_parent_joint: Float[Tensor, "*#batch joints 4"],
-    t_parent_joint: Float[Tensor, "*#batch joints 3"],
+    T_world_root: Float[Tensor, "#*batch 7"],
+    Rs_parent_joint: Float[Tensor, "#*batch joints 4"],
+    t_parent_joint: Float[Tensor, "#*batch joints 3"],
     parent_indices: tuple[int, ...],
-) -> Float[Tensor, "*#batch joints 7"]:
+) -> Float[Tensor, "#*batch joints 7"]:
     """Run forward kinematics to compute absolute poses (T_world_joint) for
     each joint. The output array containts pose parameters
     (w, x, y, z, tx, ty, tz) for each joint. (this does not include the root!)
