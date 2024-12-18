@@ -52,6 +52,7 @@ class EgoAlloTrainConfig:
 
     # Network arch.
     use_fourier_in_masked_joints: bool = True
+    use_joint_embeddings: bool = False
 
     # debug
     debug: bool = False
@@ -62,4 +63,5 @@ class EgoAlloTrainConfig:
             joint_cond_mode=self.joint_cond_mode,
             smplh_npz_path=self.smplh_npz_path,
             use_fourier_in_masked_joints=self.use_fourier_in_masked_joints,
+            use_joint_embeddings=self.use_joint_embeddings,
         )
