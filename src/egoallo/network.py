@@ -92,13 +92,14 @@ class EgoDenoiseTraj(TensorDataclass):
             self.t_world_root,
         ).parameters()
 
+        breakpoint()
         posed = shaped.with_pose_decomposed(
             T_world_root=T_world_root,
             body_quats=SO3.from_matrix(self.body_rotmats).wxyz,
-            left_hand_quats=SO3.from_matrix(self.hand_rotmats[:, :15]).wxyz
+            left_hand_quats=SO3.from_matrix(self.hand_rotmats[..., :15, :, :]).wxyz
             if self.hand_rotmats is not None
             else None,
-            right_hand_quats=SO3.from_matrix(self.hand_rotmats[:, 15:30]).wxyz
+            right_hand_quats=SO3.from_matrix(self.hand_rotmats[..., 15:30, :, :]).wxyz
             if self.hand_rotmats is not None
             else None,
         )

@@ -57,7 +57,12 @@ def main(
                 device_body_model, npz_path, include_hands=include_hands
             )
             output_name = npz_path.stem + ".mp4"
-            # EgoTrainingData.visualize_ego_training_data(train_data, body_model, output_path=str(Path("./logs/rich/viz") / output_name))
+            train_traj = train_data.to_denoise_traj(include_hands=True)
+            EgoTrainingData.visualize_ego_training_data(
+                train_traj,
+                body_model,
+                output_path=str(Path("./exp/debug_frame_rate_diff/") / output_name),
+            )
 
             # Get the relative path after any of the input directories
             for data_npz_dir in data_npz_dirs:

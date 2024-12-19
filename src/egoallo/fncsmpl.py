@@ -285,13 +285,13 @@ class SmplhShapedAndPosed(TensorDataclass):
     shaped_model: SmplhShaped
     """Underlying shaped body model."""
 
-    T_world_root: Float[Tensor, "*batch 7"]
+    T_world_root: Float[Tensor, "#*batch 7"]
     """Root coordinate frame."""
 
-    local_quats: Float[Tensor, "*batch joints 4"]
+    local_quats: Float[Tensor, "#*batch joints 4"]
     """Local joint orientations."""
 
-    Ts_world_joint: Float[Tensor, "*batch joints 7"]
+    Ts_world_joint: Float[Tensor, "#*batch joints 7"]
     """Absolute transform for each joint. Does not include the root."""
 
     @jaxtyped(typechecker=typeguard.typechecked)
@@ -408,7 +408,7 @@ class SmplMesh(TensorDataclass):
     verts: Float[Tensor, "*batch verts 3"]
     """Vertices for mesh."""
 
-    faces: Int[Tensor, "verts 3"]
+    faces: Int[Tensor, "faces 3"]
     """Faces for mesh."""
 
 

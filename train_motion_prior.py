@@ -205,7 +205,7 @@ def run_training(
             if not accelerator.is_main_process:
                 continue
 
-            if step % 400 == 0 and accelerator.is_main_process:
+            if step % 400 == 0:
                 epoch_time = time.time() - epoch_start_time
                 log_msg = (
                     f"step: {step} ({loop_metrics.iterations_per_sec:.2f} it/sec)"
@@ -234,6 +234,26 @@ def run_training(
                         log_msg += f" {term_name}: {value:.6f}"
 
                 logger.info(log_msg)
+                # Log metrics to wandb
+                wandb.log(
+                    {
+                        "train/loss": loss.item(),
+                        "train/learning_rate": scheduler.get_last_lr()[0],
+                        "train/batch_time": loop_metrics.batch_time,
+                        "train/iterations_per_sec": loop_metrics.iterations_per_sec,
+                    },
+                    step=step,
+                )
+
+                # Log all loss terms from log_outputs
+                for key, value in log_outputs.items():
+                    if key.startswith("loss_term/"):
+                        # Extract term name after loss_term/
+                        term_name = key.split("/")[-1]
+                        wandb.log(
+                            {f"train/loss_{term_name}": value},
+                            step=step
+                        )
 
             # Checkpointing and evaluation
             steps_to_save = 5000
@@ -288,6 +308,7 @@ def run_training(
                         logger.exception("Detailed error:")
 
                 del checkpoint_path
+
 
         # End of epoch
         epoch += 1

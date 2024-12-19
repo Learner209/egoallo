@@ -197,7 +197,7 @@ class TrainingLossComputer:
                     < torch.rand((batch, 1, 1), device=device)
                 ),
                 hand_positions_wrt_cpf,
-                0.0,
+            0.0,
             )
 
         # Denoise.
@@ -377,7 +377,9 @@ class TrainingLossComputer:
 
         # Log loss terms.
         for name, term in loss_terms.items():
-            log_outputs[f"loss_term/{name}"] = term * self.config.loss_weights[name]
+            loss_term = term * self.config.loss_weights[name]
+            loss_terms[name] = loss_term
+            log_outputs[f"loss_term/{name}"] = loss_term
 
         # Return loss.
         loss = sum([loss_terms[k] for k in loss_terms])
