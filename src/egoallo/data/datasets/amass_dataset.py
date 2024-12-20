@@ -389,23 +389,30 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         Returns:
             EgoTrainingData: Data object containing the requested item.
         """
-        global_index = (
-            index * self._subseq_len
-        )  # Directly using global index without previous window conditioning
-        group_index, slice_index = self._find_group_and_slice_index(global_index)
+        if self._slice_strategy == "full_sequence":
+            group = self._groups[index]
+            npz_group = self._get_npz_group(group)
+            total_t = cast(h5py.Dataset, npz_group["T_world_root"]).shape[0]
+            start_t, end_t = 0, total_t
+        else:
+            global_index = (
+                index * self._subseq_len
+            )  # Directly using global index without previous window conditioning
+            group_index, slice_index = self._find_group_and_slice_index(global_index)
 
-        group = self._groups[group_index]
-        npz_group = self._get_npz_group(group)
-        total_t = cast(h5py.Dataset, npz_group["T_world_root"]).shape[0]
-        assert total_t >= self.min_seq_len
+            group = self._groups[group_index]
+            npz_group = self._get_npz_group(group)
+            total_t = cast(h5py.Dataset, npz_group["T_world_root"]).shape[0]
+            assert total_t >= self.min_seq_len
 
-        # Calculate slice indices for the current window
-        start_t = slice_index
-        end_t = min(start_t + self._subseq_len, total_t)
+            # Calculate slice indices for the current window
+            start_t = slice_index
+            end_t = min(start_t + self._subseq_len, total_t)
 
         # Load current window data
         kwargs = self._load_sequence_data(group, start_t, end_t, total_t)
-        kwargs["mask"] = torch.ones(self._subseq_len, dtype=torch.bool)
+        seq_len = total_t if self._slice_strategy == "full_sequence" else self._subseq_len
+        kwargs["mask"] = torch.ones(seq_len, dtype=torch.bool)
 
         # Add MAE-style masking
         num_joints = CFG.smplh.num_joints
@@ -416,7 +423,7 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         mask_ratio = self._get_mask_ratio()
         num_masked = int(num_joints * mask_ratio)
         visible_joints_mask = torch.ones(
-            (self._subseq_len, num_joints), dtype=torch.bool, device=device
+            (seq_len, num_joints), dtype=torch.bool, device=device
         )
 
         # * Randomly select joints to mask, all data within a timestep is masked together, across batch is different.
@@ -525,8 +532,11 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         Returns:
             int: Total number of samples.
         """
-        _ = self._cum_len[-1] // self._subseq_len
-        return _.item()
+        if self._slice_strategy == "full_sequence":
+            return len(self._groups)
+        else:
+            _ = self._cum_len[-1] // self._subseq_len
+            return _.item()
 
     def _get_mask_ratio(self) -> float:
         """Get mask ratio - either fixed or randomly sampled"""

@@ -134,6 +134,7 @@ def run_training(
         drop_last=True,
     )
 
+    # breakpoint()
     optim = torch.optim.AdamW(  # type: ignore
         model.parameters(),
         lr=config.learning_rate,
@@ -247,11 +248,19 @@ def run_training(
                         "train/batch_time_ms": loop_metrics.batch_time * 1000,
                         "train/iterations_per_sec": loop_metrics.iterations_per_sec,
                         "performance/forward_time_ms": loop_metrics.forward_time * 1000,
-                        "performance/backward_time_ms": loop_metrics.backward_time * 1000,
-                        "performance/optimizer_time_ms": loop_metrics.optimizer_time * 1000,
+                        "performance/backward_time_ms": loop_metrics.backward_time
+                        * 1000,
+                        "performance/optimizer_time_ms": loop_metrics.optimizer_time
+                        * 1000,
                         "performance/batch_load_time_ms": batch_load_time * 1000,
-                        "system/gpu_utilization": {f"gpu_{i}": util for i, util in enumerate(loop_metrics.gpu_utilization)},
-                        "system/gpu_memory_used": {f"gpu_{i}": mem for i, mem in enumerate(loop_metrics.gpu_memory_used)},
+                        "system/gpu_utilization": {
+                            f"gpu_{i}": util
+                            for i, util in enumerate(loop_metrics.gpu_utilization)
+                        },
+                        "system/gpu_memory_used": {
+                            f"gpu_{i}": mem
+                            for i, mem in enumerate(loop_metrics.gpu_memory_used)
+                        },
                         "system/total_batch_size": loop_metrics.total_batch_size,
                         "system/per_gpu_batch_size": loop_metrics.per_gpu_batch_size,
                         "system/num_gpus": loop_metrics.num_gpus,
@@ -276,22 +285,29 @@ def run_training(
                             param_norm += p.norm(2).item() ** 2
                             grad_norm = p.grad.norm(2).item() ** 2
                             total_grad_norm += grad_norm
-                            
-                    wandb.log({
-                        "gradients/total_grad_norm": np.sqrt(total_grad_norm),
-                        "gradients/param_norm": np.sqrt(param_norm),
-                        "gradients/grad_to_param_ratio": np.sqrt(total_grad_norm) / (np.sqrt(param_norm) + 1e-8),
-                    }, step=step)
+
+                    wandb.log(
+                        {
+                            "gradients/total_grad_norm": np.sqrt(total_grad_norm),
+                            "gradients/param_norm": np.sqrt(param_norm),
+                            "gradients/grad_to_param_ratio": np.sqrt(total_grad_norm)
+                            / (np.sqrt(param_norm) + 1e-8),
+                        },
+                        step=step,
+                    )
 
                 # Log model parameter statistics periodically
                 if step % 2000 == 0:
                     for name, param in model.named_parameters():
                         if param.requires_grad:
-                            wandb.log({
-                                f"parameters/{name}/mean": param.mean().item(),
-                                f"parameters/{name}/std": param.std().item(),
-                                f"parameters/{name}/norm": param.norm().item(),
-                            }, step=step)
+                            wandb.log(
+                                {
+                                    f"parameters/{name}/mean": param.mean().item(),
+                                    f"parameters/{name}/std": param.std().item(),
+                                    f"parameters/{name}/norm": param.norm().item(),
+                                },
+                                step=step,
+                            )
 
             # Checkpointing and evaluation
             steps_to_save = 5000

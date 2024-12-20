@@ -132,7 +132,7 @@ class TestRunner:
             self.device
         )
 
-        # runtime_config.dataset_slice_strategy = "full_sequence"
+        runtime_config.dataset_slice_strategy = "full_sequence"
         runtime_config.train_splits = ("test",)  # Sorry for the naming
 
         self.dataloader = torch.utils.data.DataLoader(
