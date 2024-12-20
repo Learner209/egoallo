@@ -92,7 +92,6 @@ class EgoDenoiseTraj(TensorDataclass):
             self.t_world_root,
         ).parameters()
 
-        breakpoint()
         posed = shaped.with_pose_decomposed(
             T_world_root=T_world_root,
             body_quats=SO3.from_matrix(self.body_rotmats).wxyz,

@@ -58,11 +58,14 @@ def main(
             )
             output_name = npz_path.stem + ".mp4"
             train_traj = train_data.to_denoise_traj(include_hands=True)
-            EgoTrainingData.visualize_ego_training_data(
-                train_traj,
-                body_model,
-                output_path=str(Path("./exp/debug_frame_rate_diff/") / output_name),
-            )
+            output_path = Path("./exp/debug_frame_rate_diff/")
+            output_path.mkdir(parents=True, exist_ok=True)
+
+            # EgoTrainingData.visualize_ego_training_data(
+            #     train_traj,
+            #     body_model,
+            #     output_path=str(output_path / output_name),
+            # )
 
             # Get the relative path after any of the input directories
             for data_npz_dir in data_npz_dirs:

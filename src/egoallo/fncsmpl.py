@@ -203,6 +203,7 @@ class SmplhModel(TensorDataclass):
         )
         assert isinstance(root_and_joints_pred, Float[Tensor, "*batch jointsp1 xyz"])
         root_offset = root_and_joints_pred[..., 0:1, :]  # shape: (*batch 1 xyz)
+        # breakpoint()
         return SmplhShaped(
             body_model=self,
             root_offset=root_offset.squeeze(-2),
@@ -223,10 +224,10 @@ class SmplhShaped(TensorDataclass):
     verts_zero: Float[Tensor, "*#batch verts 3"]
     """Vertices of shaped body _relative to the root joint_ at the zero
     configuration."""
-    joints_zero: Float[Tensor, "*batch joints 3"]
+    joints_zero: Float[Tensor, "*#batch joints 3"]
     """Joints of shaped body _relative to the root joint_ at the zero
     configuration."""
-    t_parent_joint: Float[Tensor, "*batch joints 3"]
+    t_parent_joint: Float[Tensor, "*#batch joints 3"]
     """Position of each shaped body joint relative to its parent. Does not
     include root."""
 
@@ -265,6 +266,7 @@ class SmplhShaped(TensorDataclass):
         # Forward kinematics.
         num_joints = self.body_model.get_num_joints()
         assert local_quats.shape[-2:] == (num_joints, 4)
+
         Ts_world_joint = forward_kinematics(
             T_world_root=T_world_root,
             Rs_parent_joint=local_quats,
@@ -285,13 +287,13 @@ class SmplhShapedAndPosed(TensorDataclass):
     shaped_model: SmplhShaped
     """Underlying shaped body model."""
 
-    T_world_root: Float[Tensor, "#*batch 7"]
+    T_world_root: Float[Tensor, "*#batch 7"]
     """Root coordinate frame."""
 
-    local_quats: Float[Tensor, "#*batch joints 4"]
+    local_quats: Float[Tensor, "*#batch joints 4"]
     """Local joint orientations."""
 
-    Ts_world_joint: Float[Tensor, "#*batch joints 7"]
+    Ts_world_joint: Float[Tensor, "*#batch joints 7"]
     """Absolute transform for each joint. Does not include the root."""
 
     @jaxtyped(typechecker=typeguard.typechecked)
@@ -414,11 +416,11 @@ class SmplMesh(TensorDataclass):
 
 @jaxtyped(typechecker=typeguard.typechecked)
 def forward_kinematics(
-    T_world_root: Float[Tensor, "#*batch 7"],
-    Rs_parent_joint: Float[Tensor, "#*batch joints 4"],
-    t_parent_joint: Float[Tensor, "#*batch joints 3"],
+    T_world_root: Float[Tensor, "*#batch 7"],
+    Rs_parent_joint: Float[Tensor, "*#batch joints 4"],
+    t_parent_joint: Float[Tensor, "*#batch joints 3"],
     parent_indices: tuple[int, ...],
-) -> Float[Tensor, "#*batch joints 7"]:
+) -> Float[Tensor, "*#batch joints 7"]:
     """Run forward kinematics to compute absolute poses (T_world_joint) for
     each joint. The output array containts pose parameters
     (w, x, y, z, tx, ty, tz) for each joint. (this does not include the root!)

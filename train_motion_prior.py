@@ -41,6 +41,7 @@ import tempfile
 from egoallo.config.inference.inference_defaults import InferenceConfig
 from egoallo.scripts.test_amass import TestRunner
 import json
+import numpy as np
 
 
 def get_experiment_dir(experiment_name: str, version: int = 0) -> Path:
@@ -170,6 +171,7 @@ def run_training(
     loss_helper = training_loss.TrainingLossComputer(config.loss, device=device)
     loop_metrics_gen = training_utils.loop_metric_generator(counter_init=step)
     prev_checkpoint_path: Path | None = None
+    training_start_time = time.time()
     batch_start_time = time.time()
     epoch_start_time = time.time()
     epoch = 0
@@ -178,6 +180,7 @@ def run_training(
         for train_batch in train_loader:
             # Record batch loading time
             batch_load_time = time.time() - batch_start_time
+            batch_start_time = time.time()
 
             loop_metrics = next(loop_metrics_gen)
             step = loop_metrics.counter
@@ -239,21 +242,56 @@ def run_training(
                     {
                         "train/loss": loss.item(),
                         "train/learning_rate": scheduler.get_last_lr()[0],
-                        "train/batch_time": loop_metrics.batch_time,
+                        "train/epoch": epoch,
+                        "train/step": step,
+                        "train/batch_time_ms": loop_metrics.batch_time * 1000,
                         "train/iterations_per_sec": loop_metrics.iterations_per_sec,
+                        "performance/forward_time_ms": loop_metrics.forward_time * 1000,
+                        "performance/backward_time_ms": loop_metrics.backward_time * 1000,
+                        "performance/optimizer_time_ms": loop_metrics.optimizer_time * 1000,
+                        "performance/batch_load_time_ms": batch_load_time * 1000,
+                        "system/gpu_utilization": {f"gpu_{i}": util for i, util in enumerate(loop_metrics.gpu_utilization)},
+                        "system/gpu_memory_used": {f"gpu_{i}": mem for i, mem in enumerate(loop_metrics.gpu_memory_used)},
+                        "system/total_batch_size": loop_metrics.total_batch_size,
+                        "system/per_gpu_batch_size": loop_metrics.per_gpu_batch_size,
+                        "system/num_gpus": loop_metrics.num_gpus,
+                        "time/epoch_time": time.time() - epoch_start_time,
+                        "time/total_time": time.time() - training_start_time,
                     },
                     step=step,
                 )
 
-                # Log all loss terms from log_outputs
+                # Add individual loss terms
                 for key, value in log_outputs.items():
                     if key.startswith("loss_term/"):
-                        # Extract term name after loss_term/
                         term_name = key.split("/")[-1]
-                        wandb.log(
-                            {f"train/loss_{term_name}": value},
-                            step=step
-                        )
+                        wandb.log({f"losses/{term_name}": value}, step=step)
+
+                # Add gradient norms if not in debug mode
+                if not debug_mode and step % 400 == 0:
+                    total_grad_norm = 0.0
+                    param_norm = 0.0
+                    for p in model.parameters():
+                        if p.grad is not None:
+                            param_norm += p.norm(2).item() ** 2
+                            grad_norm = p.grad.norm(2).item() ** 2
+                            total_grad_norm += grad_norm
+                            
+                    wandb.log({
+                        "gradients/total_grad_norm": np.sqrt(total_grad_norm),
+                        "gradients/param_norm": np.sqrt(param_norm),
+                        "gradients/grad_to_param_ratio": np.sqrt(total_grad_norm) / (np.sqrt(param_norm) + 1e-8),
+                    }, step=step)
+
+                # Log model parameter statistics periodically
+                if step % 2000 == 0:
+                    for name, param in model.named_parameters():
+                        if param.requires_grad:
+                            wandb.log({
+                                f"parameters/{name}/mean": param.mean().item(),
+                                f"parameters/{name}/std": param.std().item(),
+                                f"parameters/{name}/norm": param.norm().item(),
+                            }, step=step)
 
             # Checkpointing and evaluation
             steps_to_save = 5000
@@ -308,7 +346,6 @@ def run_training(
                         logger.exception("Detailed error:")
 
                 del checkpoint_path
-
 
         # End of epoch
         epoch += 1

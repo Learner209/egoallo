@@ -137,7 +137,7 @@ def loop_metric_generator(
     accelerator: Optional[Accelerator] = None,
 ) -> Generator[LoopMetrics, None, None]:
     """Enhanced generator for computing detailed training loop metrics.
-    
+
     Args:
         counter_init: Initial counter value
         accelerator: HuggingFace Accelerator instance for multi-GPU info
@@ -145,7 +145,7 @@ def loop_metric_generator(
     counter = counter_init
     time_start = time.time()
     time_prev = time_start
-    
+
     # Track timing for different training phases
     phase_start = time.time()
     forward_time = 0.0
@@ -160,13 +160,15 @@ def loop_metric_generator(
         gpu_memory = []
         gpu_util = []
         num_gpus = 1
-        
+
         if torch.cuda.is_available():
             num_gpus = torch.cuda.device_count()
             for i in range(num_gpus):
                 memory_used, memory_total = torch.cuda.mem_get_info(i)
-                gpu_memory.append((memory_total - memory_used) / 1024**3)  # Convert to GB
-                
+                gpu_memory.append(
+                    (memory_total - memory_used) / 1024**3
+                )  # Convert to GB
+
                 # Note: This requires nvidia-smi
                 try:
                     gpu_util.append(
@@ -201,13 +203,13 @@ def loop_metric_generator(
             gpu_memory_used=gpu_memory,
             gpu_utilization=gpu_util,
             forward_time=forward_time,
-            backward_time=backward_time, 
+            backward_time=backward_time,
             optimizer_time=optimizer_time,
             num_gpus=num_gpus,
             per_gpu_batch_size=per_gpu_batch,
-            total_batch_size=total_batch
+            total_batch_size=total_batch,
         )
-        
+
         yield metrics
 
         # Reset timing trackers

@@ -197,7 +197,7 @@ class TrainingLossComputer:
                     < torch.rand((batch, 1, 1), device=device)
                 ),
                 hand_positions_wrt_cpf,
-            0.0,
+                0.0,
             )
 
         # Denoise.

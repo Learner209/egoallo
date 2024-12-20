@@ -259,6 +259,8 @@ class SMPLViewer(BaseRenderer):
         device = body_model.weights.device
 
         # Prepare SMPL sequence
+        denoised_traj = denoised_traj[0:400]
+
         T_world_root = SE3.from_rotation_and_translation(
             SO3.from_matrix(denoised_traj.R_world_root),
             denoised_traj.t_world_root,
@@ -283,9 +285,10 @@ class SMPLViewer(BaseRenderer):
             ],
             dim=-1,
         )
+
+        # breakpoint()
         mesh = posed.lbs()
         T_world_cpf = SE3(get_T_world_cpf(mesh))
-        # breakpoint()
         # Convert SMPL data to sequence
         sequence = []
         for i in range(T_world_root.shape[0]):
@@ -316,12 +319,11 @@ class SMPLViewer(BaseRenderer):
         )
 
         # Render frames
-        # breakpoint()
         with (
             VideoWriter(
                 output_path, resolution=self.config.resolution, fps=self.config.fps
             ) as vw,
-            AsyncPBOCapture(self.config.resolution, queue_size=100) as capturing,
+            AsyncPBOCapture(self.config.resolution, queue_size=40) as capturing,
         ):
             for i in tqdm(range(T_world_root.shape[0] - 1), desc="Rendering frames"):
                 # Get current camera pose from ego_data

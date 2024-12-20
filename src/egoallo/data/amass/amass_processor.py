@@ -120,14 +120,19 @@ class AMASSProcessor:
             if required_key not in seq_data.keys():
                 return None
 
-        # Get sequence info
+        # Get sequence info and handle mislabeled data
         gender = seq_data.get("gender", "invalid").item()
         if isinstance(gender, bytes):
             gender = gender.decode("utf-8")
         else:
             gender = str(gender)
 
+        # Correct mislabeled framerates
         fps = int(seq_data["mocap_framerate"])
+        if "BMLhandball" in str(seq_path):
+            fps = 240
+        if "20160930_50032" in str(seq_path) or "20161014_50033" in str(seq_path):
+            fps = 59
 
         # Get poses and shape
         poses = torch.from_numpy(seq_data["poses"]).float().to(self.device)  # (N, 156)
@@ -135,14 +140,34 @@ class AMASSProcessor:
         betas = (
             torch.from_numpy(seq_data["betas"][:16]).float().to(self.device)
         )  # (16,)
-        assert (
-            betas.dim() == 1 and betas.shape[0] == 16
-        ), f"betas.shape is {betas.shape}"
 
+        # Trim sequence to middle 80% to avoid redundant static poses
         num_frames = len(poses)
+        start_idx = int(0.1 * num_frames)
+        end_idx = int(0.9 * num_frames)
+        poses = poses[start_idx:end_idx]
+        trans = trans[start_idx:end_idx]
+        num_frames = end_idx - start_idx
+
         if num_frames < min_frames:
             logger.warning(f"Sequence too short: {num_frames} frames")
             return None
+
+        # Resample if target FPS is different from source FPS
+        assert (
+            self.target_fps <= fps
+        ), f"target_fps: {self.target_fps}, fps: {fps}, seq_path: {seq_path}"
+        if self.target_fps != fps and self.target_fps < fps:
+            fps_ratio = float(self.target_fps) / fps
+            new_num_frames = int(fps_ratio * num_frames)
+            downsamp_inds = np.linspace(
+                0, num_frames - 1, num=new_num_frames, dtype=int
+            )
+
+            poses = poses[downsamp_inds]
+            trans = trans[downsamp_inds]
+            num_frames = new_num_frames
+            fps = self.target_fps
 
         # Split pose parameters
         root_orient = poses[:, :3]  # (N, 3)
