@@ -52,7 +52,7 @@ class EgoAlloTrainConfig:
 
     # Network arch.
     use_fourier_in_masked_joints: bool = True
-    use_joint_embeddings: bool = False
+    use_joint_embeddings: bool = True
 
     # debug
     debug: bool = False

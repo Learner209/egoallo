@@ -410,8 +410,10 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
             end_t = min(start_t + self._subseq_len, total_t)
 
         # Load current window data
-        kwargs = self._load_sequence_data(group, start_t, end_t, total_t)
-        seq_len = total_t if self._slice_strategy == "full_sequence" else self._subseq_len
+        seq_len = (
+            total_t if self._slice_strategy == "full_sequence" else self._subseq_len
+        )
+        kwargs = self._load_sequence_data(group, start_t, end_t, total_t, seq_len)
         kwargs["mask"] = torch.ones(seq_len, dtype=torch.bool)
 
         # Add MAE-style masking
@@ -434,9 +436,11 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         # Get original joints_wrt_world
         # Combine root position from T_world_root with other joints to get full 22 joints
         joints_wrt_world = kwargs["joints_wrt_world"]  # shape: [time, 22, 3]
-        assert (
-            joints_wrt_world.shape == (self._subseq_len, num_joints, 3)
-        ), f"Expected shape: {(self._subseq_len, num_joints, 3)}, got: {joints_wrt_world.shape}"
+        assert joints_wrt_world.shape == (
+            seq_len,
+            num_joints,
+            3,
+        ), f"Expected shape: {(seq_len, num_joints, 3)}, got: {joints_wrt_world.shape}"
 
         # Update kwargs with new MAE-style masking tensors
         # kwargs["visible_joints"] = visible_joints
@@ -448,7 +452,7 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         return EgoTrainingData(**kwargs)
 
     def _load_sequence_data(
-        self, group: str, start_t: int, end_t: int, total_t: int
+        self, group: str, start_t: int, end_t: int, total_t: int, seq_len: int
     ) -> dict[str, Any]:
         """Load sequence data from HDF5 file or cache.
 
@@ -477,13 +481,11 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
                 array = v[start_t:end_t]
 
             # Pad if necessary
-            if array.shape[0] != self._subseq_len and k != "betas":
+            if array.shape[0] != seq_len and k != "betas":
                 array = np.concatenate(
                     [
                         array,
-                        np.repeat(
-                            array[-1:,], self._subseq_len - array.shape[0], axis=0
-                        ),
+                        np.repeat(array[-1:,], seq_len - array.shape[0], axis=0),
                     ],
                     axis=0,
                 )

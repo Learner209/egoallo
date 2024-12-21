@@ -40,6 +40,7 @@ from egoallo.sampling import (
 )
 from egoallo.transforms import SE3, SO3
 from egoallo.utils.setup_logger import setup_logger
+from egoallo.training_utils import ipdb_safety_net
 
 local_config_file = CONFIG_FILE
 CFG = make_cfg(config_name="defaults", config_file=local_config_file, cli_args=[])
@@ -299,5 +300,7 @@ def main(inference_config: InferenceConfig) -> None:
 
 if __name__ == "__main__":
     import tyro
+
+    ipdb_safety_net()
 
     tyro.cli(main)
