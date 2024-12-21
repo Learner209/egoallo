@@ -175,6 +175,7 @@ def run_training(
     training_start_time = time.time()
     batch_start_time = time.time()
     epoch_start_time = time.time()
+    epoch_time = time.time() - epoch_start_time
     epoch = 0
 
     while True:
@@ -210,16 +211,10 @@ def run_training(
                 continue
 
             if step % 400 == 0:
-                epoch_time = time.time() - epoch_start_time
                 log_msg = (
                     f"step: {step} ({loop_metrics.iterations_per_sec:.2f} it/sec)"
                     f" epoch: {epoch} (time: {epoch_time:.1f}s)"
                     f" time: {loop_metrics.time_elapsed:.1f}s"
-                    f" batch_load: {batch_load_time*1000:.1f}ms"
-                    f" batch: {loop_metrics.batch_time*1000:.1f}ms"
-                    f" fwd: {loop_metrics.forward_time*1000:.1f}ms"
-                    f" bwd: {loop_metrics.backward_time*1000:.1f}ms"
-                    f" opt: {loop_metrics.optimizer_time*1000:.1f}ms"
                     f" gpus: {loop_metrics.num_gpus}"
                     f" batch/gpu: {loop_metrics.per_gpu_batch_size}"
                     f" total_batch: {loop_metrics.total_batch_size}"
@@ -245,13 +240,6 @@ def run_training(
                         "train/learning_rate": scheduler.get_last_lr()[0],
                         "train/epoch": epoch,
                         "train/step": step,
-                        "train/batch_time_ms": loop_metrics.batch_time * 1000,
-                        "train/iterations_per_sec": loop_metrics.iterations_per_sec,
-                        "performance/forward_time_ms": loop_metrics.forward_time * 1000,
-                        "performance/backward_time_ms": loop_metrics.backward_time
-                        * 1000,
-                        "performance/optimizer_time_ms": loop_metrics.optimizer_time
-                        * 1000,
                         "performance/batch_load_time_ms": batch_load_time * 1000,
                         "system/gpu_utilization": {
                             f"gpu_{i}": util
@@ -264,7 +252,9 @@ def run_training(
                         "system/total_batch_size": loop_metrics.total_batch_size,
                         "system/per_gpu_batch_size": loop_metrics.per_gpu_batch_size,
                         "system/num_gpus": loop_metrics.num_gpus,
-                        "time/epoch_time": time.time() - epoch_start_time,
+                        "time/batch_time_ms": loop_metrics.batch_time * 1000,
+                        "time/iterations_per_sec": loop_metrics.iterations_per_sec,
+                        "time/epoch_time": epoch_time,
                         "time/total_time": time.time() - training_start_time,
                     },
                     step=step,
