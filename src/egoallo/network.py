@@ -225,7 +225,7 @@ class EgoDenoiserConfig:
     joint_cond_mode: Literal[
         "absolute", "absrel_jnts", "absrel", "absrel_global_deltas"
     ] = "absrel"
-    joint_emb_dim: int = 512
+    joint_emb_dim: int = 8
 
     # Add SMPL-H model path configuration
     smplh_npz_path: Path = Path("data/smplh/neutral/model.npz")
@@ -237,7 +237,7 @@ class EgoDenoiserConfig:
 
     # Add new config parameter
     use_joint_embeddings: bool = (
-        False  # Whether to use joint index embeddings in conditioning
+        True  # Whether to use joint index embeddings in conditioning
     )
 
     @cached_property
@@ -302,6 +302,7 @@ class EgoDenoiserConfig:
             index_embeddings = None
 
         # Create joints with visibility as 4th dimension
+        joints = torch.where(visible_joints_mask.unsqueeze(-1), joints, 0)
         joints_with_vis = torch.cat(
             [
                 joints,
@@ -352,6 +353,59 @@ class EgoDenoiserConfig:
             ]
             if self.use_joint_embeddings:
                 components.append(index_embeddings.reshape(batch, time, -1))
+            cond = torch.cat(components, dim=-1)
+
+        elif self.joint_cond_mode == "absrel_plus":
+            # 1. Compute hierarchical joint representation
+            # Root (pelvis) as base
+            root_pos = joints[..., 0:1, :]
+
+            # Get relative positions to parent joints using kinematic chain
+            # This removes redundant global motion information
+            rel_to_parent = torch.zeros_like(joints)
+            kinematic_chain = (
+                get_kinematic_chain()
+            )  # Define this based on SMPL skeleton
+            for joint_idx, parent_idx in kinematic_chain:
+                rel_to_parent[..., joint_idx, :] = (
+                    joints[..., joint_idx, :] - joints[..., parent_idx, :]
+                )
+
+            # 2. Compute motion features
+            # Velocity (first order temporal difference)
+            velocity = joints[:, 1:] - joints[:, :-1]
+            # Acceleration (second order temporal difference)
+            accel = velocity[:, 1:] - velocity[:, :-1]
+
+            # 3. Compute motion attention scores
+            # Higher scores for frames with significant motion changes
+            motion_magnitude = torch.norm(velocity, dim=-1)
+            attention_scores = torch.sigmoid(
+                motion_magnitude - motion_magnitude.mean(dim=1, keepdim=True)
+            )
+
+            # 4. Create decorrelated features
+            components = [
+                # Global root motion
+                root_pos.reshape(batch, time, -1),
+                # Local joint configurations
+                rel_to_parent.reshape(batch, time, -1),
+                # Temporal features - weighted by attention scores
+                (velocity * attention_scores[..., None]).reshape(batch, time - 1, -1),
+                (accel * attention_scores[..., None]).reshape(batch, time - 2, -1),
+                # Optional joint embeddings for semantic information
+                index_embeddings.reshape(batch, time, -1)
+                if self.use_joint_embeddings
+                else None,
+            ]
+            components = [c for c in components if c is not None]
+
+            # Pad temporal features to match time dimension
+            pad_size = time - components[2].shape[1]
+            components[2] = F.pad(components[2], (0, 0, 0, pad_size))
+            pad_size = time - components[3].shape[1]
+            components[3] = F.pad(components[3], (0, 0, 0, pad_size))
+
             cond = torch.cat(components, dim=-1)
 
         elif self.joint_cond_mode == "absrel_global_deltas":

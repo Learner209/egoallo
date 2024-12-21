@@ -4,6 +4,7 @@ import torch
 import torch.utils.data
 
 from .datasets.amass_dataset import AdaptiveAmassHdf5Dataset, VanillaEgoAmassHdf5Dataset
+from .datasets.egoexo_dataset import EgoExoDataset
 from egoallo.utils.setup_logger import setup_logger
 from egoallo.data.dataclass import EgoTrainingData
 

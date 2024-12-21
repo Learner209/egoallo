@@ -25,7 +25,10 @@ from egoallo.inference_utils import (
     InferenceTrajectoryPaths,
     load_denoiser,
 )
-from egoallo.sampling import run_sampling_with_stitching
+from egoallo.sampling import (
+    run_sampling_with_stitching,
+    run_sampling_with_masked_data,
+)
 from egoallo.transforms import SE3, SO3
 from egoallo.vis_helpers import visualize_traj_and_hand_detections
 from egoallo.training_utils import ipdb_safety_net
@@ -112,7 +115,7 @@ def main(config: InferenceConfig) -> None:
     body_model = fncsmpl.SmplhModel.load(config.smplh_npz_path).to(device)
 
     # traj = run_sampling_with_stitching(
-    traj = real_time_sampling_with_stitching(
+    traj = run_sampling_with_masked_data(
         denoiser_network,
         body_model=body_model,
         guidance_mode=config.guidance_mode,

@@ -254,14 +254,10 @@ class VanillaEgoAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         # Generate random mask for sequence
         mask_ratio = self._get_mask_ratio()
         num_masked = int(num_joints * mask_ratio)
-        visible_joints_mask = torch.ones(
-            (subseq_len, num_joints), dtype=torch.bool, device=device
-        )
 
-        # * Randomly select joints to mask, all data within a timestep is masked together, across batch is different.
-        rand_indices = torch.randperm(num_joints)
-        masked_indices = rand_indices[:num_masked]
-        visible_joints_mask[:, masked_indices] = False
+        rand_values = torch.rand((subseq_len, num_joints), device=device)
+        _, indices = torch.sort(rand_values, dim=1)
+        visible_joints_mask = indices >= num_masked
 
         # Get original joints_wrt_world
         joints_wrt_world = kwargs["joints_wrt_world"]  # shape: [time, 22, 3]
@@ -421,17 +417,12 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         # assert num_joints == 22, f"Expected 22 joints, got {num_joints}"
         device = kwargs["joints_wrt_world"].device
 
-        # Generate random mask for sequence
         mask_ratio = self._get_mask_ratio()
         num_masked = int(num_joints * mask_ratio)
-        visible_joints_mask = torch.ones(
-            (seq_len, num_joints), dtype=torch.bool, device=device
-        )
 
-        # * Randomly select joints to mask, all data within a timestep is masked together, across batch is different.
-        rand_indices = torch.randperm(num_joints)
-        masked_indices = rand_indices[:num_masked]
-        visible_joints_mask[:, masked_indices] = False
+        rand_values = torch.rand((seq_len, num_joints), device=device)
+        _, indices = torch.sort(rand_values, dim=1)
+        visible_joints_mask = indices >= num_masked
 
         # Get original joints_wrt_world
         # Combine root position from T_world_root with other joints to get full 22 joints

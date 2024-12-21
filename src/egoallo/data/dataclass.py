@@ -108,26 +108,39 @@ class EgoTrainingData(TensorDataclass):
         posed = shaped.with_pose_decomposed(
             T_world_root=T_world_root.to(device), body_quats=body_quats.to(device)
         )
+
+        # Get initial position offset
+        initial_pos = T_world_root[0, 4:7]  # First frame position
+
+        # Align positions by subtracting offset
+        T_world_root_aligned = T_world_root.clone()
+        T_world_root_aligned[..., 4:7] = T_world_root[..., 4:7] - initial_pos
+
+        # Align joints_wrt_world
+        joints_wrt_world_aligned = raw_fields["joints"] - initial_pos
+
+        # Align T_world_cpf (only translation component)
         T_world_cpf = (
             tf.SE3(posed.Ts_world_joint[:, 14, :])  # T_world_head
             @ tf.SE3(fncsmpl_extensions.get_T_head_cpf(shaped))
         ).parameters()
-        assert T_world_cpf.shape == (timesteps, 7)
+        
+        T_world_cpf_aligned = T_world_cpf.clone()
+        T_world_cpf_aligned[..., 4:7] = T_world_cpf[..., 4:7] - initial_pos
 
         return EgoTrainingData(
-            T_world_root=T_world_root.cpu(),
+            T_world_root=T_world_root_aligned.cpu(),
             contacts=raw_fields["contacts"][:, :22].cpu(),  # root is included.
             betas=raw_fields["betas"].unsqueeze(0).cpu(),
-            joints_wrt_world=raw_fields["joints"].cpu(),  # root is included.
+            joints_wrt_world=joints_wrt_world_aligned.cpu(),  # root is included.
             body_quats=body_quats.cpu(),
             # CPF frame stuff.
-            T_world_cpf=T_world_cpf.cpu(),
-            # Get translational z coordinate from wxyz_xyz.
-            height_from_floor=T_world_cpf[:, 6:7].cpu(),
+            T_world_cpf=T_world_cpf_aligned.cpu(),
+            height_from_floor=T_world_cpf_aligned[:, 6:7].cpu(),
             joints_wrt_cpf=(
                 # unsqueeze so both shapes are (timesteps, joints, dim)
-                tf.SE3(T_world_cpf[:, None, :]).inverse()
-                @ raw_fields["joints"].to(T_world_cpf.device)
+                tf.SE3(T_world_cpf_aligned[:, None, :]).inverse()
+                @ joints_wrt_world_aligned.to(T_world_cpf_aligned.device)
             ).cpu(),
             mask=torch.ones((timesteps,), dtype=torch.bool),
             hand_quats=hand_quats.cpu() if include_hands else None,

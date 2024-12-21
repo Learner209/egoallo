@@ -179,7 +179,7 @@ class TrainingLossComputer:
                 / bt_mask_sum
             )
 
-        hand_positions_wrt_cpf: Tensor | None = None
+        oand_positions_wrt_cpf: Tensor | None = None
         if unwrapped_model.config.include_hands:
             # Joints 19 and 20 are the hand positions.
             wrist_start_index = 20
