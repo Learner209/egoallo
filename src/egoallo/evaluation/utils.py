@@ -4,7 +4,7 @@ from typing import Optional, Tuple
 import torch
 from torch import Tensor
 
-from .types import Device, PathLike
+from egoallo.types import Device, PathLike
 
 
 def get_device(device: Optional[Device] = None) -> torch.device:
@@ -26,12 +26,12 @@ def procrustes_align(
 ) -> Tuple[Tensor, Tensor, Tensor]:
     """
     Perform Procrustes alignment between two point sets.
-    
+
     Args:
         points_y: Target points (..., N, 3)
         points_x: Source points (..., N, 3)
         fix_scale: Whether to fix scale to 1
-        
+
     Returns:
         Tuple of (scale, rotation, translation)
     """
@@ -60,9 +60,13 @@ def procrustes_align(
     if fix_scale:
         s = torch.ones(*dims, 1, device=device, dtype=dtype)
     else:
-        var = torch.sum(x0 ** 2, dim=(-1, -2), keepdim=True) / N_tensor
-        s = (torch.sum(D * S.diagonal(dim1=-2, dim2=-1), dim=-1, keepdim=True) / var[..., 0])
+        var = torch.sum(x0**2, dim=(-1, -2), keepdim=True) / N_tensor
+        s = (
+            torch.sum(D * S.diagonal(dim1=-2, dim2=-1), dim=-1, keepdim=True)
+            / var[..., 0]
+        )
 
     t = my - s * torch.matmul(R, mx[..., None])[..., 0]
 
-    return s, R, t 
+    return s, R, t
+

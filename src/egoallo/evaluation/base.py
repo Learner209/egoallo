@@ -6,7 +6,13 @@ from egoallo import fncsmpl
 import torch
 from torch import Tensor
 
-from .types import Device, MetricsDict, PathLike, ProcrustesMode, ProcrustesOutput
+from egoallo.types import (
+    Device,
+    MetricsDict,
+    PathLike,
+    ProcrustesMode,
+    ProcrustesOutput,
+)
 from .utils import get_device, ensure_path
 
 

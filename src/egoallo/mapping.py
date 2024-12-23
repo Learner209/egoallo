@@ -74,7 +74,32 @@ EGOEXO_ROOT_IDX = EGOEXO4D_EGOPOSE_BODYPOSE_MAPPINGS.index('left-hip')
 
 # ! The egoexo4d-bodypose <--> smplh-bodypose mapping is not consistent, as the head pose is mapped to left-eye.
 # Totaling 24.
-EGOEXO4D_BODYPOSE_TO_SMPL_INDICES = [-1, 11, 12, -1, 13, 14, -1, 15, 16, -1, -1, -1, -1, -1,-1, 1, 5, 6, 7, 8, 9, 10, -1, -1]
+EGOEXO4D_BODYPOSE_TO_SMPL_INDICES = [
+    -1,     # nose -> no direct mapping
+    11,     # left-eye -> left_foot 
+    12,     # right-eye -> right_foot
+    -1,     # left-ear -> no direct mapping
+    13,     # right-ear -> left_collar
+    14,     # left-shoulder -> right_collar
+    -1,     # right-shoulder -> no direct mapping
+    15,     # left-elbow -> head
+    16,     # right-elbow -> left_shoulder
+    -1,     # left-wrist -> no direct mapping
+    -1,     # right-wrist -> no direct mapping
+    -1,     # left-hip -> no direct mapping
+    -1,     # right-hip -> no direct mapping
+    -1,     # left-knee -> no direct mapping
+    -1,     # right-knee -> no direct mapping
+    1,      # left-ankle -> left_hip
+    5,      # right-ankle -> right_knee
+    6,      # spine2 -> spine2
+    7,      # left_ankle -> left_ankle
+    8,      # right_ankle -> right_ankle
+    9,      # spine3 -> spine3
+    10,     # left_foot -> left_foot
+    -1,     # left_hand -> no direct mapping
+    -1      # right_hand -> no direct mapping
+]
 EGOEXO4D_BODYPOSE_TO_SMPLH_INDICES = EGOEXO4D_BODYPOSE_TO_SMPL_INDICES[:-2]
 
 SMPLH_TO_EGOEXO4D_BODYPOSE_INDICES =[

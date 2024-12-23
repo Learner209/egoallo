@@ -45,3 +45,16 @@ ProcrustesMode = Literal["transforms", "aligned_x"]
 
 # Evaluation types
 EvalMode = Union[Literal["hamer"], GuidanceMode]
+
+# Dataset type (for both training and inference)
+DatasetType = Literal[
+	"AdaptiveAmassHdf5Dataset",
+	"VanillaEgoAmassHdf5Dataset",
+	"EgoExoDataset",
+]
+
+DatasetSliceStrategy = Literal[
+	"deterministic", "random_uniform_len", "random_variable_len", "full_sequence"
+]
+
+DatasetSplit = Literal["train", "val", "test", "just_humaneva"]

@@ -2,6 +2,7 @@ from pathlib import Path
 from typing import Literal
 import dataclasses
 from egoallo import network, training_loss
+from egoallo.types import DatasetType, DatasetSliceStrategy, DatasetSplit
 
 
 @dataclasses.dataclass
@@ -28,21 +29,16 @@ class EgoAlloTrainConfig:
     """Effective batch size."""
     num_workers: int = 0
     subseq_len: int = 128
-    dataset_slice_strategy: Literal[
-        "deterministic", "random_uniform_len", "random_variable_len", "full_sequence"
-    ] = "random_uniform_len"
+    dataset_slice_strategy: DatasetSliceStrategy = "random_uniform_len"
     dataset_slice_random_variable_len_proportion: float = 0.3
     """Only used if dataset_slice_strategy == 'random_variable_len'."""
-    train_splits: tuple[Literal["train", "val", "test", "just_humaneva"], ...] = (
-        "train",
-        "val",
-    )
+    splits: tuple[DatasetSplit, ...] = ("train", "val")
     data_collate_fn: Literal[
         "DefaultBatchCollator", "ExtendedBatchCollator", "EgoTrainingDataBatchCollator"
     ] = "EgoTrainingDataBatchCollator"
-    dataset_type: Literal["AdaptiveAmassHdf5Dataset", "VanillaEgoAmassHdf5Dataset"] = (
-        "AdaptiveAmassHdf5Dataset"
-    )
+    dataset_type: DatasetType = "AdaptiveAmassHdf5Dataset"
+    bodypose_anno_dir: Path | None = None
+    """Path to body pose annotation directory, only used when dataset_type is EgoExoDataset"""
 
     # Optimizer options.
     learning_rate: float = 1e-4

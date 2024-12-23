@@ -132,16 +132,18 @@ class TestRunner:
         self.body_model = fncsmpl.SmplhModel.load(runtime_config.smplh_npz_path).to(
             self.device
         )
-
-        runtime_config.dataset_slice_strategy = "full_sequence"
-        runtime_config.train_splits = ("test",)  # Sorry for the naming
+        # Override runtime config with inference config values
+        for field in dataclasses.fields(type(self.config)):
+            if hasattr(runtime_config, field.name):
+                setattr(runtime_config, field.name, getattr(self.config, field.name))
 
         self.dataloader = torch.utils.data.DataLoader(
             dataset=build_dataset(cfg=runtime_config)(config=runtime_config),
             batch_size=1,
             shuffle=False,
-            num_workers=runtime_config.num_workers,
-            persistent_workers=runtime_config.num_workers > 0,
+            # num_workers=runtime_config.num_workers,
+            num_workers=0,
+            # persistent_workers=runtime_config.num_workers > 0,
             pin_memory=True,
             collate_fn=make_batch_collator(runtime_config),
             drop_last=False,

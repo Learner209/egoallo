@@ -16,13 +16,13 @@ from egoallo.utilities import procrustes_align
 from egoallo.utils.setup_logger import setup_logger
 
 from .base import BaseEvaluator
-from .constants import (
+from egoallo.constants import (
     BODY_METRICS,
     FOOT_HEIGHT_THRESHOLDS,
     FOOT_INDICES,
     HEAD_JOINT_INDEX,
 )
-from .types import (
+from egoallo.types import (
     BatchedJointTransforms,
     BatchedRootTransforms,
     FloatArray,

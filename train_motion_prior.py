@@ -39,7 +39,7 @@ import wandb
 import datetime
 import tempfile
 from egoallo.config.inference.inference_defaults import InferenceConfig
-from egoallo.scripts.test_amass import TestRunner
+from egoallo.scripts.test import TestRunner
 import json
 import numpy as np
 

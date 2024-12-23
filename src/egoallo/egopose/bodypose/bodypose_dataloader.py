@@ -24,8 +24,13 @@ from egoallo.utils.setup_logger import setup_logger
 from egoallo.egoexo import EGOEXO_UTILS_INST
 from egoallo.egoexo.egoexo_utils import EgoExoUtils
 from egoallo.config import make_cfg, CONFIG_FILE
-from egoallo.egopose.handpose.data_preparation.handpose_dataloader import hand_pose_anno_loader
-from egoallo.egopose.stats_collector import PreprocessingStatsCollector, KeypointFilterStats
+from egoallo.egopose.handpose.data_preparation.handpose_dataloader import (
+    hand_pose_anno_loader,
+)
+from egoallo.egopose.stats_collector import (
+    PreprocessingStatsCollector,
+    KeypointFilterStats,
+)
 from dataclasses import dataclass
 from egoallo.data.aria_mps import load_point_cloud_and_find_ground
 from pathlib import Path
@@ -34,7 +39,10 @@ from typing import Dict, Optional, Any
 local_config_file = CONFIG_FILE
 CFG = make_cfg(config_name="defaults", config_file=local_config_file, cli_args=[])
 
-logger = setup_logger(output=CFG.io.egoexo.preprocessing.gt_bodypose.output.log_save_dir, name=__name__)
+logger = setup_logger(
+    output=CFG.io.egoexo.preprocessing.gt_bodypose.output.log_save_dir, name=__name__
+)
+
 
 # Loads dataframe at target path to csv
 def load_csv_to_df(filepath: str) -> pd.DataFrame:
@@ -42,6 +50,7 @@ def load_csv_to_df(filepath: str) -> pd.DataFrame:
         return None
     with open(filepath, "r") as csv_file:
         return pd.read_csv(csv_file)
+
 
 class body_pose_anno_loader(hand_pose_anno_loader):
     """
@@ -57,7 +66,9 @@ class body_pose_anno_loader(hand_pose_anno_loader):
         self.discard_seq_than = args.gt_bodypose.discard_seq_than
         self.anno_type = anno_type
         self.split = split
-        self.num_joints = len(EGOEXO4D_EGOPOSE_BODYPOSE_MAPPINGS)  # Number of joints for single body
+        self.num_joints = len(
+            EGOEXO4D_EGOPOSE_BODYPOSE_MAPPINGS
+        )  # Number of joints for single body
         self.undist_img_dim = (2160, 3840)  # Dimension of undistorted aria image [H, W]
         self.valid_kpts_threshold = (
             args.valid_kpts_num_thresh
@@ -72,17 +83,19 @@ class body_pose_anno_loader(hand_pose_anno_loader):
         self.aria_calib_dir = args.aria_calib_output_dir
         self.takes = EGOEXO_UTILS_INST.takes
         self.splits = EGOEXO_UTILS_INST.splits
-        self.test_run = getattr(args.gt_bodypose, 'test_run', False)
-        self.test_max_takes = getattr(args.gt_bodypose, 'test_max_takes', 2)
-        self.test_max_frames_per_take = getattr(args.gt_bodypose, 'test_max_frames_per_take', 10)
-        self.test_frame_interval = getattr(args.gt_bodypose, 'test_frame_interval', 30)  # Sample every 30 frames
+        self.test_run = getattr(args.gt_bodypose, "test_run", False)
+        self.test_max_takes = getattr(args.gt_bodypose, "test_max_takes", 2)
+        self.test_max_frames_per_take = getattr(
+            args.gt_bodypose, "test_max_frames_per_take", 10
+        )
+        self.test_frame_interval = getattr(
+            args.gt_bodypose, "test_frame_interval", 30
+        )  # Sample every 30 frames
 
         # Determine annotation and camera pose directory
         anno_type_dir_dict = {"manual": "annotation", "auto": "automatic"}
         self.body_anno_dir = (
-            os.path.join(
-                self.dataset_root, "annotations/ego_pose/test/body/annotation"
-            )
+            os.path.join(self.dataset_root, "annotations/ego_pose/test/body/annotation")
             if self.split == "test"
             else os.path.join(
                 self.dataset_root,
@@ -124,10 +137,7 @@ class body_pose_anno_loader(hand_pose_anno_loader):
             }
             uid_to_take = {uid: take for take, uid in take_to_uid.items()}
             # (0). Filter common takes
-            comm_local_take_uid = list(
-                set(split_all_local_takes)
-            )
-
+            comm_local_take_uid = list(set(split_all_local_takes))
 
         # Get all valid local take uids that are used in current split
         # 1. Filter takes based on split (train/val/test)
@@ -135,7 +145,7 @@ class body_pose_anno_loader(hand_pose_anno_loader):
         # 2. Filter takes based on benchmark (ego_pose)
         ego_pose_uid = get_ego_pose_takes_from_splits(self.splits)
         curr_split_ego_pose_uid = list(set(curr_split_uid) & set(ego_pose_uid))
-        
+
         # 3. Filter takes with available camera pose file
         available_cam_pose_uid = [
             k.split(".")[0] for k in os.listdir(self.cam_pose_dir)
@@ -145,25 +155,33 @@ class body_pose_anno_loader(hand_pose_anno_loader):
         if self.split == "test":
             comm_take_w_cam_pose = sorted(list(set(comm_take)))
         else:
-            comm_take_w_cam_pose = sorted(list(set(comm_take) & set(comm_local_take_uid)))
-        
+            comm_take_w_cam_pose = sorted(
+                list(set(comm_take) & set(comm_local_take_uid))
+            )
+
         # Sample takes if in test run mode
         if self.test_run:
             import random
+
             num_takes = min(self.test_max_takes, len(comm_take_w_cam_pose))
             comm_take_w_cam_pose = random.sample(comm_take_w_cam_pose, num_takes)
             logger.info(f"Test run: Sampling {num_takes} takes")
 
-        logger.info(f"Find {len(comm_take_w_cam_pose)} takes in {self.split} ({self.anno_type}) dataset. Start data processing...")
+        logger.info(
+            f"Find {len(comm_take_w_cam_pose)} takes in {self.split} ({self.anno_type}) dataset. Start data processing..."
+        )
 
         overall_frames_num = 0
         overall_valid_frames_num = 0
 
         # Iterate through all takes from annotation directory and check
         for curr_take_uid in tqdm(comm_take_w_cam_pose):
-
-            curr_take_name = EGOEXO_UTILS_INST.find_take_name_from_take_uid(curr_take_uid)
-            assert curr_take_name is not None, f"Take name not found for {curr_take_uid}."
+            curr_take_name = EGOEXO_UTILS_INST.find_take_name_from_take_uid(
+                curr_take_uid
+            )
+            assert (
+                curr_take_name is not None
+            ), f"Take name not found for {curr_take_uid}."
             # Load annotation, camera pose JSON and image directory
             curr_take_anno_path = os.path.join(
                 self.body_anno_dir, f"{curr_take_uid}.json"
@@ -172,11 +190,15 @@ class body_pose_anno_loader(hand_pose_anno_loader):
                 self.cam_pose_dir, f"{curr_take_uid}.json"
             )
             curr_take = [t for t in self.takes if t["take_name"] == curr_take_name][0]
-            traj_dir = os.path.join(self.dataset_root, curr_take["root_dir"], "trajectory")
+            traj_dir = os.path.join(
+                self.dataset_root, curr_take["root_dir"], "trajectory"
+            )
             exo_traj_path = os.path.join(traj_dir, "gopro_calibs.csv")
 
             # assert os.path.exists(exo_traj_path), f"Exo trajectory file not found at {exo_traj_path}."
-            assert os.path.exists(curr_take_cam_pose_path), f"Camera pose file not found at {curr_take_cam_pose_path}."
+            assert os.path.exists(
+                curr_take_cam_pose_path
+            ), f"Camera pose file not found at {curr_take_cam_pose_path}."
 
             exo_traj_df = load_csv_to_df(exo_traj_path)
 
@@ -185,11 +207,20 @@ class body_pose_anno_loader(hand_pose_anno_loader):
             # aria_mask, aria_cam_name = self.load_aria_calib(curr_take_name)
             aria_cam_name = EgoExoUtils.get_ego_aria_cam_name(curr_take)
             if self.split == "test":
-                exo_cam_masks, exo_cam_names = CalibrationUtilities.get_exo_cam_masks(curr_take, exo_traj_df, portrait_view=self.portrait_view, dimension=self.undist_img_dim[::-1])
+                exo_cam_masks, exo_cam_names = CalibrationUtilities.get_exo_cam_masks(
+                    curr_take,
+                    exo_traj_df,
+                    portrait_view=self.portrait_view,
+                    dimension=self.undist_img_dim[::-1],
+                )
                 if len(exo_cam_names) == 0 or len(exo_cam_masks) == 0:
                     continue
                 curr_take_data = self.load_take_raw_data_for_test(
-                    curr_take_name, curr_take_uid, curr_take_cam_pose, aria_cam_name, exo_cam_names
+                    curr_take_name,
+                    curr_take_uid,
+                    curr_take_cam_pose,
+                    aria_cam_name,
+                    exo_cam_names,
                 )
                 if len(curr_take_data) > 0:
                     gt_db[curr_take_uid] = curr_take_data
@@ -197,13 +228,22 @@ class body_pose_anno_loader(hand_pose_anno_loader):
                     overall_frames_num += len(curr_take_data)
                     overall_valid_frames_num += len(curr_take_data)
             else:
-                assert os.path.exists(curr_take_anno_path), f"Annotation file not found at {curr_take_anno_path}."
+                assert os.path.exists(
+                    curr_take_anno_path
+                ), f"Annotation file not found at {curr_take_anno_path}."
 
                 curr_take_anno = json.load(open(curr_take_anno_path))
 
                 # Get valid takes info for all frames
                 if len(curr_take_anno) > 0:
-                    exo_cam_masks, exo_cam_names = CalibrationUtilities.get_exo_cam_masks(curr_take, exo_traj_df, portrait_view=self.portrait_view, dimension=self.undist_img_dim[::-1])
+                    exo_cam_masks, exo_cam_names = (
+                        CalibrationUtilities.get_exo_cam_masks(
+                            curr_take,
+                            exo_traj_df,
+                            portrait_view=self.portrait_view,
+                            dimension=self.undist_img_dim[::-1],
+                        )
+                    )
                     if exo_cam_names is not None:
                         curr_take_data = self.load_take_raw_data(
                             curr_take_name,
@@ -222,32 +262,32 @@ class body_pose_anno_loader(hand_pose_anno_loader):
                         else:
                             pass
                             # logger.warning(f"Take {curr_take_name} has no valid annotation. Skipped this take.")
-        logger.warning(f"Egoexo dataset achieves {overall_valid_frames_num}/{overall_frames_num} valid frames for [{self.split}/{self.anno_type}].")
+        logger.warning(
+            f"Egoexo dataset achieves {overall_valid_frames_num}/{overall_frames_num} valid frames for [{self.split}/{self.anno_type}]."
+        )
         return gt_db
-    
+
     def _get_ground_height(self, take_uid: str) -> float:
         """Get ground height for a take, computing it if not cached."""
         if take_uid not in self.ground_heights:
             # Get point cloud path
             point_cloud_path = EGOEXO_UTILS_INST.load_semidense_pts(take_uid)
-            
+
             if point_cloud_path is None:
                 logger.warning(f"No point cloud found for take {take_uid}")
                 self.ground_heights[take_uid] = None
                 return None
-                
+
             try:
                 # Load point cloud and find ground
                 _, ground_height = load_point_cloud_and_find_ground(
-                    Path(point_cloud_path),
-                    return_points="filtered",
-                    cache_files=False
+                    Path(point_cloud_path), return_points="filtered", cache_files=False
                 )
                 self.ground_heights[take_uid] = float(ground_height)
             except Exception as e:
                 logger.error(f"Error computing ground height for take {take_uid}: {e}")
                 self.ground_heights[take_uid] = None
-                
+
         return self.ground_heights[take_uid]
 
     def load_take_raw_data(
@@ -262,10 +302,10 @@ class body_pose_anno_loader(hand_pose_anno_loader):
     ):
         """Load and validate data for a single take"""
         curr_take_db = {}
-        
+
         # Initialize take stats
         self.stats_collector.mark_take_processed(take_uid, valid=False)
-        
+
         curr_exo_intrs, curr_exo_extrs = self.load_static_ego_exo_cam_poses(
             cam_pose, exo_cam_names
         )
@@ -276,27 +316,36 @@ class body_pose_anno_loader(hand_pose_anno_loader):
             keypoint_stats.total = self.num_joints
 
             # Load frame data
-            curr_body_2d_kpts, curr_body_3d_kpts, joints_view_stat = self.load_frame_body_2d_3d_kpts(
-                curr_frame_anno, exo_cam_names
+            curr_body_2d_kpts, curr_body_3d_kpts, joints_view_stat = (
+                self.load_frame_body_2d_3d_kpts(curr_frame_anno, exo_cam_names)
             )
-            
+
             curr_ego_intr, curr_ego_extr = self.load_frame_cam_pose(
                 frame_idx, cam_pose, aria_cam_name
             )
 
             # Basic validation of data presence
-            if curr_body_3d_kpts is None or curr_body_2d_kpts is None or curr_exo_extrs is None or curr_exo_intrs is None:
+            if (
+                curr_body_3d_kpts is None
+                or curr_body_2d_kpts is None
+                or curr_exo_extrs is None
+                or curr_exo_intrs is None
+            ):
                 keypoint_stats.missing_annotation = self.num_joints
-                self.stats_collector.update_frame_stats(take_uid, frame_idx, keypoint_stats, valid=False)
+                self.stats_collector.update_frame_stats(
+                    take_uid, frame_idx, keypoint_stats, valid=False
+                )
                 continue
 
             # Track initially missing annotations
             missing_anno_mask = np.any(np.isnan(curr_body_3d_kpts), axis=1)
             keypoint_stats.missing_annotation = np.sum(missing_anno_mask)
-            
+
             # Only validate biomechanics for keypoints that have annotations
             valid_anno_mask = ~missing_anno_mask
-            curr_body_3d_kpts, biomech_valid_mask = body_jnts_dist_angle_check(curr_body_3d_kpts)
+            curr_body_3d_kpts, biomech_valid_mask = body_jnts_dist_angle_check(
+                curr_body_3d_kpts
+            )
             # Only count biomechanical failures for keypoints that had valid annotations
             biomech_invalid = ~biomech_valid_mask & valid_anno_mask
             keypoint_stats.biomechanical_invalid = np.sum(biomech_invalid)
@@ -306,15 +355,29 @@ class body_pose_anno_loader(hand_pose_anno_loader):
 
             # Per-camera validation
             camera_validations = {}
-            for curr_ind, (curr_exo_intr, curr_exo_extr, curr_exo_cam_mask, curr_exo_cam_name) in enumerate(
-                zip(curr_exo_intrs.values(), curr_exo_extrs.values(), exo_cam_masks.values(), exo_cam_names)
+            for curr_ind, (
+                curr_exo_intr,
+                curr_exo_extr,
+                curr_exo_cam_mask,
+                curr_exo_cam_name,
+            ) in enumerate(
+                zip(
+                    curr_exo_intrs.values(),
+                    curr_exo_extrs.values(),
+                    exo_cam_masks.values(),
+                    exo_cam_names,
+                )
             ):
                 # Process 2D keypoints for this camera
-                this_cam_body_2d_kpts = curr_body_2d_kpts[curr_exo_cam_name][:self.num_joints].copy()
-                
+                this_cam_body_2d_kpts = curr_body_2d_kpts[curr_exo_cam_name][
+                    : self.num_joints
+                ].copy()
+
                 # Project 3D to 2D for validation
                 this_body_3d_kpts_cam = world_to_cam(curr_body_3d_kpts, curr_exo_extr)
-                this_cam_body_proj_2d_kpts = cam_to_img(this_body_3d_kpts_cam, curr_exo_intr)
+                this_cam_body_proj_2d_kpts = cam_to_img(
+                    this_body_3d_kpts_cam, curr_exo_intr
+                )
 
                 # Validate visibility and bounds only for keypoints that were valid after previous checks
                 _, visibility_mask = self.body_kpts_valid_check(
@@ -327,15 +390,21 @@ class body_pose_anno_loader(hand_pose_anno_loader):
                 reproj_valid_mask = reproj_error_check(
                     this_cam_body_2d_kpts,
                     this_cam_body_proj_2d_kpts,
-                    self.reproj_error_threshold
+                    self.reproj_error_threshold,
                 )
-                reproj_invalid = ~reproj_valid_mask & valid_3d_kpts_flag & visibility_mask
+                reproj_invalid = (
+                    ~reproj_valid_mask & valid_3d_kpts_flag & visibility_mask
+                )
                 keypoint_stats.projection_error += np.sum(reproj_invalid)
 
                 # Update per-camera validation results
                 camera_validations[curr_exo_cam_name] = {
-                    "visibility_valid": bool(np.any(visibility_mask & valid_3d_kpts_flag)),
-                    "reprojection_valid": bool(np.any(reproj_valid_mask & valid_3d_kpts_flag & visibility_mask))
+                    "visibility_valid": bool(
+                        np.any(visibility_mask & valid_3d_kpts_flag)
+                    ),
+                    "reprojection_valid": bool(
+                        np.any(reproj_valid_mask & valid_3d_kpts_flag & visibility_mask)
+                    ),
                 }
 
                 # Update global keypoint validity considering all checks
@@ -343,17 +412,19 @@ class body_pose_anno_loader(hand_pose_anno_loader):
 
             # Final validation
             keypoint_stats.final_valid = np.sum(valid_3d_kpts_flag)
-            keypoint_stats.valid_keypoint_indices = np.where(valid_3d_kpts_flag)[0].tolist()
+            keypoint_stats.valid_keypoint_indices = np.where(valid_3d_kpts_flag)[
+                0
+            ].tolist()
 
             frame_valid = keypoint_stats.final_valid >= self.valid_kpts_threshold
 
             # Update frame stats
             self.stats_collector.update_frame_stats(
                 take_uid,
-                frame_idx, 
+                frame_idx,
                 keypoint_stats,
                 valid=frame_valid,
-                camera_validations=camera_validations
+                camera_validations=camera_validations,
             )
 
             if frame_valid:
@@ -362,7 +433,7 @@ class body_pose_anno_loader(hand_pose_anno_loader):
                     valid_3d_kpts_flag,
                     curr_ego_intr,
                     curr_ego_extr,
-                    aria_cam_name
+                    aria_cam_name,
                 )
                 curr_take_db[frame_idx] = curr_frame_anno
                 # breakpoint()
@@ -379,13 +450,21 @@ class body_pose_anno_loader(hand_pose_anno_loader):
                 "take_uid": take_uid,
                 "take_name": take_name,
                 "exo_cam_names": exo_cam_names.tolist(),
-                "exo_camera_intrinsics": {k: v.tolist() for k, v in curr_exo_intrs.items()},
-                "exo_camera_extrinsics": {k: v.tolist() for k, v in curr_exo_extrs.items()},
-                "ground_height": ground_height
+                "exo_camera_intrinsics": {
+                    k: v.tolist() for k, v in curr_exo_intrs.items()
+                },
+                "exo_camera_extrinsics": {
+                    k: v.tolist() for k, v in curr_exo_extrs.items()
+                },
+                "ground_height": ground_height,
             }
-            logger.info(f"Take {take_name} has {len(curr_take_db)-1}/{len(anno.items())} valid frames.")
+            logger.info(
+                f"Take {take_name} has {len(curr_take_db)-1}/{len(anno.items())} valid frames."
+            )
 
-        return curr_take_db
+            return curr_take_db
+        else:
+            return {}
 
     def load_take_raw_data_for_test(
         self,
@@ -413,19 +492,19 @@ class body_pose_anno_loader(hand_pose_anno_loader):
             return curr_take_db
 
         # Build camera projection matrix
-        curr_ego_intr = np.array(
-            cam_pose[aria_cam_name]["camera_intrinsics"]
-        ).astype(np.float32)
+        curr_ego_intr = np.array(cam_pose[aria_cam_name]["camera_intrinsics"]).astype(
+            np.float32
+        )
 
         # Process each frame
         for frame_idx in cam_pose[aria_cam_name]["camera_extrinsics"].keys():
             # Initialize frame statistics
             keypoint_stats = KeypointFilterStats()
             keypoint_stats.total = self.num_joints  # Set total number of joints
-            
+
             # For test data, we mark all keypoints as missing since we don't have annotations
             keypoint_stats.missing_annotation = self.num_joints
-            
+
             curr_frame_anno = {}
             curr_ego_extr = np.array(
                 cam_pose[aria_cam_name]["camera_extrinsics"][frame_idx]
@@ -435,7 +514,7 @@ class body_pose_anno_loader(hand_pose_anno_loader):
             camera_validations = {
                 cam_name: {
                     "visibility_valid": True,  # Default to True for test data
-                    "reprojection_valid": True  # Default to True for test data
+                    "reprojection_valid": True,  # Default to True for test data
                 }
                 for cam_name in exo_cam_names
             }
@@ -446,7 +525,7 @@ class body_pose_anno_loader(hand_pose_anno_loader):
                 frame_idx,
                 keypoint_stats,
                 valid=True,  # All frames are considered valid for test data
-                camera_validations=camera_validations
+                camera_validations=camera_validations,
             )
 
             # Prepare frame data
@@ -493,6 +572,8 @@ class body_pose_anno_loader(hand_pose_anno_loader):
                 "ground_height": ground_height,
             }
             curr_take_db["metadata"] = metadata
+        else:
+            curr_take_db = {}
 
         return curr_take_db
 
@@ -507,7 +588,7 @@ class body_pose_anno_loader(hand_pose_anno_loader):
 
         Returns
         -------
-        curr_frame_2d_kpts : dict of numpy array of shape (17,2) 
+        curr_frame_2d_kpts : dict of numpy array of shape (17,2)
             each key being the egoexo cam name, with corresponding value being the 2D body keypoints in original frame
         curr_frame_3d_kpts : (17,3) 3D body keypoints in world coordinate system
         joints_view_stat : (17,) Number of triangulation views for each 3D body keypoints
@@ -538,7 +619,9 @@ class body_pose_anno_loader(hand_pose_anno_loader):
                         )
                     else:
                         curr_frame_2d_kpts.append([None, None])
-            all_cam_curr_frame_2d_kpts[egoexo_cam_name] = np.array(curr_frame_2d_kpts).astype(np.float32)
+            all_cam_curr_frame_2d_kpts[egoexo_cam_name] = np.array(
+                curr_frame_2d_kpts
+            ).astype(np.float32)
 
         ### Load 3D GT body kpts ###
         # Return NaN if no annotation exists
@@ -555,8 +638,7 @@ class body_pose_anno_loader(hand_pose_anno_loader):
             # Load 3D annotation for both bodys
             for body_jnt in EGOEXO4D_EGOPOSE_BODYPOSE_MAPPINGS:
                 if body_jnt in curr_frame_3d_anno.keys() and (
-                    curr_frame_3d_anno[body_jnt]["num_views_for_3d"]
-                    >= 2
+                    curr_frame_3d_anno[body_jnt]["num_views_for_3d"] >= 2
                     or self.anno_type == "auto"
                 ):
                     curr_frame_3d_kpts.append(
@@ -567,14 +649,12 @@ class body_pose_anno_loader(hand_pose_anno_loader):
                         ]
                     )
                     joints_view_stat.append(
-                        curr_frame_3d_anno[body_jnt][
-                            "num_views_for_3d"
-                        ]
+                        curr_frame_3d_anno[body_jnt]["num_views_for_3d"]
                     )
                 else:
                     curr_frame_3d_kpts.append([None, None, None])
                     joints_view_stat.append(None)
-                    
+
         return (
             all_cam_curr_frame_2d_kpts,
             np.array(curr_frame_3d_kpts).astype(np.float32),
@@ -638,7 +718,9 @@ class body_pose_anno_loader(hand_pose_anno_loader):
         new_kpts[out_bound_flag] = 0
         # 3. Check in-bound but invisible kpts
         invis_flag = (
-            egoexo_cam_mask[new_kpts[:, 1].astype(np.int64), new_kpts[:, 0].astype(np.int64)]
+            egoexo_cam_mask[
+                new_kpts[:, 1].astype(np.int64), new_kpts[:, 0].astype(np.int64)
+            ]
             == 0
         )
         # 4. Get valid flag
@@ -655,18 +737,18 @@ class body_pose_anno_loader(hand_pose_anno_loader):
         valid_kpts_mask: np.ndarray,
         ego_intrinsics: np.ndarray,
         ego_extrinsics: np.ndarray,
-        aria_cam_name: str
+        aria_cam_name: str,
     ) -> Dict[str, Any]:
         """
         Prepare frame data for valid frames by processing 3D keypoints and camera parameters.
-        
+
         Args:
             body_3d_kpts: Array of shape (num_joints, 3) containing 3D keypoints in world coordinates
             valid_kpts_mask: Boolean array of shape (num_joints,) indicating valid keypoints
             ego_intrinsics: 3x3 camera intrinsic matrix
             ego_extrinsics: 3x4 camera extrinsic matrix
             aria_cam_name: Name of the aria camera
-            
+
         Returns:
             Dictionary containing processed frame data including:
             - Filtered 3D keypoints (world and camera coordinates)
@@ -676,37 +758,32 @@ class body_pose_anno_loader(hand_pose_anno_loader):
         # Filter 3D keypoints based on validation mask
         filtered_3d_kpts_world = body_3d_kpts.copy()
         filtered_3d_kpts_world[~valid_kpts_mask] = None
-        
+
         # Transform to camera coordinates
         body_3d_kpts_cam = world_to_cam(body_3d_kpts, ego_extrinsics)
         filtered_3d_kpts_cam = body_3d_kpts_cam.copy()
         filtered_3d_kpts_cam[~valid_kpts_mask] = None
-        
+
         # Project to 2D for verification
         body_2d_kpts = cam_to_img(body_3d_kpts_cam, ego_intrinsics)
         if self.portrait_view:
-            body_2d_kpts = aria_landscape_to_portrait(
-                body_2d_kpts, 
-                self.undist_img_dim
-            )
-        
+            body_2d_kpts = aria_landscape_to_portrait(body_2d_kpts, self.undist_img_dim)
+
         # Generate body bbox
         if self.split == "test":
             body_bbox = rand_bbox_from_kpts(
-                body_2d_kpts[valid_kpts_mask],
-                self.undist_img_dim
+                body_2d_kpts[valid_kpts_mask], self.undist_img_dim
             )
         else:
             body_bbox = pad_bbox_from_kpts(
-                body_2d_kpts[valid_kpts_mask],
-                self.undist_img_dim,
-                self.bbox_padding
+                body_2d_kpts[valid_kpts_mask], self.undist_img_dim, self.bbox_padding
             )
-        
+
         # Verify keypoint filtering consistency
-        assert np.sum(np.isnan(np.mean(filtered_3d_kpts_cam, axis=1))) == np.sum(~valid_kpts_mask), \
-            "Mismatch in number of filtered keypoints between mask and processed data"
-        
+        assert np.sum(np.isnan(np.mean(filtered_3d_kpts_cam, axis=1))) == np.sum(
+            ~valid_kpts_mask
+        ), "Mismatch in number of filtered keypoints between mask and processed data"
+
         # Prepare frame data dictionary
         frame_data = {
             "body_3d_world": filtered_3d_kpts_world.tolist(),
@@ -716,8 +793,7 @@ class body_pose_anno_loader(hand_pose_anno_loader):
             "body_valid_3d": valid_kpts_mask.tolist(),
             "ego_camera_intrinsics": ego_intrinsics.tolist(),
             "ego_camera_extrinsics": ego_extrinsics.tolist(),
-            "aria_camera_name": aria_cam_name
+            "aria_camera_name": aria_cam_name,
         }
-        
-        return frame_data
 
+        return frame_data

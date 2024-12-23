@@ -5,6 +5,7 @@ from pathlib import Path
 
 import torch
 
+from egoallo.types import DatasetType, DatasetSliceStrategy, DatasetSplit
 from egoallo.guidance_optimizer_jax import GuidanceMode
 
 
@@ -52,10 +53,6 @@ class InferenceConfig:
     visualize_traj: bool = False
     """Whether to visualize trajectories"""
 
-    # Dataset configs
-    split: str = "train"
-    """Dataset split to use"""
-
     anno_type: str = "manual"
     """Type of annotations to use"""
 
@@ -67,3 +64,17 @@ class InferenceConfig:
 
     guidance_mode: GuidanceMode = "aria_hamer"
     """Which guidance mode to use."""
+
+    dataset_type: DatasetType = "AdaptiveAmassHdf5Dataset"
+    """Dataset type to use"""
+
+    dataset_slice_strategy: DatasetSliceStrategy = "full_sequence"
+    """Dataset slice strategy to use"""
+
+    splits: tuple[DatasetSplit, ...] = ("test",)
+    """Dataset splits to use"""
+
+    bodypose_anno_dir: tuple[Path, ...] = (
+        Path("./data/egoexo-default-gt-output/annotation/manual"),
+    )  # type: ignore
+    """Path to body pose annotation directory, only for EgoExo dataset"""
