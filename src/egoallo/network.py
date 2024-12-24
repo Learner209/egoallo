@@ -398,14 +398,20 @@ class EgoDenoiserConfig:
 
         elif self.joint_cond_mode == "absolute":
             # joints_with_vis (22*4) + index_embeddings (22*16 if enabled)
-            components = [joints.reshape(batch, time, -1)]
+            joints_with_vis = torch.cat(
+                [joints, visible_joints_mask.unsqueeze(-1).to(dtype)], dim=-1
+            )
+            components = [joints_with_vis.reshape(batch, time, -1)]
             if self.use_joint_embeddings:
                 components.append(index_embeddings.reshape(batch, time, -1))
             cond = torch.cat(components, dim=-1)
 
         elif self.joint_cond_mode == "absrel_jnts":
-            first_joint = joints[..., 0:1, :]
-            other_joints = joints[..., 1:, :]
+            joints_with_vis = torch.cat(
+                [joints, visible_joints_mask.unsqueeze(-1).to(dtype)], dim=-1
+            )
+            first_joint = joints_with_vis[..., 0:1, :]
+            other_joints = joints_with_vis[..., 1:, :]
             local_coords = other_joints - first_joint[..., :3].expand_as(
                 other_joints[..., :3]
             )
@@ -426,9 +432,12 @@ class EgoDenoiserConfig:
             cond = torch.cat(components, dim=-1)
 
         elif self.joint_cond_mode == "absrel":
-            abs_pos = joints
-            rel_pos = torch.zeros_like(joints)
-            rel_pos[:, 1:] = joints[:, 1:] - joints[:, :-1]
+            joints_with_vis = torch.cat(
+                [joints, visible_joints_mask.unsqueeze(-1).to(dtype)], dim=-1
+            )
+            abs_pos = joints_with_vis
+            rel_pos = torch.zeros_like(joints_with_vis)
+            rel_pos[:, 1:] = joints_with_vis[:, 1:] - joints_with_vis[:, :-1]
 
             components = [
                 abs_pos.reshape(batch, time, -1),
@@ -439,8 +448,11 @@ class EgoDenoiserConfig:
             cond = torch.cat(components, dim=-1)
 
         elif self.joint_cond_mode == "absrel_global_deltas":
-            first_frame = joints[:, 0]
-            current_frames = joints
+            joints_with_vis = torch.cat(
+                [joints, visible_joints_mask.unsqueeze(-1).to(dtype)], dim=-1
+            )
+            first_frame = joints_with_vis[:, 0]
+            current_frames = joints_with_vis
 
             first_centroid = first_frame.mean(dim=1, keepdim=True)
             current_centroids = current_frames.mean(dim=2, keepdim=True)
@@ -470,7 +482,7 @@ class EgoDenoiserConfig:
             )
 
             components = [
-                torch.cat([joints, index_embeddings], dim=-1).reshape(batch, time, -1),
+                torch.cat([joints_with_vis, index_embeddings], dim=-1).reshape(batch, time, -1),
                 r_mat.reshape(batch, time, 9),
                 t.reshape(batch, time, 3),
             ]

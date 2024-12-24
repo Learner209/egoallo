@@ -277,8 +277,8 @@ class TestRunner:
                 desc="Enumerating test loader",
                 ascii=" >=",
             ):
-                if batch_idx == 5:
-                    break
+                # if batch_idx == 5:
+                #     break
 
                 batch = batch.to(self.device)
                 temp_output_dir = Path("./logs/amass_visualization")
