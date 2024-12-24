@@ -1,10 +1,19 @@
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from functools import cache, cached_property
+
+# src/egoallo/core/denoising/trajectories.py
+from typing import Optional
+
+import torch
+from jaxtyping import Bool, Float
+from torch import Tensor
+
 from math import ceil
 from pathlib import Path
-from typing import Literal, Optional, assert_never
+from typing import Generic, Literal, Optional, TypeVar, assert_never
 
 import numpy as np
 import torch
@@ -16,6 +25,7 @@ from rotary_embedding_torch import RotaryEmbedding
 from torch import Tensor, nn
 
 from egoallo.config import CONFIG_FILE, make_cfg
+from egoallo.types import JointCondMode
 
 from .fncsmpl import SmplhModel, SmplhShapedAndPosed
 from .tensor_dataclass import TensorDataclass
@@ -36,6 +46,175 @@ def project_rotmats_via_svd(
     u, s, vh = torch.linalg.svd(rotmats)
     del s
     return torch.einsum("...ij,...jk->...ik", u, vh)
+
+
+T = TypeVar("T", bound="BaseDenoiseTraj")
+
+
+@dataclass
+class DenoisingConfig:
+    """Configuration for denoising."""
+
+    mode: Literal["absolute", "velocity"] = "absolute"
+    temporal_window: int = 2
+    use_acceleration: bool = False
+    loss_weights: dict[str, float] = None
+
+
+class BaseDenoiseTraj(TensorDataclass, ABC, Generic[T]):
+    """Abstract base class for denoising trajectories."""
+
+    @abstractmethod
+    def pack(self) -> Float[Tensor, "*batch timesteps d_state"]:
+        """Pack trajectory into a single flattened vector."""
+        pass
+
+    @abstractmethod
+    def unpack(self) -> T:
+        """Unpack trajectory into structured form."""
+        pass
+
+    @abstractmethod
+    def compute_loss(
+        self,
+        other: T,
+        mask: Bool[Tensor, "batch time"],
+        weight_t: Float[Tensor, "batch"],
+    ) -> dict[str, Float[Tensor, ""]]:
+        """Compute loss between this trajectory and another."""
+        pass
+
+class AbsoluteDenoiseTraj(BaseDenoiseTraj["AbsoluteDenoiseTraj"]):
+    """Denoising trajectory with absolute pose representation."""
+
+    betas: Float[Tensor, "*batch timesteps 16"]
+    body_rotmats: Float[Tensor, "*batch timesteps 21 3 3"]
+    contacts: Float[Tensor, "*batch timesteps 22"]
+    R_world_root: Float[Tensor, "*batch timesteps 3 3"]
+    t_world_root: Float[Tensor, "*batch timesteps 3"]
+    hand_rotmats: Optional[Float[Tensor, "*batch timesteps 30 3 3"]]
+
+    def compute_loss(self, other, mask, weight_t):
+        batch, time = mask.shape[:2]
+
+        loss_terms = {
+            "betas": self._weighted_loss(
+                (self.betas - other.betas) ** 2, mask, weight_t
+            ),
+            "body_rotmats": self._weighted_loss(
+                (self.body_rotmats - other.body_rotmats).reshape(batch, time, -1) ** 2,
+                mask,
+                weight_t,
+            ),
+            "R_world_root": self._weighted_loss(
+                (self.R_world_root - other.R_world_root).reshape(batch, time, -1) ** 2,
+                mask,
+                weight_t,
+            ),
+            "t_world_root": self._weighted_loss(
+                (self.t_world_root - other.t_world_root) ** 2, mask, weight_t
+            ),
+        }
+
+        if self.hand_rotmats is not None:
+            loss_terms["hand_rotmats"] = self._weighted_loss(
+                (self.hand_rotmats - other.hand_rotmats).reshape(batch, time, -1) ** 2,
+                mask,
+                weight_t,
+            )
+
+        return loss_terms
+
+
+class VelocityDenoiseTraj(BaseDenoiseTraj["VelocityDenoiseTraj"]):
+    """Denoising trajectory with velocity-based representation."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def compute_loss(self, other, mask, weight_t):
+        batch, time = mask.shape[:2]
+        vel_mask = mask[:, 1:] & mask[:, :-1]
+
+        # Compute velocities
+        def compute_velocity(current, prev):
+            return current - prev
+
+        # Compute accelerations if configured
+        def compute_acceleration(vel_current, vel_prev):
+            return vel_current - vel_prev
+
+        # Rotation velocity (relative rotation between frames)
+        R_vel_self = torch.matmul(
+            self.R_world_root[:, 1:], self.R_world_root[:, :-1].transpose(-2, -1)
+        )
+        R_vel_other = torch.matmul(
+            other.R_world_root[:, 1:], other.R_world_root[:, :-1].transpose(-2, -1)
+        )
+
+        loss_terms = {
+            # Beta loss remains absolute since it's shape parameters
+            "betas": self._weighted_loss(
+                (self.betas - other.betas) ** 2, mask, weight_t
+            ),
+            # Velocity losses
+            "body_rotmats_vel": self._weighted_loss(
+                compute_velocity(
+                    self.body_rotmats[:, 1:], self.body_rotmats[:, :-1]
+                ).reshape(batch, time - 1, -1)
+                ** 2,
+                vel_mask,
+                weight_t,
+            ),
+            "R_world_root_vel": self._weighted_loss(
+                (R_vel_self - R_vel_other).reshape(batch, time - 1, -1) ** 2,
+                vel_mask,
+                weight_t,
+            ),
+            "t_world_root_vel": self._weighted_loss(
+                compute_velocity(self.t_world_root[:, 1:], self.t_world_root[:, :-1])
+                ** 2,
+                vel_mask,
+                weight_t,
+            ),
+        }
+
+        # Add acceleration losses if configured
+        if self.config.use_acceleration:
+            acc_mask = vel_mask[:, 1:] & vel_mask[:, :-1]
+
+            loss_terms.update(
+                {
+                    "body_rotmats_acc": self._weighted_loss(
+                        compute_acceleration(
+                            compute_velocity(
+                                self.body_rotmats[:, 2:], self.body_rotmats[:, 1:-1]
+                            ),
+                            compute_velocity(
+                                self.body_rotmats[:, 1:-1], self.body_rotmats[:, :-2]
+                            ),
+                        ).reshape(batch, time - 2, -1)
+                        ** 2,
+                        acc_mask,
+                        weight_t,
+                    ),
+                    "t_world_root_acc": self._weighted_loss(
+                        compute_acceleration(
+                            compute_velocity(
+                                self.t_world_root[:, 2:], self.t_world_root[:, 1:-1]
+                            ),
+                            compute_velocity(
+                                self.t_world_root[:, 1:-1], self.t_world_root[:, :-2]
+                            ),
+                        )
+                        ** 2,
+                        acc_mask,
+                        weight_t,
+                    ),
+                }
+            )
+
+        return loss_terms
 
 
 @jaxtyped(typechecker=typeguard.typechecked)
