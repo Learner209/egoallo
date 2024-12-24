@@ -557,13 +557,15 @@ class EgoDenoiserConfig:
             accelerations[:, 2:] = velocities[:, 2:] - velocities[:, 1:-1]
 
             # Combine with visibility masks
-            velocities_with_vis = torch.cat(
-                [velocities, vel_mask.unsqueeze(-1).to(dtype)], dim=-1
-            )
+            velocities_with_vis = torch.cat([
+                velocities,
+                vel_mask.unsqueeze(-1).to(dtype)
+            ], dim=-1)
 
-            accelerations_with_vis = torch.cat(
-                [accelerations, acc_mask.unsqueeze(-1).to(dtype)], dim=-1
-            )
+            accelerations_with_vis = torch.cat([
+                accelerations,
+                acc_mask.unsqueeze(-1).to(dtype)
+            ], dim=-1)
 
             # Combine all components
             components = [
