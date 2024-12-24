@@ -18,6 +18,7 @@ from . import network
 from .data.dataclass import EgoDenoiseTraj, EgoTrainingData
 from .sampling import CosineNoiseScheduleConstants
 from .transforms import SO3
+from .types import LossWeights
 
 local_config_file = CONFIG_FILE
 CFG = make_cfg(config_name="defaults", config_file=local_config_file, cli_args=[])
@@ -30,19 +31,17 @@ logger = setup_logger(output=None, name=__name__)
 class TrainingLossConfig:
     cond_dropout_prob: float = 0.0
     beta_coeff_weights: tuple[float, ...] = tuple(1 / (i + 1) for i in range(16))
-    loss_weights: dict[str, float] = dataclasses.field(
-        default_factory={
-            "betas": 0.05,
-            "body_rotmats": 1.00,
-            "contacts": 0.05,
-            "hand_rotmats": 0.00,
-            "R_world_root": 0.5,
-            "t_world_root": 0.5,
-            "joints": 0.25,
-            "foot_skating": 0.1,
-            "velocity": 0.01,
-        }.copy
-    )
+    loss_weights: LossWeights = {
+        "betas": 0.05,
+        "body_rotmats": 1.00,
+        "contacts": 0.05,
+        "hand_rotmats": 0.00,
+        "R_world_root": 0.5,
+    "t_world_root": 0.5,
+    "joints": 0.25,
+    "foot_skating": 0.1,
+    "velocity": 0.01,
+}
     weight_loss_by_t: Literal["emulate_eps_pred"] = "emulate_eps_pred"
     """Weights to apply to the loss at each noise level."""
 

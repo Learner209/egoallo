@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Dict, List, Literal, Optional, Tuple, Union
+from typing import Dict, List, Literal, Optional, Tuple, Union, TypeVar
 
 import numpy as np
 import torch
@@ -62,3 +62,5 @@ DatasetSplit = Literal["train", "val", "test", "just_humaneva"]
 JointCondMode = Literal[
     "absolute", "absrel_jnts", "absrel", "absrel_global_deltas", "vel_acc"
 ]
+
+LossWeights = Dict[str, float]
