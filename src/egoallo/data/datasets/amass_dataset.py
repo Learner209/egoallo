@@ -84,7 +84,7 @@ class VanillaEgoAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         self.config = config
         hdf5_path = config.dataset_hdf5_path
         file_list_path = config.dataset_files_path
-        splits = config.train_splits
+        splits = config.splits
         subseq_len = config.subseq_len
         slice_strategy = config.dataset_slice_strategy
 
@@ -345,7 +345,7 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         all_paths = self.config.dataset_files_path.read_text().splitlines()
 
         # Filter paths that start with any of the split names
-        split_prefixes = [split + "/" for split in self.config.train_splits]
+        split_prefixes = [split + "/" for split in self.config.splits]
         groups = [
             p
             for p in all_paths
@@ -358,7 +358,7 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
 
         assert (
             len(groups) > 0
-        ), f"No valid groups found for splits: {self.config.train_splits}"
+        ), f"No valid groups found for splits: {self.config.splits}"
         assert (
             len(cast(h5py.Group, hdf5_file[groups[0]]).keys()) > 0
         ), f"First group {groups[0]} has no keys"

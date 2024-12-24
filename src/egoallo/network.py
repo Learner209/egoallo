@@ -20,7 +20,6 @@ from egoallo.config import CONFIG_FILE, make_cfg
 from .fncsmpl import SmplhModel, SmplhShapedAndPosed
 from .tensor_dataclass import TensorDataclass
 from .transforms import SE3, SO3
-from 
 
 local_config_file = CONFIG_FILE
 CFG = make_cfg(config_name="defaults", config_file=local_config_file, cli_args=[])
@@ -305,7 +304,7 @@ class EgoDenoiserConfig:
         else:
             index_embeddings = None
 
-		
+
         if self.joint_cond_mode == "vel_acc_plus":
             # 1. Compute hierarchical joint representation
             # Root (pelvis) as base
@@ -364,19 +363,19 @@ class EgoDenoiserConfig:
             assert isinstance(visible_joints_mask, Bool[Tensor, "batch time 22"])
             vel_mask = torch.zeros_like(visible_joints_mask)
             vel_mask[:, 1:] = visible_joints_mask[:, 1:] & visible_joints_mask[:, :-1]
-            
+
             # Calculate acceleration mask (current and two previous frames must be visible)
             acc_mask = torch.zeros_like(visible_joints_mask)
             acc_mask[:, 2:] = (
-                visible_joints_mask[:, 2:] 
-                & visible_joints_mask[:, 1:-1] 
+                visible_joints_mask[:, 2:]
+                & visible_joints_mask[:, 1:-1]
                 & visible_joints_mask[:, :-2]
             )
 
             # Calculate velocities
             velocities = torch.zeros_like(joints)
             velocities[:, 1:] = joints[:, 1:] - joints[:, :-1]
-            
+
             # Calculate accelerations
             accelerations = torch.zeros_like(joints)
             accelerations[:, 2:] = velocities[:, 2:] - velocities[:, 1:-1]
@@ -386,7 +385,7 @@ class EgoDenoiserConfig:
                 velocities,
                 vel_mask.unsqueeze(-1).to(dtype)
             ], dim=-1)
-            
+
             accelerations_with_vis = torch.cat([
                 accelerations,
                 acc_mask.unsqueeze(-1).to(dtype)
@@ -399,7 +398,7 @@ class EgoDenoiserConfig:
             ]
             if self.use_joint_embeddings:
                 components.append(index_embeddings.reshape(batch, time, -1))
-            
+
             cond = torch.cat(components, dim=-1)
 
         elif self.joint_cond_mode == "absolute":
@@ -490,7 +489,7 @@ class EgoDenoiserConfig:
         # Apply Fourier encoding if enabled
         if self.use_fourier_in_masked_joints:
             cond = fourier_encode(cond, freqs=self.fourier_enc_freqs)
-        
+
         assert cond.shape == (batch, time, self.d_cond)
         return cond
 
