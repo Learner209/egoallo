@@ -2,7 +2,7 @@ from pathlib import Path
 from typing import Literal
 import dataclasses
 from egoallo import network, training_loss
-from egoallo.types import DatasetType, DatasetSliceStrategy, DatasetSplit
+from egoallo.types import DatasetType, DatasetSliceStrategy, DatasetSplit, JointCondMode
 
 
 @dataclasses.dataclass
@@ -17,9 +17,7 @@ class EgoAlloTrainConfig:
     random_sample_mask_ratio: bool = False
     """If True, randomly sample mask ratio between mask_ratio / 4 ~ mask_ratio for each batch"""
 
-    joint_cond_mode: Literal[
-        "absolute", "absrel_jnts", "absrel", "absrel_global_deltas"
-    ] = "absrel"
+    joint_cond_mode: JointCondMode = "vel_acc"
 
     model: network.EgoDenoiserConfig = dataclasses.field(init=False)
     loss: training_loss.TrainingLossConfig = training_loss.TrainingLossConfig()

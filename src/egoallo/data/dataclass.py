@@ -90,18 +90,23 @@ class EgoTrainingData(TensorDataclass):
             raw_fields["betas"] = torch.cat([raw_fields["betas"], torch.zeros(6)])
         assert raw_fields["betas"].shape[0] == 16
 
+        device = body_model.weights.device
+
         T_world_root = torch.cat(
             [
                 tf.SO3.exp(raw_fields["root_orient"]).wxyz,
                 raw_fields["joints"][:, 0, :],
             ],
             dim=-1,
-        )
-        body_quats = tf.SO3.exp(raw_fields["pose_body"].reshape(timesteps, 21, 3)).wxyz
-        hand_quats = tf.SO3.exp(raw_fields["pose_hand"].reshape(timesteps, 30, 3)).wxyz
+        ).to(device)
 
-        device = body_model.weights.device
-        # import ipdb; ipdb.set_trace()
+        body_quats = tf.SO3.exp(
+            raw_fields["pose_body"].reshape(timesteps, 21, 3)
+        ).wxyz.to(device)
+        hand_quats = tf.SO3.exp(
+            raw_fields["pose_hand"].reshape(timesteps, 30, 3)
+        ).wxyz.to(device)
+
         shaped = body_model.with_shape(raw_fields["betas"].unsqueeze(0).to(device))
 
         # Batch the SMPL body model operations, this can be pretty memory-intensive...
@@ -109,24 +114,27 @@ class EgoTrainingData(TensorDataclass):
             T_world_root=T_world_root.to(device), body_quats=body_quats.to(device)
         )
 
-        # Get initial position offset
-        initial_pos = T_world_root[0, 4:7]  # First frame position
+        # Get initial x,y position offset (ignoring z)
+        initial_xy = T_world_root[1, 4:6]  # First frame x,y position
 
-        # Align positions by subtracting offset
+        # Align positions by subtracting x,y offset only
         T_world_root_aligned = T_world_root.clone()
-        T_world_root_aligned[..., 4:7] = T_world_root[..., 4:7] - initial_pos
+        T_world_root_aligned[..., 4:6] = T_world_root[..., 4:6] - initial_xy
 
-        # Align joints_wrt_world
-        joints_wrt_world_aligned = raw_fields["joints"] - initial_pos
+        # Align joints_wrt_world (x,y only)
+        joints_wrt_world_aligned = raw_fields["joints"].clone()
+        joints_wrt_world_aligned[..., :2] = (
+            raw_fields["joints"][..., :2].to(device) - initial_xy
+        )
 
-        # Align T_world_cpf (only translation component)
+        # Align T_world_cpf (only x,y translation component)
         T_world_cpf = (
             tf.SE3(posed.Ts_world_joint[:, 14, :])  # T_world_head
             @ tf.SE3(fncsmpl_extensions.get_T_head_cpf(shaped))
         ).parameters()
-        
+
         T_world_cpf_aligned = T_world_cpf.clone()
-        T_world_cpf_aligned[..., 4:7] = T_world_cpf[..., 4:7] - initial_pos
+        T_world_cpf_aligned[..., 4:6] = T_world_cpf[..., 4:6] - initial_xy
 
         return EgoTrainingData(
             T_world_root=T_world_root_aligned.cpu(),
@@ -192,3 +200,82 @@ def collate_dataclass[T](batch: list[T]) -> T:
     return type(batch[0])(
         **{k: torch.stack([getattr(b, k) for b in batch]) for k in keys}
     )
+
+
+def collate_tensor_only_dataclass[T](batch: list[T]) -> T:
+    """Collate function that only stacks tensor attributes in dataclasses.
+
+    This is a more flexible version that:
+    1. Only stacks torch.Tensor and np.ndarray attributes
+    2. Ignores non-tensor attributes (preserves first item's value)
+    3. Handles None values and optional fields
+    4. Supports nested dataclasses
+
+    Args:
+        batch: List of dataclass instances to collate
+
+    Returns:
+        Collated dataclass with stacked tensor attributes
+
+    Example:
+        >>> @dataclass
+        >>> class Data:
+        >>>     x: torch.Tensor
+        >>>     y: Optional[torch.Tensor] = None
+        >>>     z: str = "test"
+        >>> batch = [Data(x=torch.ones(3), y=None, z="a"),
+        >>>         Data(x=torch.zeros(3), y=torch.ones(2), z="b")]
+        >>> result = collate_tensor_only_dataclass(batch)
+        >>> # result.x: tensor([[1,1,1], [0,0,0]])
+        >>> # result.y: None
+        >>> # result.z: "a"
+    """
+    if not batch:
+        raise ValueError("Empty batch")
+
+    # Get first item as reference
+    first = batch[0]
+    if not hasattr(first, "__dataclass_fields__"):
+        raise TypeError("Expected dataclass instance")
+
+    # Initialize output dict
+    collated = {}
+
+    # Get all field names from first item
+    fields = vars(first).keys()
+
+    for key in fields:
+        # Get values for this field from all items
+        values = [getattr(item, key) for item in batch]
+
+        # Handle first non-None value as reference
+        ref_val = next((v for v in values if v is not None), None)
+
+        if ref_val is None:
+            # If all values are None, keep as None
+            collated[key] = None
+
+        elif isinstance(ref_val, (torch.Tensor, np.ndarray)):
+            # Stack tensors/arrays, filtering out None values
+            valid_values = [v for v in values if v is not None]
+            if valid_values:
+                if isinstance(ref_val, torch.Tensor):
+                    collated[key] = torch.stack(valid_values)
+                else:
+                    collated[key] = np.stack(valid_values)
+            else:
+                collated[key] = None
+
+        elif hasattr(ref_val, "__dataclass_fields__"):
+            # Recursively handle nested dataclasses
+            valid_values = [v for v in values if v is not None]
+            if valid_values:
+                collated[key] = collate_tensor_only_dataclass(valid_values)
+            else:
+                collated[key] = None
+
+        else:
+            # For non-tensor fields, keep first item's value
+            collated[key] = values[0]
+
+    return type(first)(**collated)

@@ -212,6 +212,7 @@ class HPSProcessor:
         #     joints,
         #     list(self.joint_indices.values())
         # )
+        # breakpoint()
         floor_height, contacts = self.motion_processor.process_floor_and_contacts(
             joints, self.joint_indices
         )
@@ -225,7 +226,6 @@ class HPSProcessor:
         camera_traj, start_time, end_time = self._load_camera_trajectory(sequence_name)
 
         # Prepare sequence data
-        # breakpoint()
         sequence_data = {
             "poses": poses.cpu().numpy(),
             "trans": trans.cpu().numpy(),

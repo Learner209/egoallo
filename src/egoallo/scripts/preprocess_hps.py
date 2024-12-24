@@ -109,9 +109,9 @@ def main(config: HPSPreprocessConfig) -> None:
 
     # Collect all sequences to process
     sequences = []
-    assert config.splits == (
-        "train",
-    ), "the HPS dataset doesn't splits on train,val,test set, so all in train set."
+    assert config.splits == [
+        "train"
+    ], "the HPS dataset doesn't splits on train,val,test set, so all in train set."
     for split in config.splits:
         split_dir = config.output_dir / split
         split_dir.mkdir(exist_ok=True)

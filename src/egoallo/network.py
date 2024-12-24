@@ -20,6 +20,7 @@ from egoallo.config import CONFIG_FILE, make_cfg
 from .fncsmpl import SmplhModel, SmplhShapedAndPosed
 from .tensor_dataclass import TensorDataclass
 from .transforms import SE3, SO3
+from 
 
 local_config_file = CONFIG_FILE
 CFG = make_cfg(config_name="defaults", config_file=local_config_file, cli_args=[])
@@ -222,9 +223,7 @@ class EgoDenoiserConfig:
     )
 
     # Joint position conditioning settings
-    joint_cond_mode: Literal[
-        "absolute", "absrel_jnts", "absrel", "absrel_global_deltas"
-    ] = "absrel"
+    joint_cond_mode: JointCondMode = "vel_acc"
     joint_emb_dim: int = 8
 
     # Add SMPL-H model path configuration
@@ -244,15 +243,20 @@ class EgoDenoiserConfig:
     def d_cond(self) -> int:
         """Dimensionality of conditioning vector."""
         num_joints = CFG.smplh.num_joints  # Assuming num_joints is 22
-
-        spatial_dim = 4
+        spatial_dim = 4  # x, y, z, visibility
 
         # Only include joint embedding dimensions if enabled
         joint_emb_contribution = (
             (self.joint_emb_dim * num_joints) if self.use_joint_embeddings else 0
         )
 
-        if self.joint_cond_mode == "absolute":
+        if self.joint_cond_mode == "vel_acc":
+            # velocities (22*4) + accelerations (22*4) + index_embeddings (22*16 if enabled)
+            d_cond = (spatial_dim * num_joints * 2) + joint_emb_contribution
+        elif self.joint_cond_mode == "vel_acc_plus":
+            # velocities (22*4) + accelerations (22*4) + index_embeddings (22*16 if enabled)
+            d_cond = (spatial_dim * num_joints * 2) + joint_emb_contribution
+        elif self.joint_cond_mode == "absolute":
             # joints_with_vis (22*4) + index_embeddings (22*16 if enabled)
             d_cond = (spatial_dim * num_joints) + joint_emb_contribution
         elif self.joint_cond_mode == "absrel_jnts":
@@ -273,7 +277,7 @@ class EgoDenoiserConfig:
         else:
             assert_never(self.joint_cond_mode)
 
-        # Apply Fourier encoding multiplier only if enabled
+        # Apply Fourier encoding multiplier if enabled
         if self.use_fourier_in_masked_joints:
             d_cond = d_cond * (2 * self.fourier_enc_freqs + 1)
 
@@ -289,7 +293,7 @@ class EgoDenoiserConfig:
         device = joints.device
         dtype = joints.dtype
 
-        # Only create joint embeddings if enabled
+        # Create joint embeddings if enabled
         if self.use_joint_embeddings:
             joint_embeddings = nn.Embedding(
                 CFG.smplh.num_joints, self.joint_emb_dim
@@ -297,65 +301,12 @@ class EgoDenoiserConfig:
             all_indices = torch.arange(CFG.smplh.num_joints, device=device)
             index_embeddings = joint_embeddings(all_indices).expand(
                 batch, time, -1, -1
-            )  # (batch, time, 22, 16)
+            )
         else:
             index_embeddings = None
 
-        # Create joints with visibility as 4th dimension
-        joints = torch.where(visible_joints_mask.unsqueeze(-1), joints, 0)
-        joints_with_vis = torch.cat(
-            [
-                joints,
-                visible_joints_mask.unsqueeze(-1).to(dtype),
-            ],
-            dim=-1,
-        )
-        assert isinstance(
-            joints_with_vis, Float[Tensor, "batch timesteps num_joints 4"]
-        )
-
-        if self.joint_cond_mode == "absolute":
-            components = [joints_with_vis.reshape(batch, time, -1)]
-            if self.use_joint_embeddings:
-                components.append(index_embeddings.reshape(batch, time, -1))
-            cond = torch.cat(components, dim=-1)
-
-        elif self.joint_cond_mode == "absrel_jnts":
-            first_joint = joints_with_vis[..., 0:1, :]
-            other_joints = joints_with_vis[..., 1:, :]
-            local_coords = other_joints - first_joint[..., :3].expand_as(
-                other_joints[..., :3]
-            )
-            local_coords = torch.cat(
-                [
-                    local_coords[..., :3],
-                    other_joints[..., 3:],
-                ],
-                dim=-1,
-            )
-
-            components = [
-                first_joint.reshape(batch, time, -1),
-                local_coords.reshape(batch, time, -1),
-            ]
-            if self.use_joint_embeddings:
-                components.append(index_embeddings.reshape(batch, time, -1))
-            cond = torch.cat(components, dim=-1)
-
-        elif self.joint_cond_mode == "absrel":
-            abs_pos = joints_with_vis
-            rel_pos = torch.zeros_like(joints_with_vis)
-            rel_pos[:, 1:, :, :3] = joints[:, 1:] - joints[:, :-1]
-
-            components = [
-                abs_pos.reshape(batch, time, -1),
-                rel_pos.reshape(batch, time, -1),
-            ]
-            if self.use_joint_embeddings:
-                components.append(index_embeddings.reshape(batch, time, -1))
-            cond = torch.cat(components, dim=-1)
-
-        elif self.joint_cond_mode == "absrel_plus":
+		
+        if self.joint_cond_mode == "vel_acc_plus":
             # 1. Compute hierarchical joint representation
             # Root (pelvis) as base
             root_pos = joints[..., 0:1, :]
@@ -408,6 +359,91 @@ class EgoDenoiserConfig:
 
             cond = torch.cat(components, dim=-1)
 
+        elif self.joint_cond_mode == "vel_acc":
+            # Calculate velocity mask (both current and previous frame must be visible)
+            assert isinstance(visible_joints_mask, Bool[Tensor, "batch time 22"])
+            vel_mask = torch.zeros_like(visible_joints_mask)
+            vel_mask[:, 1:] = visible_joints_mask[:, 1:] & visible_joints_mask[:, :-1]
+            
+            # Calculate acceleration mask (current and two previous frames must be visible)
+            acc_mask = torch.zeros_like(visible_joints_mask)
+            acc_mask[:, 2:] = (
+                visible_joints_mask[:, 2:] 
+                & visible_joints_mask[:, 1:-1] 
+                & visible_joints_mask[:, :-2]
+            )
+
+            # Calculate velocities
+            velocities = torch.zeros_like(joints)
+            velocities[:, 1:] = joints[:, 1:] - joints[:, :-1]
+            
+            # Calculate accelerations
+            accelerations = torch.zeros_like(joints)
+            accelerations[:, 2:] = velocities[:, 2:] - velocities[:, 1:-1]
+
+            # Combine with visibility masks
+            velocities_with_vis = torch.cat([
+                velocities,
+                vel_mask.unsqueeze(-1).to(dtype)
+            ], dim=-1)
+            
+            accelerations_with_vis = torch.cat([
+                accelerations,
+                acc_mask.unsqueeze(-1).to(dtype)
+            ], dim=-1)
+
+            # Combine all components
+            components = [
+                velocities_with_vis.reshape(batch, time, -1),
+                accelerations_with_vis.reshape(batch, time, -1),
+            ]
+            if self.use_joint_embeddings:
+                components.append(index_embeddings.reshape(batch, time, -1))
+            
+            cond = torch.cat(components, dim=-1)
+
+        elif self.joint_cond_mode == "absolute":
+            # joints_with_vis (22*4) + index_embeddings (22*16 if enabled)
+            components = [joints.reshape(batch, time, -1)]
+            if self.use_joint_embeddings:
+                components.append(index_embeddings.reshape(batch, time, -1))
+            cond = torch.cat(components, dim=-1)
+
+        elif self.joint_cond_mode == "absrel_jnts":
+            first_joint = joints[..., 0:1, :]
+            other_joints = joints[..., 1:, :]
+            local_coords = other_joints - first_joint[..., :3].expand_as(
+                other_joints[..., :3]
+            )
+            local_coords = torch.cat(
+                [
+                    local_coords[..., :3],
+                    other_joints[..., 3:],
+                ],
+                dim=-1,
+            )
+
+            components = [
+                first_joint.reshape(batch, time, -1),
+                local_coords.reshape(batch, time, -1),
+            ]
+            if self.use_joint_embeddings:
+                components.append(index_embeddings.reshape(batch, time, -1))
+            cond = torch.cat(components, dim=-1)
+
+        elif self.joint_cond_mode == "absrel":
+            abs_pos = joints
+            rel_pos = torch.zeros_like(joints)
+            rel_pos[:, 1:] = joints[:, 1:] - joints[:, :-1]
+
+            components = [
+                abs_pos.reshape(batch, time, -1),
+                rel_pos.reshape(batch, time, -1),
+            ]
+            if self.use_joint_embeddings:
+                components.append(index_embeddings.reshape(batch, time, -1))
+            cond = torch.cat(components, dim=-1)
+
         elif self.joint_cond_mode == "absrel_global_deltas":
             first_frame = joints[:, 0]
             current_frames = joints
@@ -451,9 +487,10 @@ class EgoDenoiserConfig:
         else:
             assert_never(self.joint_cond_mode)
 
-        # Apply Fourier encoding
+        # Apply Fourier encoding if enabled
         if self.use_fourier_in_masked_joints:
             cond = fourier_encode(cond, freqs=self.fourier_enc_freqs)
+        
         assert cond.shape == (batch, time, self.d_cond)
         return cond
 

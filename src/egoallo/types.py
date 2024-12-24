@@ -58,3 +58,7 @@ DatasetSliceStrategy = Literal[
 ]
 
 DatasetSplit = Literal["train", "val", "test", "just_humaneva"]
+
+JointCondMode = Literal[
+    "absolute", "absrel_jnts", "absrel", "absrel_global_deltas", "vel_acc"
+]

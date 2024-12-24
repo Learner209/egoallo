@@ -58,19 +58,20 @@ class DataVisualizer:
         denoised_traj: EgoDenoiseTraj,
         body_model: fncsmpl.SmplhModel,
         output_dir: Path,
-        timestamp: str,
+        output_name: str,
+        save_gt: bool = False,
     ) -> Tuple[Path, Path]:
         """Save visualization of ground truth and denoised trajectories."""
         output_dir.mkdir(exist_ok=True, parents=True)
 
-        # TODO: hack way to debug.
-        output_dir = Path("./exp/amass_visualization")
-        output_dir.mkdir(parents=True, exist_ok=True)
-        gt_path = output_dir / f"gt_traj_{timestamp}.mp4"
-        inferred_path = output_dir / f"inferred_traj_{timestamp}.mp4"
+        gt_path = output_dir / f"gt_traj_{output_name}.mp4"
+        inferred_path = output_dir / f"inferred_traj_{output_name}.mp4"
 
         # Visualize ground truth
-        EgoTrainingData.visualize_ego_training_data(gt_traj, body_model, str(gt_path))
+        if save_gt:
+            EgoTrainingData.visualize_ego_training_data(
+                gt_traj, body_model, str(gt_path)
+            )
 
         EgoTrainingData.visualize_ego_training_data(
             denoised_traj, body_model, str(inferred_path)
@@ -202,6 +203,8 @@ class TestRunner:
         processor: SequenceProcessor,
         visualizer: DataVisualizer,
         output_dir: Path,
+        save_gt_vis: bool = False,
+        output_name: Optional[str] = None,
     ) -> None:
         """Process a batch of sequences."""
         for seq_idx in range(batch.T_world_cpf.shape[0]):
@@ -211,6 +214,7 @@ class TestRunner:
             )
 
             # Save visualizations if requested
+            output_name = output_name or f"sequence_{batch_idx}_{seq_idx}"
             if self.config.visualize_traj:
                 timestamp = time.strftime("%Y%m%d-%H%M%S")
                 gt_path, inferred_path = visualizer.save_visualization(
@@ -218,12 +222,18 @@ class TestRunner:
                     denoised_traj[seq_idx],
                     self.body_model,
                     output_dir,
-                    timestamp,
+                    output_name,
+                    save_gt=save_gt_vis,
                 )
-                logger.info(f"gt_path: {gt_path}, pred_path: {inferred_path}")
+                logger.info(f"pred_path: {inferred_path}")
+                if save_gt_vis:
+                    logger.info(f"gt_path: {gt_path}")
 
             # Save sequence data
-            output_path = output_dir / f"sequence_{batch_idx}_{seq_idx}.pt"
+            filename = (
+                output_name if output_name else f"sequence_{batch_idx}_{seq_idx}.pt"
+            )
+            output_path = output_dir / filename
             self._save_sequence_data(gt_traj, denoised_traj, seq_idx, output_path)
 
     def _compute_metrics(
@@ -271,8 +281,15 @@ class TestRunner:
                     break
 
                 batch = batch.to(self.device)
+                temp_output_dir = Path("./logs/amass_visualization")
                 self._process_batch(
-                    batch, batch_idx, processor, visualizer, temp_output_dir
+                    batch,
+                    batch_idx,
+                    processor,
+                    visualizer,
+                    temp_output_dir,
+                    save_gt_vis=True,
+                    output_name=f"sequence_{batch_idx}",
                 )
 
             if self.config.compute_metrics:
