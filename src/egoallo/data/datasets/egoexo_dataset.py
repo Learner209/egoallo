@@ -224,11 +224,13 @@ class EgoExoDataset(torch.utils.data.Dataset[EgoTrainingData]):
             num_joints=22 if return_smplh_joints else 17,
             debug_vis=False,
         )
+        masked_joints = joints_world.clone()
+        masked_joints[~visible_mask] = 0
         # T_world_root = self._process_camera_poses(slice_data)
 
         # Create EgoTrainingData object
         return EgoTrainingData(
-            joints_wrt_world=joints_world,
+            joints_wrt_world=masked_joints,
             joints_wrt_cpf=joints_cam,
             T_world_root=torch.zeros((seq_len, 7)),
             T_world_cpf=torch.zeros((seq_len, 7)),

@@ -444,9 +444,11 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         # Update kwargs with new MAE-style masking tensors
         # kwargs["visible_joints"] = visible_joints
         kwargs["visible_joints_mask"] = visible_joints_mask
-        kwargs["joints_wrt_world"] = (
-            joints_wrt_world  # Keep original joints for computing loss
-        )
+        
+        # Zero out invisible joints while keeping original joints for loss computation
+        masked_joints = joints_wrt_world.clone()
+        masked_joints[~visible_joints_mask] = 0
+        kwargs["joints_wrt_world"] = masked_joints
 
         return EgoTrainingData(**kwargs)
 

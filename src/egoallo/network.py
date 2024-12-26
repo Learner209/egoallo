@@ -897,6 +897,9 @@ class EgoDenoiserConfig:
         device = joints.device
         dtype = joints.dtype
 
+        # !joints must be masked to prevent further motion information from being used
+        joints[~visible_joints_mask] = 0
+
         # Create joint embeddings if enabled
         if self.use_joint_embeddings:
             joint_embeddings = nn.Embedding(
