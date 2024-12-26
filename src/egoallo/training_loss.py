@@ -1,12 +1,13 @@
 """Training loss configuration."""
 
 import dataclasses
-from typing import Literal
+from typing import TYPE_CHECKING, Any, Literal, cast, TypeVar, Optional, Union
 
+import torch
 import torch.utils.data
+import torch.nn.functional as F
 import typeguard
-from jaxtyping import Bool, Float, Int, jaxtyped
-from numpy import unwrap
+from jaxtyping import Bool, Float, Int
 from torch import Tensor
 from torch._dynamo import OptimizedModule
 from torch.nn.parallel import DistributedDataParallel
@@ -14,8 +15,12 @@ from torch.nn.parallel import DistributedDataParallel
 from egoallo.config import CONFIG_FILE, make_cfg
 from egoallo.utils.setup_logger import setup_logger
 
+if TYPE_CHECKING:
+    from egoallo.config.train.train_config import EgoAlloTrainConfig
+
 from . import network
-from .data.dataclass import EgoDenoiseTraj, EgoTrainingData
+from .data.dataclass import EgoTrainingData
+from .network import AbsoluteDenoiseTraj, VelocityDenoiseTraj, BaseDenoiseTraj
 from .sampling import CosineNoiseScheduleConstants
 from .transforms import SO3
 from .types import LossWeights
@@ -23,32 +28,19 @@ from .types import LossWeights
 local_config_file = CONFIG_FILE
 CFG = make_cfg(config_name="defaults", config_file=local_config_file, cli_args=[])
 
-
 logger = setup_logger(output=None, name=__name__)
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass
 class TrainingLossConfig:
     cond_dropout_prob: float = 0.0
     beta_coeff_weights: tuple[float, ...] = tuple(1 / (i + 1) for i in range(16))
-    loss_weights: LossWeights = {
-        "betas": 0.05,
-        "body_rotmats": 1.00,
-        "contacts": 0.05,
-        "hand_rotmats": 0.00,
-        "R_world_root": 0.5,
-    "t_world_root": 0.5,
-    "joints": 0.25,
-    "foot_skating": 0.1,
-    "velocity": 0.01,
-}
     weight_loss_by_t: Literal["emulate_eps_pred"] = "emulate_eps_pred"
     """Weights to apply to the loss at each noise level."""
 
 
 class TrainingLossComputer:
-    """Helper class for computing the training loss. Contains a single method
-    for computing a training loss."""
+    """Helper class for computing the training loss."""
 
     def __init__(self, config: TrainingLossConfig, device: torch.device) -> None:
         self.config = config
@@ -70,37 +62,11 @@ class TrainingLossComputer:
         padding = 0.01
         self.weight_t = weight_t / weight_t[1] * (1.0 - padding) + padding
 
-    @jaxtyped(typechecker=typeguard.typechecked)
-    def compute_geodesic_distance(
-        self, R1: Float[Tensor, "... 3 3"], R2: Float[Tensor, "... 3 3"]
-    ) -> Float[Tensor, "..."]:
-        """Compute geodesic distance between rotation matrices.
-
-        Args:
-            R1: First rotation matrix
-            R2: Second rotation matrix
-
-        Returns:
-            Geodesic distance in radians
-        """
-        # Compute R1 @ R2.T
-        R_diff = R1 @ R2.transpose(-2, -1)
-
-        # Get trace of the difference matrix
-        trace = R_diff.diagonal(dim1=-2, dim2=-1).sum(-1)
-
-        # Clamp for numerical stability
-        cos_theta = (trace - 1) / 2
-        cos_theta = torch.clamp(cos_theta, -1 + 1e-7, 1 - 1e-7)
-
-        # Return geodesic distance
-        return torch.acos(cos_theta)
-
-    @jaxtyped(typechecker=typeguard.typechecked)
     def compute_denoising_loss(
         self,
         model: network.EgoDenoiser | DistributedDataParallel | OptimizedModule,
         unwrapped_model: network.EgoDenoiser,
+        train_config: "EgoAlloTrainConfig",
         train_batch: EgoTrainingData,
     ) -> tuple[Tensor, dict[str, Tensor | float]]:
         """Compute a training loss for the EgoDenoiser model.
@@ -114,18 +80,15 @@ class TrainingLossComputer:
         batch, time, _, _ = train_batch.body_quats.shape
 
         num_joints = CFG.smplh.num_joints
-        # assert num_joints == 22
-
-        if unwrapped_model.config.include_hands:
-            assert train_batch.hand_quats is not None
-            x_0: EgoDenoiseTraj = train_batch.to_denoise_traj(
-                include_hands=unwrapped_model.config.include_hands
+        assert num_joints == 22
+        # Create trajectory using denoising config factory method
+        x_0: Union[AbsoluteDenoiseTraj, VelocityDenoiseTraj] = (
+            train_config.denoising.create_trajectory(
+                **train_batch.to_denoise_traj(
+                    include_hands=unwrapped_model.config.include_hands
+                ).__dict__
             )
-        else:
-            # assert train_batch.hand_quats is None
-            x_0: EgoDenoiseTraj = train_batch.to_denoise_traj(
-                include_hands=unwrapped_model.config.include_hands
-            )
+        )
 
         x_0_packed = x_0.pack()
         device = x_0_packed.device
@@ -152,33 +115,7 @@ class TrainingLossComputer:
         weight_t = self.weight_t[t].to(device)
         assert weight_t.shape == (batch,)
 
-        @jaxtyped(typechecker=typeguard.typechecked)
-        def weight_and_mask_loss(
-            loss_per_step: Float[Tensor, "b t d"],
-            # bt stands for "batch time"
-            bt_mask: Bool[Tensor, "b t"] = train_batch.mask,
-            bt_mask_sum: Int[Tensor, ""] = torch.sum(train_batch.mask),
-        ) -> Float[Tensor, ""]:
-            """Weight and mask per-timestep losses (squared errors)."""
-            _, time, d = loss_per_step.shape
-            assert loss_per_step.shape == (batch, time, d)
-            assert bt_mask.shape == (batch, time)
-            assert weight_t.shape == (batch,)
-            return (
-                # Sum across b axis.
-                torch.sum(
-                    # Sum across t axis.
-                    torch.sum(
-                        # Mean across d axis.
-                        torch.mean(loss_per_step, dim=-1) * bt_mask,
-                        dim=-1,
-                    )
-                    * weight_t
-                )
-                / bt_mask_sum
-            )
-
-        oand_positions_wrt_cpf: Tensor | None = None
+        hand_positions_wrt_cpf: Tensor | None = None
         if unwrapped_model.config.include_hands:
             # Joints 19 and 20 are the hand positions.
             wrist_start_index = 20
@@ -199,7 +136,6 @@ class TrainingLossComputer:
                 0.0,
             )
 
-        # Denoise.
         x_0_packed_pred = model.forward(
             x_t_packed=x_t_packed,
             t=t,
@@ -213,9 +149,14 @@ class TrainingLossComputer:
             else None,
         )
         assert isinstance(x_0_packed_pred, torch.Tensor)
-        x_0_pred = network.EgoDenoiseTraj.unpack(
-            x_0_packed_pred, include_hands=unwrapped_model.config.include_hands
+
+        x_0_pred = train_config.denoising.unpack_traj(
+            x_0_packed_pred,
+            include_hands=unwrapped_model.config.include_hands,
+            project_rotmats=False,
         )
+        # Compute loss using x_0_pred and x_0
+        loss_terms: dict[str, Tensor | float] = x_0_pred.compute_loss(other=x_0, mask=train_batch.mask, weight_t=weight_t)
         # breakpoint()
 
         # Add joint position loss calculation
@@ -243,16 +184,18 @@ class TrainingLossComputer:
         # visible_joints_mask: shape (b, t, 22), joint_loss: shape (b, t, 22, 3)
         # Compute masked joint loss while handling shape alignment
         # joint_loss: (b, t, 22, 3), visible_joints_mask: (b, t, 22)
-        # breakpoint()
-        invisible_joint_loss = (
-            joint_loss
-            * (
-                (~train_batch.visible_joints_mask)[..., None]
-            )  # Use only invisible joints by inverting the visible joints mask
-        ).sum(dim=(-2, -1)) / (  # Sum over joints (22) and xyz (3)
-            ((~train_batch.visible_joints_mask).sum(dim=-1) * 3)
-            + 1e-8  # Multiply by 3 for xyz channels
-        )  # Result: (b, t)
+        if train_batch.visible_joints_mask is not None:
+            invisible_joint_loss = (
+                joint_loss
+                * (
+                    (~train_batch.visible_joints_mask)[..., None]
+                )  # Use only invisible joints by inverting the visible joints mask
+            ).sum(dim=(-2, -1)) / (  # Sum over joints (22) and xyz (3)
+                ((~train_batch.visible_joints_mask).sum(dim=-1) * 3)
+                + 1e-8  # Multiply by 3 for xyz channels
+            )  # Result: (b, t)
+        else:
+            invisible_joint_loss = torch.zeros((batch, time), device=device)
 
         # Foot skating loss
         foot_indices = [7, 8, 10, 11]  # Indices for foot joints
@@ -271,16 +214,19 @@ class TrainingLossComputer:
         foot_skating_losses = []
         for i in range(len(foot_indices)):
             # breakpoint()
-            foot_loss = weight_and_mask_loss(
+            foot_loss = x_0_pred._weight_and_mask_loss(
                 foot_velocities[..., i, :].pow(2),  # (batch, time-1, 3)
                 bt_mask=foot_skating_mask[..., i],  # (batch, time-1)
+                weight_t=weight_t,
                 bt_mask_sum=torch.maximum(
                     torch.sum(foot_skating_mask[..., i]) * 3,  # Multiply by 3 for x,y,z
                     torch.tensor(1, device=device),
                 ),
             )
             foot_skating_losses.append(foot_loss)
-        foot_skating_loss = sum(foot_skating_losses) / len(foot_indices)
+
+        # Average foot skating losses
+        foot_skating_loss = torch.stack(foot_skating_losses).mean()
 
         # Velocity loss
         joint_velocities = (
@@ -290,93 +236,76 @@ class TrainingLossComputer:
             train_batch.joints_wrt_world[:, 1:] - train_batch.joints_wrt_world[:, :-1]
         )
 
-        loss_terms: dict[str, Tensor | float] = {
-            "betas": weight_and_mask_loss(
-                # (b, t, 16)
-                (x_0_pred.betas - x_0.betas) ** 2
-                # (16,)
-                * x_0.betas.new_tensor(self.config.beta_coeff_weights),
-            ),
-            "body_rotmats": weight_and_mask_loss(
-                # Reshape inputs to (batch, time, 21, 3, 3)
-                (x_0_pred.body_rotmats - x_0.body_rotmats).reshape(batch, time, -1) ** 2
-            ),
-            "contacts": weight_and_mask_loss(
-                (x_0_pred.contacts.float() - x_0.contacts.float()) ** 2
-            ),
-            "t_world_root": weight_and_mask_loss(
-                (x_0_pred.t_world_root - x_0.t_world_root) ** 2
-            ),
-            "R_world_root": weight_and_mask_loss(
-                (x_0_pred.R_world_root - x_0.R_world_root).reshape(batch, time, -1) ** 2
-            ),
-            "joints": weight_and_mask_loss(
+        loss_terms.update({
+            "joints": x_0_pred._weight_and_mask_loss(
                 invisible_joint_loss.unsqueeze(-1),
                 train_batch.mask,
+                weight_t,
                 torch.sum(train_batch.mask),
             ),
             "foot_skating": foot_skating_loss,
-            "velocity": weight_and_mask_loss(
-                (joint_velocities - gt_velocities).reshape(batch, time - 1, -1) ** 2,
-                bt_mask=train_batch.mask[:, 1:],
-                bt_mask_sum=torch.sum(train_batch.mask[:, 1:]),
+            "velocity": x_0_pred._weight_and_mask_loss(
+                (joint_velocities - gt_velocities).reshape(batch, time - 1, -1),
+                train_batch.mask[:, 1:],
+                weight_t,
+                torch.sum(train_batch.mask[:, 1:]),
             ),
-        }
-
+        })
         # Include hand objective.
         # We didn't use this in the paper.
-        if unwrapped_model.config.include_hands:
-            assert x_0_pred.hand_rotmats is not None
-            assert x_0.hand_rotmats is not None
-            assert x_0.hand_rotmats.shape == (batch, time, 30, 3, 3)
+        # TODO: hand-rotmats loss is incorporated in the network.py DenoiseTraj class, keep it here for reference.
+        # if unwrapped_model.config.include_hands:
+        #     assert x_0_pred.hand_rotmats is not None
+        #     assert x_0.hand_rotmats is not None
+        #     assert x_0.hand_rotmats.shape == (batch, time, 30, 3, 3)
 
-            # Detect whether or not hands move in a sequence.
-            # We should only supervise sequences where the hands are actully tracked / move;
-            # we mask out hands in AMASS sequences where they are not tracked.
-            gt_hand_flatmat = x_0.hand_rotmats.reshape((batch, time, -1))
-            hand_motion = (
-                torch.sum(  # (b,) from (b, t)
-                    torch.sum(  # (b, t) from (b, t, d)
-                        torch.abs(gt_hand_flatmat - gt_hand_flatmat[:, 0:1, :]), dim=-1
-                    )
-                    # Zero out changes in masked frames.
-                    * train_batch.mask,
-                    dim=-1,
-                )
-                > 1e-5
-            )
-            assert hand_motion.shape == (batch,)
+        #     # Detect whether or not hands move in a sequence.
+        #     # We should only supervise sequences where the hands are actully tracked / move;
+        #     # we mask out hands in AMASS sequences where they are not tracked.
+        #     gt_hand_flatmat = x_0.hand_rotmats.reshape((batch, time, -1))
+        #     hand_motion = (
+        #         torch.sum(  # (b,) from (b, t)
+        #             torch.sum(  # (b, t) from (b, t, d)
+        #                 torch.abs(gt_hand_flatmat - gt_hand_flatmat[:, 0:1, :]), dim=-1
+        #             )
+        #             # Zero out changes in masked frames.
+        #             * train_batch.mask,
+        #             dim=-1,
+        #         )
+        #         > 1e-5
+        #     )
+        #     assert hand_motion.shape == (batch,)
 
-            hand_bt_mask = torch.logical_and(hand_motion[:, None], train_batch.mask)
-            loss_terms["hand_rotmats"] = torch.sum(
-                weight_and_mask_loss(
-                    (x_0_pred.hand_rotmats - x_0.hand_rotmats).reshape(
-                        batch, time, 30 * 3 * 3
-                    )
-                    ** 2,
-                    bt_mask=hand_bt_mask,
-                    # We want to weight the loss by the number of frames where
-                    # the hands actually move, but gradients here can be too
-                    # noisy and put NaNs into mixed-precision training when we
-                    # inevitably sample too few frames. So we clip the
-                    # denominator.
-                    bt_mask_sum=torch.maximum(
-                        torch.sum(hand_bt_mask), torch.tensor(256, device=device)
-                    ),
-                )
-            )
-            # self.log(
-            #     "train/hand_motion_proportion",
-            #     torch.sum(hand_motion) / batch,
-            # )
-        else:
-            loss_terms["hand_rotmats"] = 0.0
+        #     hand_bt_mask = torch.logical_and(hand_motion[:, None], train_batch.mask)
+        #     loss_terms["hand_rotmats"] = torch.sum(
+        #         weight_and_mask_loss(
+        #             (x_0_pred.hand_rotmats - x_0.hand_rotmats).reshape(
+        #                 batch, time, 30 * 3 * 3
+        #             )
+        #             ** 2,
+        #             bt_mask=hand_bt_mask,
+        #             # We want to weight the loss by the number of frames where
+        #             # the hands actually move, but gradients here can be too
+        #             # noisy and put NaNs into mixed-precision training when we
+        #             # inevitably sample too few frames. So we clip the
+        #             # denominator.
+        #             bt_mask_sum=torch.maximum(
+        #                 torch.sum(hand_bt_mask), torch.tensor(256, device=device)
+        #             ),
+        #         )
+        #     )
+        #     # self.log(
+        #     #     "train/hand_motion_proportion",
+        #     #     torch.sum(hand_motion) / batch,
+        #     # )
+        # else:
+        #     loss_terms["hand_rotmats"] = 0.0
 
-        assert loss_terms.keys() == self.config.loss_weights.keys()
-
+        assert all(k in train_config.denoising.loss_weights.keys() for k in loss_terms.keys()), \
+            f"Missing loss weights for terms: {set(loss_terms.keys()) - set(train_config.denoising.loss_weights.keys())}"
         # Log loss terms.
         for name, term in loss_terms.items():
-            loss_term = term * self.config.loss_weights[name]
+            loss_term = term * train_config.denoising.loss_weights[name]
             loss_terms[name] = loss_term
             log_outputs[f"loss_term/{name}"] = loss_term
 
@@ -388,262 +317,3 @@ class TrainingLossComputer:
 
         return loss, log_outputs
 
-    @jaxtyped(typechecker=typeguard.typechecked)
-    def _compute_denoising_loss(
-        self,
-        model: network.EgoDenoiser | DistributedDataParallel | OptimizedModule,
-        unwrapped_model: network.EgoDenoiser,
-        train_batch: EgoTrainingData,
-    ) -> tuple[Tensor, dict[str, Tensor | float]]:
-        """Compute a training loss for the EgoDenoiser model with relative temporal offsets.
-
-        Returns:
-            A tuple (loss tensor, dictionary of things to log).
-        """
-        log_outputs: dict[str, Tensor | float] = {}
-
-        batch, time, _, _ = train_batch.body_quats.shape
-        num_joints = CFG.smplh.num_joints
-
-        # Convert training data to denoise trajectory
-        if unwrapped_model.config.include_hands:
-            assert train_batch.hand_quats is not None
-            x_0: EgoDenoiseTraj = train_batch.to_denoise_traj(
-                include_hands=unwrapped_model.config.include_hands
-            )
-        else:
-            x_0: EgoDenoiseTraj = train_batch.to_denoise_traj(
-                include_hands=unwrapped_model.config.include_hands
-            )
-
-        x_0_packed = x_0.pack()
-        device = x_0_packed.device
-        assert x_0_packed.shape == (batch, time, unwrapped_model.get_d_state())
-
-        # Diffusion process remains the same
-        t = torch.randint(
-            low=1,
-            high=unwrapped_model.config.max_t + 1,
-            size=(batch,),
-            device=device,
-        )
-        eps = torch.randn(x_0_packed.shape, dtype=x_0_packed.dtype, device=device)
-        alpha_bar_t = self.noise_constants.alpha_bar_t[t, None, None]
-        assert alpha_bar_t.shape == (batch, 1, 1)
-        x_t_packed = (
-            torch.sqrt(alpha_bar_t) * x_0_packed + torch.sqrt(1.0 - alpha_bar_t) * eps
-        )
-
-        # Define weighting scheme
-        weight_t = self.weight_t[t].to(device)
-        assert weight_t.shape == (batch,)
-
-        # Get model prediction
-        x_0_packed_pred = model.forward(
-            x_t_packed=x_t_packed,
-            t=t,
-            joints=train_batch.joints_wrt_world,
-            visible_joints_mask=train_batch.visible_joints_mask,
-            project_output_rotmats=False,
-            mask=train_batch.mask,
-            cond_dropout_keep_mask=torch.rand((batch,), device=device)
-            > self.config.cond_dropout_prob
-            if self.config.cond_dropout_prob > 0.0
-            else None,
-        )
-        x_0_pred = network.EgoDenoiseTraj.unpack(
-            x_0_packed_pred, include_hands=unwrapped_model.config.include_hands
-        )
-
-        @jaxtyped(typechecker=typeguard.typechecked)
-        def weight_and_mask_loss(
-            loss_per_step: Float[Tensor, "b t d"],
-            bt_mask: Bool[Tensor, "b t"] = train_batch.mask,
-            bt_mask_sum: Int[Tensor, ""] = torch.sum(train_batch.mask),
-        ) -> Float[Tensor, ""]:
-            """Weight and mask per-timestep losses (squared errors)."""
-            _, time, d = loss_per_step.shape
-            assert loss_per_step.shape == (batch, time, d)
-            assert bt_mask.shape == (batch, time)
-            assert weight_t.shape == (batch,)
-            return (
-                torch.sum(
-                    torch.sum(
-                        torch.mean(loss_per_step, dim=-1) * bt_mask,
-                        dim=-1,
-                    )
-                    * weight_t
-                )
-                / bt_mask_sum
-            )
-
-        # Compute relative temporal losses
-        loss_terms: dict[str, Tensor | float] = {
-            # Beta loss remains absolute as it's shape parameters
-            "betas": weight_and_mask_loss(
-                (x_0_pred.betas - x_0.betas) ** 2
-                * x_0.betas.new_tensor(self.config.beta_coeff_weights),
-            ),
-            
-            # Body rotations remain absolute
-            "body_rotmats": weight_and_mask_loss(
-                (x_0_pred.body_rotmats - x_0.body_rotmats).reshape(batch, time, -1) ** 2
-            ),
-            
-            # Contacts remain absolute
-            "contacts": weight_and_mask_loss(
-                (x_0_pred.contacts.float() - x_0.contacts.float()) ** 2
-            ),
-
-            # Compute relative root rotation loss
-            "R_world_root": weight_and_mask_loss(
-                # Compute relative rotations between consecutive frames
-                (
-                    torch.matmul(
-                        x_0_pred.R_world_root[:, 1:],
-                        x_0_pred.R_world_root[:, :-1].transpose(-2, -1)
-                    )
-                    - torch.matmul(
-                        x_0.R_world_root[:, 1:],
-                        x_0.R_world_root[:, :-1].transpose(-2, -1)
-                    )
-                ).reshape(batch, time-1, -1) ** 2,
-                bt_mask=train_batch.mask[:, 1:],
-                bt_mask_sum=torch.sum(train_batch.mask[:, 1:]),
-            ),
-
-            # Compute relative translation loss
-            "t_world_root": weight_and_mask_loss(
-                # Compute relative translations between consecutive frames
-                (
-                    (x_0_pred.t_world_root[:, 1:] - x_0_pred.t_world_root[:, :-1])
-                    - (x_0.t_world_root[:, 1:] - x_0.t_world_root[:, :-1])
-                ) ** 2,
-                bt_mask=train_batch.mask[:, 1:],
-                bt_mask_sum=torch.sum(train_batch.mask[:, 1:]),
-            ),
-        }
-
-        # Get predicted joint positions through forward kinematics
-        x_0_posed = x_0_pred.apply_to_body(
-            unwrapped_model.body_model.to(device)
-        )
-        pred_joints = torch.cat(
-            [
-                x_0_posed.T_world_root[..., 4:7].unsqueeze(dim=-2),
-                x_0_posed.Ts_world_joint[..., :num_joints-1, 4:7],
-            ],
-            dim=-2,
-        )
-        
-        # Get ground truth joints
-        gt_joints = train_batch.joints_wrt_world
-
-        # Calculate relative joint positions
-        pred_joints_rel = pred_joints[:, 1:] - pred_joints[:, :-1]
-        gt_joints_rel = gt_joints[:, 1:] - gt_joints[:, :-1]
-
-        # Compute relative joint position loss
-        joint_loss = (pred_joints_rel - gt_joints_rel) ** 2
-
-        # Apply joint visibility mask for consecutive frames
-        visible_joints_mask_rel = (
-            train_batch.visible_joints_mask[:, 1:]
-            & train_batch.visible_joints_mask[:, :-1]
-        )
-        
-        # Compute masked joint loss for invisible joints
-        invisible_joint_loss = (
-            joint_loss
-            * (~visible_joints_mask_rel)[..., None]
-        ).sum(dim=(-2, -1)) / (
-            ((~visible_joints_mask_rel).sum(dim=-1) * 3) + 1e-8
-        )
-
-        # Add joint loss to loss terms
-        loss_terms["joints"] = weight_and_mask_loss(
-            invisible_joint_loss.unsqueeze(-1),
-            train_batch.mask[:, 1:],
-            torch.sum(train_batch.mask[:, 1:]),
-        )
-
-        # Foot skating loss (relative velocities when in contact)
-        foot_indices = [7, 8, 10, 11]
-        foot_positions = pred_joints[..., foot_indices, :]
-        foot_velocities = foot_positions[:, 1:] - foot_positions[:, :-1]
-        foot_contacts = x_0.contacts[..., foot_indices]
-        foot_skating_mask = (
-            foot_contacts[:, 1:] * train_batch.mask[:, 1:, None]
-        ).bool()
-
-        foot_skating_losses = []
-        for i in range(len(foot_indices)):
-            foot_loss = weight_and_mask_loss(
-                foot_velocities[..., i, :].pow(2),
-                bt_mask=foot_skating_mask[..., i],
-                bt_mask_sum=torch.maximum(
-                    torch.sum(foot_skating_mask[..., i]) * 3,
-                    torch.tensor(1, device=device),
-                ),
-            )
-            foot_skating_losses.append(foot_loss)
-        loss_terms["foot_skating"] = sum(foot_skating_losses) / len(foot_indices)
-
-        # Velocity consistency loss
-        loss_terms["velocity"] = weight_and_mask_loss(
-            (
-                (pred_joints[:, 2:] - 2 * pred_joints[:, 1:-1] + pred_joints[:, :-2])
-                - (gt_joints[:, 2:] - 2 * gt_joints[:, 1:-1] + gt_joints[:, :-2])
-            ).reshape(batch, time - 2, -1) ** 2,
-            bt_mask=train_batch.mask[:, 2:],
-            bt_mask_sum=torch.sum(train_batch.mask[:, 2:]),
-        )
-
-        # Handle hand rotations if included
-        if unwrapped_model.config.include_hands:
-            assert x_0_pred.hand_rotmats is not None
-            assert x_0.hand_rotmats is not None
-
-            # Detect sequences with hand motion
-            gt_hand_flatmat = x_0.hand_rotmats.reshape((batch, time, -1))
-            hand_motion = (
-                torch.sum(
-                    torch.sum(
-                        torch.abs(gt_hand_flatmat - gt_hand_flatmat[:, 0:1, :]), dim=-1
-                    )
-                    * train_batch.mask,
-                    dim=-1,
-                )
-                > 1e-5
-            )
-            
-            hand_bt_mask = torch.logical_and(hand_motion[:, None], train_batch.mask)
-            loss_terms["hand_rotmats"] = torch.sum(
-                weight_and_mask_loss(
-                    (x_0_pred.hand_rotmats - x_0.hand_rotmats).reshape(
-                        batch, time, 30 * 3 * 3
-                    )
-                    ** 2,
-                    bt_mask=hand_bt_mask,
-                    bt_mask_sum=torch.maximum(
-                        torch.sum(hand_bt_mask), torch.tensor(256, device=device)
-                    ),
-                )
-            )
-        else:
-            loss_terms["hand_rotmats"] = 0.0
-
-        # Apply loss weights and log
-        assert loss_terms.keys() == self.config.loss_weights.keys()
-        for name, term in loss_terms.items():
-            loss_term = term * self.config.loss_weights[name]
-            loss_terms[name] = loss_term
-            log_outputs[f"loss_term/{name}"] = loss_term
-
-        # Compute final loss
-        loss = sum([loss_terms[k] for k in loss_terms])
-        assert isinstance(loss, Tensor)
-        assert loss.shape == ()
-        log_outputs["train_loss"] = loss
-
-        return loss, log_outputs

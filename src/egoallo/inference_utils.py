@@ -23,7 +23,7 @@ from . import fncsmpl
 from . import transforms as tf
 from .data.dataclass import EgoTrainingData
 from .mapping import SMPLH_BODY_JOINTS
-from .network import EgoDenoiser, EgoDenoiserConfig, EgoDenoiseTraj
+from .network import EgoDenoiser, EgoDenoiserConfig, AbsoluteDenoiseTraj
 from .tensor_dataclass import TensorDataclass
 from .transforms import SE3
 

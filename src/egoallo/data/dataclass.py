@@ -13,7 +13,7 @@ from .. import transforms as tf
 from ..tensor_dataclass import TensorDataclass
 from typing import Optional
 
-from ..network import EgoDenoiseTraj, EgoDenoiserConfig
+from ..network import AbsoluteDenoiseTraj, BaseDenoiseTraj, EgoDenoiserConfig
 from ..viz.smpl_viewer import visualize_ego_training_data as viz_ego_data
 
 from jaxtyping import Float, jaxtyped
@@ -157,7 +157,7 @@ class EgoTrainingData(TensorDataclass):
 
     @staticmethod
     def visualize_ego_training_data(
-        data: EgoDenoiseTraj,
+        data: AbsoluteDenoiseTraj,
         body_model: fncsmpl.SmplhModel,
         output_path: str = "output.mp4",
     ):
@@ -167,8 +167,8 @@ class EgoTrainingData(TensorDataclass):
             output_path=output_path,
         )
 
-    def to_denoise_traj(self, include_hands: bool = True) -> EgoDenoiseTraj:
-        """Convert EgoTrainingData instance to EgoDenoiseTraj instance."""
+    def to_denoise_traj(self, include_hands: bool = True) -> AbsoluteDenoiseTraj:
+        """Convert EgoTrainingData instance to AbsoluteDenoiseTraj instance."""
         *batch, time, _ = self.T_world_root.shape
 
         # Extract rotation and translation from T_world_root
@@ -183,8 +183,8 @@ class EgoTrainingData(TensorDataclass):
         if self.hand_quats is not None and include_hands:
             hand_rotmats = SO3(self.hand_quats).as_matrix()
 
-        # Create and return EgoDenoiseTraj instance
-        return EgoDenoiseTraj(
+        # Create and return AbsoluteDenoiseTraj instance
+        return AbsoluteDenoiseTraj(
             betas=self.betas.expand((*batch, time, 16)),
             body_rotmats=body_rotmats,
             contacts=self.contacts,

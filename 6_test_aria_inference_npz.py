@@ -44,7 +44,7 @@ def main(
     hand_rotmats = SO3(torch.cat([left_hand_quats, right_hand_quats], dim=-2)).as_matrix()
 
     # Create EgoDenoiseTraj instance
-    traj = network.EgoDenoiseTraj(
+    traj = network.AbsoluteDenoiseTraj(
         betas=betas,
         body_rotmats=body_rotmats,
         contacts=contacts,

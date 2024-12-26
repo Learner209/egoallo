@@ -30,7 +30,7 @@ from egoallo.inference_utils import (
     load_denoiser,
     load_runtime_config,
 )
-from egoallo.network import EgoDenoiser, EgoDenoiserConfig, EgoDenoiseTraj
+from egoallo.network import EgoDenoiser, EgoDenoiserConfig, AbsoluteDenoiseTraj
 from egoallo.sampling import (
     CosineNoiseScheduleConstants,
     quadratic_ts,
@@ -54,8 +54,8 @@ class DataVisualizer:
 
     @staticmethod
     def save_visualization(
-        gt_traj: EgoDenoiseTraj,
-        denoised_traj: EgoDenoiseTraj,
+        gt_traj: AbsoluteDenoiseTraj,
+        denoised_traj: AbsoluteDenoiseTraj,
         body_model: fncsmpl.SmplhModel,
         output_dir: Path,
         output_name: str,
@@ -94,7 +94,7 @@ class SequenceProcessor:
         inference_config: InferenceConfig,
         model_config: EgoDenoiserConfig,
         device: torch.device,
-    ) -> Tuple[EgoDenoiseTraj, EgoDenoiseTraj]:
+    ) -> Tuple[AbsoluteDenoiseTraj, AbsoluteDenoiseTraj]:
         """Process a single sequence and return denoised trajectory."""
         # Run denoising with guidance
         denoised_traj = run_sampling_with_masked_data(
@@ -159,8 +159,8 @@ class TestRunner:
 
     def _save_sequence_data(
         self,
-        gt_traj: EgoDenoiseTraj,
-        denoised_traj: EgoDenoiseTraj,
+        gt_traj: AbsoluteDenoiseTraj,
+        denoised_traj: AbsoluteDenoiseTraj,
         seq_idx: int,
         output_path: Path,
     ) -> None:
@@ -277,11 +277,12 @@ class TestRunner:
                 desc="Enumerating test loader",
                 ascii=" >=",
             ):
-                # if batch_idx == 5:
-                #     break
+                if batch_idx == 5:
+                    break
 
                 batch = batch.to(self.device)
                 temp_output_dir = Path("./logs/amass_visualization")
+                breakpoint()
                 self._process_batch(
                     batch,
                     batch_idx,

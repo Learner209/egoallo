@@ -87,7 +87,7 @@ def run_sampling_with_stitching(
     aria_detections: None | CorrespondedAriaHandWristPoseDetections,
     num_samples: int,
     device: torch.device,
-) -> network.EgoDenoiseTraj:
+) -> network.AbsoluteDenoiseTraj:
     noise_constants = CosineNoiseScheduleConstants.compute(timesteps=1000).to(
         device=device
     )
@@ -98,7 +98,7 @@ def run_sampling_with_stitching(
         (num_samples, Ts_world_cpf.shape[0] - 1, denoiser_network.get_d_state()),
         device=device,
     )
-    x_t = network.EgoDenoiseTraj.unpack(
+    x_t = network.AbsoluteDenoiseTraj.unpack(
         x_t_packed, include_hands=denoiser_network.config.include_hands
     )
     x_t.T_world_root = Ts_world_cpf[1:]  # Use the transformed poses
@@ -163,7 +163,7 @@ def run_sampling_with_stitching(
             # Take the mean for overlapping regions.
             x_0_packed_pred /= overlap_weights
 
-            x_0_packed_pred = network.EgoDenoiseTraj.unpack(
+            x_0_packed_pred = network.AbsoluteDenoiseTraj.unpack(
                 x_0_packed_pred,
                 include_hands=denoiser_network.config.include_hands,
                 project_rotmats=True,
@@ -185,7 +185,7 @@ def run_sampling_with_stitching(
             x_0_pred, _ = do_guidance_optimization(
                 # It's important that we _don't_ use the shifted transforms here.
                 Ts_world_cpf=Ts_world_cpf[1:, :],
-                traj=network.EgoDenoiseTraj.unpack(
+                traj=network.AbsoluteDenoiseTraj.unpack(
                     x_0_packed_pred, include_hands=denoiser_network.config.include_hands
                 ),
                 body_model=body_model,
@@ -211,7 +211,7 @@ def run_sampling_with_stitching(
             + sigma_t[t] * torch.randn(x_0_packed_pred.shape, device=device)
         )
         x_t_list.append(
-            network.EgoDenoiseTraj.unpack(
+            network.AbsoluteDenoiseTraj.unpack(
                 x_t_packed, include_hands=denoiser_network.config.include_hands
             )
         )
@@ -250,7 +250,7 @@ def run_sampling_with_masked_data(
     aria_detections: None | CorrespondedAriaHandWristPoseDetections,
     num_samples: int,
     device: torch.device,
-) -> network.EgoDenoiseTraj:
+) -> network.AbsoluteDenoiseTraj:
     # FIXME: currently the batch-size dimension of `masked_data` is not supported, as the num_samples `param` would conflict with batch_size dim of `masked_data`.
     noise_constants = CosineNoiseScheduleConstants.compute(timesteps=1000).to(
         device=device
@@ -267,7 +267,7 @@ def run_sampling_with_masked_data(
         device=device,
     )
     x_t_list = [
-        network.EgoDenoiseTraj.unpack(
+        network.AbsoluteDenoiseTraj.unpack(
             x_t_packed, include_hands=denoiser_network.config.include_hands
         )
     ]
@@ -324,7 +324,7 @@ def run_sampling_with_masked_data(
 
             x_0_packed_pred /= overlap_weights
 
-            x_0_pred = network.EgoDenoiseTraj.unpack(
+            x_0_pred = network.AbsoluteDenoiseTraj.unpack(
                 x_0_packed_pred,
                 include_hands=denoiser_network.config.include_hands,
                 project_rotmats=True,
@@ -367,7 +367,7 @@ def run_sampling_with_masked_data(
             + sigma_t[t] * torch.randn_like(x_0_packed_pred)
         )
         x_t_list.append(
-            network.EgoDenoiseTraj.unpack(
+            network.AbsoluteDenoiseTraj.unpack(
                 x_t_packed,
                 include_hands=denoiser_network.config.include_hands,
                 project_rotmats=False,
@@ -409,7 +409,7 @@ def run_sampling_with_masked_data_ddpm(
     aria_detections: None | CorrespondedAriaHandWristPoseDetections,
     num_samples: int,
     device: torch.device,
-) -> network.EgoDenoiseTraj:
+) -> network.AbsoluteDenoiseTraj:
     """
     DDPM sampling version of run_sampling_with_masked_data.
     Uses full stochastic sampling instead of DDIM's deterministic sampling.
@@ -431,7 +431,7 @@ def run_sampling_with_masked_data_ddpm(
         device=device,
     )
     x_t_list = [
-        network.EgoDenoiseTraj.unpack(
+        network.AbsoluteDenoiseTraj.unpack(
             x_t_packed, include_hands=denoiser_network.config.include_hands
         )
     ]
@@ -491,7 +491,7 @@ def run_sampling_with_masked_data_ddpm(
 
             x_0_packed_pred /= overlap_weights
 
-            x_0_pred = network.EgoDenoiseTraj.unpack(
+            x_0_pred = network.AbsoluteDenoiseTraj.unpack(
                 x_0_packed_pred,
                 include_hands=denoiser_network.config.include_hands,
                 project_rotmats=False,
@@ -527,7 +527,7 @@ def run_sampling_with_masked_data_ddpm(
         )
 
         x_t_list.append(
-            network.EgoDenoiseTraj.unpack(
+            network.AbsoluteDenoiseTraj.unpack(
                 x_t_packed,
                 include_hands=denoiser_network.config.include_hands,
                 project_rotmats=False,
@@ -569,7 +569,7 @@ def run_sampling_with_masked_data_ddpm_hard_coded(
     aria_detections: None | CorrespondedAriaHandWristPoseDetections,
     num_samples: int,
     device: torch.device,
-) -> network.EgoDenoiseTraj:
+) -> network.AbsoluteDenoiseTraj:
     """
     Simplified DDPM sampling version without sliding window mechanism.
     Processes full sequence at once for debugging purposes.
@@ -591,7 +591,7 @@ def run_sampling_with_masked_data_ddpm_hard_coded(
         device=device,
     )
     x_t_list = [
-        network.EgoDenoiseTraj.unpack(
+        network.AbsoluteDenoiseTraj.unpack(
             x_t_packed, include_hands=denoiser_network.config.include_hands
         )
     ]
@@ -618,7 +618,7 @@ def run_sampling_with_masked_data_ddpm_hard_coded(
                 mask=masked_data.mask,
             )
 
-            x_0_pred = network.EgoDenoiseTraj.unpack(
+            x_0_pred = network.AbsoluteDenoiseTraj.unpack(
                 x_0_packed_pred,
                 include_hands=denoiser_network.config.include_hands,
                 project_rotmats=False,
@@ -655,7 +655,7 @@ def run_sampling_with_masked_data_ddpm_hard_coded(
         )
 
         x_t_list.append(
-            network.EgoDenoiseTraj.unpack(
+            network.AbsoluteDenoiseTraj.unpack(
                 x_t_packed,
                 include_hands=denoiser_network.config.include_hands,
                 project_rotmats=False,

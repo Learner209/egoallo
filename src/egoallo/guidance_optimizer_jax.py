@@ -35,13 +35,13 @@ from .transforms._so3 import SO3
 @jaxtyped(typechecker=typeguard.typechecked)
 def do_guidance_optimization(
     T_world_root: Float[Tensor, "time 7"],
-    traj: network.EgoDenoiseTraj,
+    traj: network.AbsoluteDenoiseTraj,
     body_model: fncsmpl.SmplhModel,
     guidance_mode: GuidanceMode,
     phase: Literal["inner", "post"],
     hamer_detections: None | CorrespondedHamerDetections,
     aria_detections: None | CorrespondedAriaHandWristPoseDetections,
-) -> tuple[network.EgoDenoiseTraj, dict]:
+) -> tuple[network.AbsoluteDenoiseTraj, dict]:
     """Run an optimizer to apply foot contact constraints."""
 
     assert traj.hand_rotmats is not None

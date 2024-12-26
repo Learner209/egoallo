@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Union
 import dataclasses
 from egoallo import network, training_loss
 from egoallo.types import DatasetType, DatasetSliceStrategy, DatasetSplit, JointCondMode
@@ -19,8 +19,12 @@ class EgoAlloTrainConfig:
 
     joint_cond_mode: JointCondMode = "vel_acc"
 
+    # Model and denoising configuration
     model: network.EgoDenoiserConfig = dataclasses.field(init=False)
-    loss: training_loss.TrainingLossConfig = training_loss.TrainingLossConfig()
+    denoising: network.DenoisingConfig = dataclasses.field(init=False)
+    loss: training_loss.TrainingLossConfig = dataclasses.field(
+        default_factory=training_loss.TrainingLossConfig
+    )
 
     # Dataset arguments.
     batch_size: int = 256
@@ -52,6 +56,12 @@ class EgoAlloTrainConfig:
     debug: bool = False
 
     def __post_init__(self):
+        # Create denoising config first since model config depends on it
+        self.denoising = network.DenoisingConfig.from_joint_cond_mode(
+            joint_cond_mode=self.joint_cond_mode
+        )
+
+        # Create model config with denoising settings
         self.model = network.EgoDenoiserConfig(
             mask_ratio=self.mask_ratio,
             joint_cond_mode=self.joint_cond_mode,
@@ -59,3 +69,9 @@ class EgoAlloTrainConfig:
             use_fourier_in_masked_joints=self.use_fourier_in_masked_joints,
             use_joint_embeddings=self.use_joint_embeddings,
         )
+
+    def create_trajectory(
+        self, *args, **kwargs
+    ) -> Union[network.AbsoluteDenoiseTraj, network.VelocityDenoiseTraj]:
+        """Create appropriate trajectory object based on configuration."""
+        return self.denoising.create_trajectory(*args, **kwargs)

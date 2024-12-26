@@ -133,7 +133,7 @@ def add_splat_to_viser(
 def visualize_traj_and_hand_detections(
     server: viser.ViserServer,
     T_world_root: Float[Tensor, "timesteps 7"],
-    traj: network.EgoDenoiseTraj | None,
+    traj: network.AbsoluteDenoiseTraj | None,
     body_model: fncsmpl.SmplhModel,
     hamer_detections: CorrespondedHamerDetections | None = None,
     aria_detections: CorrespondedAriaHandWristPoseDetections | None = None,

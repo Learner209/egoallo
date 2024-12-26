@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from egoallo.data.dataclass import EgoTrainingData
     from egoallo.fncsmpl import SmplhModel
-    from egoallo.network import EgoDenoiseTraj
+    from egoallo.network import AbsoluteDenoiseTraj
 
 # On some systems, EGL does not start properly if OpenGL was already initialized, that's why it's better
 # to keep EGLContext import on top
@@ -248,7 +248,7 @@ class SMPLViewer(BaseRenderer):
 
     def render_sequence(
         self,
-        denoised_traj: EgoDenoiseTraj,
+        denoised_traj: AbsoluteDenoiseTraj,
         body_model: SmplhModel,
         output_path: str = "output.mp4",
     ) -> None:
@@ -435,7 +435,7 @@ class SMPLViewer(BaseRenderer):
 
 
 def visualize_ego_training_data(
-    denoised_traj: EgoDenoiseTraj,
+    denoised_traj: AbsoluteDenoiseTraj,
     body_model: SmplhModel,
     output_path: str = "output.mp4",
 ) -> None:

@@ -24,7 +24,7 @@ from egoallo.hand_detection_structs import (
     CorrespondedHamerDetections,
 )
 from egoallo.inference_utils import InferenceTrajectoryPaths
-from egoallo.network import EgoDenoiseTraj
+from egoallo.network import AbsoluteDenoiseTraj
 from egoallo.transforms import SE3, SO3
 from egoallo.vis_helpers import visualize_traj_and_hand_detections
 
@@ -183,7 +183,7 @@ def load_and_visualize(
         paths.points_path, "filtered"
     )
 
-    traj = EgoDenoiseTraj(
+    traj = AbsoluteDenoiseTraj(
         betas=torch.from_numpy(outputs["betas"]).to(device),
         body_rotmats=SO3(
             torch.from_numpy(outputs["body_quats"]),

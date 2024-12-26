@@ -190,6 +190,7 @@ def run_training(
             loss, log_outputs = loss_helper.compute_denoising_loss(
                 model,
                 unwrapped_model=accelerator.unwrap_model(model),
+                train_config=config,
                 train_batch=train_batch,
             )
 
