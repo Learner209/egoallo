@@ -178,188 +178,191 @@ def run_training(
     epoch_time = time.time() - epoch_start_time
     epoch = 0
 
-    while True:
-        for train_batch in train_loader:
-            # Record batch loading time
-            batch_load_time = time.time() - batch_start_time
-            batch_start_time = time.time()
+    with torch.autograd.set_detect_anomaly(True):
+        while True:
+            for train_batch in train_loader:
+                # Record batch loading time
+                batch_load_time = time.time() - batch_start_time
+                batch_start_time = time.time()
 
-            loop_metrics = next(loop_metrics_gen)
-            step = loop_metrics.counter
+                loop_metrics = next(loop_metrics_gen)
+                step = loop_metrics.counter
 
-            loss, log_outputs = loss_helper.compute_denoising_loss(
-                model,
-                unwrapped_model=accelerator.unwrap_model(model),
-                train_config=config,
-                train_batch=train_batch,
-            )
+                loss, log_outputs = loss_helper.compute_denoising_loss(
+                    model,
+                    unwrapped_model=accelerator.unwrap_model(model),
+                    train_config=config,
+                    train_batch=train_batch,
+                )
 
-            # Add learning rate to outputs
-            log_outputs["learning_rate"] = scheduler.get_last_lr()[0]
+                # Add learning rate to outputs
+                log_outputs["learning_rate"] = scheduler.get_last_lr()[0]
 
-            # Wrap optimization steps in debug_mode check
-            if not debug_mode:
-                accelerator.backward(loss)
-                if accelerator.sync_gradients:
-                    accelerator.clip_grad_norm_(
-                        model.parameters(), config.max_grad_norm
+                # Wrap optimization steps in debug_mode check
+                if not debug_mode:
+                    accelerator.backward(loss)
+                    if accelerator.sync_gradients:
+                        accelerator.clip_grad_norm_(
+                            model.parameters(), config.max_grad_norm
+                        )
+                    optim.step()
+                    scheduler.step()
+                    optim.zero_grad(set_to_none=True)
+
+                if not accelerator.is_main_process:
+                    continue
+
+                if step % 400 == 0:
+                    log_msg = (
+                        f"step: {step} ({loop_metrics.iterations_per_sec:.2f} it/sec)"
+                        f" epoch: {epoch} (time: {epoch_time:.1f}s)"
+                        f" time: {loop_metrics.time_elapsed:.1f}s"
+                        f" gpus: {loop_metrics.num_gpus}"
+                        f" batch/gpu: {loop_metrics.per_gpu_batch_size}"
+                        f" total_batch: {loop_metrics.total_batch_size}"
+                        f" gpu_util: {[f'{u:.1f}%' for u in loop_metrics.gpu_utilization]}"
+                        f" gpu_mem: {[f'{m:.1f}GB' for m in loop_metrics.gpu_memory_used]}"
+                        f" lr: {scheduler.get_last_lr()[0]:.7f}"
+                        f" loss: {loss.item():.6f}"
                     )
-                optim.step()
-                scheduler.step()
-                optim.zero_grad(set_to_none=True)
 
-            if not accelerator.is_main_process:
-                continue
+                    # Add all loss terms from log_outputs
+                    for key, value in log_outputs.items():
+                        if key.startswith("loss_term/"):
+                            # Extract term name after loss_term/
+                            term_name = key.split("/")[-1]
+                            # Add formatted loss term
+                            log_msg += f" {term_name}: {value:.6f}"
 
-            if step % 400 == 0:
-                log_msg = (
-                    f"step: {step} ({loop_metrics.iterations_per_sec:.2f} it/sec)"
-                    f" epoch: {epoch} (time: {epoch_time:.1f}s)"
-                    f" time: {loop_metrics.time_elapsed:.1f}s"
-                    f" gpus: {loop_metrics.num_gpus}"
-                    f" batch/gpu: {loop_metrics.per_gpu_batch_size}"
-                    f" total_batch: {loop_metrics.total_batch_size}"
-                    f" gpu_util: {[f'{u:.1f}%' for u in loop_metrics.gpu_utilization]}"
-                    f" gpu_mem: {[f'{m:.1f}GB' for m in loop_metrics.gpu_memory_used]}"
-                    f" lr: {scheduler.get_last_lr()[0]:.7f}"
-                    f" loss: {loss.item():.6f}"
-                )
-
-                # Add all loss terms from log_outputs
-                for key, value in log_outputs.items():
-                    if key.startswith("loss_term/"):
-                        # Extract term name after loss_term/
-                        term_name = key.split("/")[-1]
-                        # Add formatted loss term
-                        log_msg += f" {term_name}: {value:.6f}"
-
-                logger.info(log_msg)
-                # Log metrics to wandb
-                wandb.log(
-                    {
-                        "train/loss": loss.item(),
-                        "train/learning_rate": scheduler.get_last_lr()[0],
-                        "train/epoch": epoch,
-                        "train/step": step,
-                        "performance/batch_load_time_ms": batch_load_time * 1000,
-                        "system/gpu_utilization": {
-                            f"gpu_{i}": util
-                            for i, util in enumerate(loop_metrics.gpu_utilization)
-                        },
-                        "system/gpu_memory_used": {
-                            f"gpu_{i}": mem
-                            for i, mem in enumerate(loop_metrics.gpu_memory_used)
-                        },
-                        "system/total_batch_size": loop_metrics.total_batch_size,
-                        "system/per_gpu_batch_size": loop_metrics.per_gpu_batch_size,
-                        "system/num_gpus": loop_metrics.num_gpus,
-                        "time/batch_time_ms": loop_metrics.batch_time * 1000,
-                        "time/iterations_per_sec": loop_metrics.iterations_per_sec,
-                        "time/epoch_time": epoch_time,
-                        "time/total_time": time.time() - training_start_time,
-                    },
-                    step=step,
-                )
-
-                # Add individual loss terms
-                for key, value in log_outputs.items():
-                    if key.startswith("loss_term/"):
-                        term_name = key.split("/")[-1]
-                        wandb.log({f"losses/{term_name}": value}, step=step)
-
-                # Add gradient norms if not in debug mode
-                if not debug_mode and step % 400 == 0:
-                    total_grad_norm = 0.0
-                    param_norm = 0.0
-                    for p in model.parameters():
-                        if p.grad is not None:
-                            param_norm += p.norm(2).item() ** 2
-                            grad_norm = p.grad.norm(2).item() ** 2
-                            total_grad_norm += grad_norm
-
+                    logger.info(log_msg)
+                    # Log metrics to wandb
                     wandb.log(
                         {
-                            "gradients/total_grad_norm": np.sqrt(total_grad_norm),
-                            "gradients/param_norm": np.sqrt(param_norm),
-                            "gradients/grad_to_param_ratio": np.sqrt(total_grad_norm)
-                            / (np.sqrt(param_norm) + 1e-8),
+                            "train/loss": loss.item(),
+                            "train/learning_rate": scheduler.get_last_lr()[0],
+                            "train/epoch": epoch,
+                            "train/step": step,
+                            "performance/batch_load_time_ms": batch_load_time * 1000,
+                            "system/gpu_utilization": {
+                                f"gpu_{i}": util
+                                for i, util in enumerate(loop_metrics.gpu_utilization)
+                            },
+                            "system/gpu_memory_used": {
+                                f"gpu_{i}": mem
+                                for i, mem in enumerate(loop_metrics.gpu_memory_used)
+                            },
+                            "system/total_batch_size": loop_metrics.total_batch_size,
+                            "system/per_gpu_batch_size": loop_metrics.per_gpu_batch_size,
+                            "system/num_gpus": loop_metrics.num_gpus,
+                            "time/batch_time_ms": loop_metrics.batch_time * 1000,
+                            "time/iterations_per_sec": loop_metrics.iterations_per_sec,
+                            "time/epoch_time": epoch_time,
+                            "time/total_time": time.time() - training_start_time,
                         },
                         step=step,
                     )
 
-                # Log model parameter statistics periodically
-                if step % 2000 == 0:
-                    for name, param in model.named_parameters():
-                        if param.requires_grad:
-                            wandb.log(
-                                {
-                                    f"parameters/{name}/mean": param.mean().item(),
-                                    f"parameters/{name}/std": param.std().item(),
-                                    f"parameters/{name}/norm": param.norm().item(),
-                                },
-                                step=step,
-                            )
+                    # Add individual loss terms
+                    for key, value in log_outputs.items():
+                        if key.startswith("loss_term/"):
+                            term_name = key.split("/")[-1]
+                            wandb.log({f"losses/{term_name}": value}, step=step)
 
-            # Checkpointing and evaluation
-            steps_to_save = 5000
-            # if step % steps_to_save == 0 and step != 0:
-            if step % steps_to_save == 0:
-                # Save checkpoint.
-                checkpoint_path = experiment_dir / f"checkpoints_{step}"
-                accelerator.save_state(str(checkpoint_path))
-                logger.info(f"Saved checkpoint to {checkpoint_path}")
+                    # Add gradient norms if not in debug mode
+                    if not debug_mode and step % 400 == 0:
+                        total_grad_norm = 0.0
+                        param_norm = 0.0
+                        for p in model.parameters():
+                            if p.grad is not None:
+                                param_norm += p.norm(2).item() ** 2
+                                grad_norm = p.grad.norm(2).item() ** 2
+                                total_grad_norm += grad_norm
 
-                # Keep checkpoints from only every 100k steps
-                if prev_checkpoint_path is not None:
-                    shutil.rmtree(prev_checkpoint_path)
-                prev_checkpoint_path = (
-                    None if step % steps_to_save == 0 else checkpoint_path
-                )
+                        wandb.log(
+                            {
+                                "gradients/total_grad_norm": np.sqrt(total_grad_norm),
+                                "gradients/param_norm": np.sqrt(param_norm),
+                                "gradients/grad_to_param_ratio": np.sqrt(
+                                    total_grad_norm
+                                )
+                                / (np.sqrt(param_norm) + 1e-8),
+                            },
+                            step=step,
+                        )
 
-                # Create temporary directory for evaluation outputs
-                with tempfile.TemporaryDirectory() as temp_dir:
-                    # Create inference config for evaluation
-                    inference_config = InferenceConfig(
-                        checkpoint_dir=checkpoint_path,
-                        output_dir=Path(temp_dir),
-                        device=device,
-                        visualize_traj=False,  # Don't generate videos during training
-                        compute_metrics=True,
-                        skip_eval_confirm=True,
-                        use_mean_body_shape=False,  # use_mean_body_shape would fail assertion
-                    )
-
-                    # Run evaluation
-                    try:
-                        test_runner = TestRunner(inference_config)
-                        # TODO: just for debugging.
-                        # test_runner.denoiser = accelerator.unwrap_model(model)
-                        metrics = test_runner.run()
-
-                        assert metrics is not None
-                        # Log summary metrics to wandb
-                        for metric_name, metric_stats in metrics.summary.items():
-                            for stat_name, stat_value in metric_stats.items():
+                    # Log model parameter statistics periodically
+                    if step % 2000 == 0:
+                        for name, param in model.named_parameters():
+                            if param.requires_grad:
                                 wandb.log(
-                                    {f"eval/{metric_name}/{stat_name}": stat_value},
+                                    {
+                                        f"parameters/{name}/mean": param.mean().item(),
+                                        f"parameters/{name}/std": param.std().item(),
+                                        f"parameters/{name}/norm": param.norm().item(),
+                                    },
                                     step=step,
                                 )
-                                logger.info(
-                                    f"Step {step}, Loss: {log_outputs['train_loss']:.6f}, Eval: {metric_name} {stat_name}: {stat_value:.4f}"
-                                )
 
-                    except Exception as e:
-                        logger.error(f"Evaluation failed at step {step}: {str(e)}")
-                        logger.exception("Detailed error:")
+                # Checkpointing and evaluation
+                steps_to_save = 5000
+                if step % steps_to_save == 0 and step != 0:
+                    # if step % steps_to_save == 0:
+                    # Save checkpoint.
+                    checkpoint_path = experiment_dir / f"checkpoints_{step}"
+                    accelerator.save_state(str(checkpoint_path))
+                    logger.info(f"Saved checkpoint to {checkpoint_path}")
 
-                del checkpoint_path
+                    # Keep checkpoints from only every 100k steps
+                    if prev_checkpoint_path is not None:
+                        shutil.rmtree(prev_checkpoint_path)
+                    prev_checkpoint_path = (
+                        None if step % steps_to_save == 0 else checkpoint_path
+                    )
 
-        # End of epoch
-        epoch += 1
-        epoch_time = time.time() - epoch_start_time
-        # if accelerator.is_main_process:
-        #     logger.info(f"Epoch {epoch} completed in {epoch_time:.1f} seconds")
-        epoch_start_time = time.time()
+                    # Create temporary directory for evaluation outputs
+                    with tempfile.TemporaryDirectory() as temp_dir:
+                        # Create inference config for evaluation
+                        inference_config = InferenceConfig(
+                            checkpoint_dir=checkpoint_path,
+                            output_dir=Path(temp_dir),
+                            device=device,
+                            visualize_traj=False,  # Don't generate videos during training
+                            compute_metrics=True,
+                            skip_eval_confirm=True,
+                            use_mean_body_shape=False,  # use_mean_body_shape would fail assertion
+                        )
+
+                        # Run evaluation
+                        try:
+                            test_runner = TestRunner(inference_config)
+                            # TODO: just for debugging.
+                            # test_runner.denoiser = accelerator.unwrap_model(model)
+                            metrics = test_runner.run()
+
+                            assert metrics is not None
+                            # Log summary metrics to wandb
+                            for metric_name, metric_stats in metrics.summary.items():
+                                for stat_name, stat_value in metric_stats.items():
+                                    wandb.log(
+                                        {f"eval/{metric_name}/{stat_name}": stat_value},
+                                        step=step,
+                                    )
+                                    logger.info(
+                                        f"Step {step}, Loss: {log_outputs['train_loss']:.6f}, Eval: {metric_name} {stat_name}: {stat_value:.4f}"
+                                    )
+
+                        except Exception as e:
+                            logger.error(f"Evaluation failed at step {step}: {str(e)}")
+                            logger.exception("Detailed error:")
+
+                    del checkpoint_path
+
+            # End of epoch
+            epoch += 1
+            epoch_time = time.time() - epoch_start_time
+            # if accelerator.is_main_process:
+            #     logger.info(f"Epoch {epoch} completed in {epoch_time:.1f} seconds")
+            epoch_start_time = time.time()
 
     # Finish wandb run
     if accelerator.is_main_process:

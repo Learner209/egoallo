@@ -157,7 +157,6 @@ class TrainingLossComputer:
         )
         # Compute loss using x_0_pred and x_0
         loss_terms: dict[str, Tensor | float] = x_0_pred.compute_loss(other=x_0, mask=train_batch.mask, weight_t=weight_t)
-        # breakpoint()
 
         # Add joint position loss calculation
         # Get predicted joint positions through forward kinematics

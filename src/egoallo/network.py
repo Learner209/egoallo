@@ -45,32 +45,43 @@ from egoallo.utils.setup_logger import setup_logger
 logger = setup_logger(output=None, name=__name__)
 
 
-def get_kinematic_chain() -> list[tuple[int, int]]:
-    """Get kinematic chain for SMPL-H model."""
-    # Define parent-child relationships for joints
+def get_kinematic_chain(use_smplh: bool = True) -> list[tuple[int, int]]:
+    """Get kinematic chain for SMPL-H model based on SMPL_JOINT_NAMES."""
+    # Define parent-child relationships for joints based on SMPL_JOINT_NAMES order:
+    # ['pelvis', 'left_hip', 'right_hip', 'spine1', 'left_knee', 'right_knee',
+    # 'spine2', 'left_ankle', 'right_ankle', 'spine3', 'left_foot', 'right_foot',
+    # 'neck', 'left_collar', 'right_collar', 'head', 'left_shoulder', 'right_shoulder',
+    # 'left_elbow', 'right_elbow', 'left_wrist', 'right_wrist', 'left_hand', 'right_hand']
     # Each tuple is (child_idx, parent_idx)
-    return [
-        (1, 0),  # Left hip
-        (2, 1),  # Left knee
-        (3, 2),  # Left ankle
-        (4, 0),  # Right hip
-        (5, 4),  # Right knee
-        (6, 5),  # Right ankle
-        (7, 0),  # Spine1
-        (8, 7),  # Spine2
-        (9, 8),  # Spine3
-        (10, 9),  # Neck
-        (11, 10),  # Head
-        (12, 9),  # Left collar
-        (13, 12),  # Left shoulder
-        (14, 13),  # Left elbow
-        (15, 14),  # Left wrist
-        (16, 9),  # Right collar
-        (17, 16),  # Right shoulder
-        (18, 17),  # Right elbow
-        (19, 18),  # Right wrist
-        (20, 0),  # Pelvis
+    kinematic_chain = [
+        (1, 0),  # left_hip -> pelvis
+        (2, 0),  # right_hip -> pelvis
+        (3, 0),  # spine1 -> pelvis
+        (4, 1),  # left_knee -> left_hip
+        (5, 2),  # right_knee -> right_hip
+        (6, 3),  # spine2 -> spine1
+        (7, 4),  # left_ankle -> left_knee
+        (8, 5),  # right_ankle -> right_knee
+        (9, 6),  # spine3 -> spine2
+        (10, 7),  # left_foot -> left_ankle
+        (11, 8),  # right_foot -> right_ankle
+        (12, 9),  # neck -> spine3
+        (13, 12),  # left_collar -> neck
+        (14, 12),  # right_collar -> neck
+        (15, 12),  # head -> neck
+        (16, 13),  # left_shoulder -> left_collar
+        (17, 14),  # right_shoulder -> right_collar
+        (18, 16),  # left_elbow -> left_shoulder
+        (19, 17),  # right_elbow -> right_shoulder
+        (20, 18),  # left_wrist -> left_elbow
+        (21, 19),  # right_wrist -> right_elbow
+        (22, 20),  # left_hand -> left_wrist
+        (23, 21),  # right_hand -> right_wrist
     ]
+    if use_smplh:
+        return kinematic_chain
+    else:
+        return kinematic_chain[:-2]
 
 
 @jaxtyped(typechecker=typeguard.typechecked)
@@ -201,6 +212,48 @@ class DenoisingConfig:
         return AbsoluteDenoiseTraj.unpack(
             x, include_hands=include_hands, project_rotmats=project_rotmats
         )
+
+    def fetch_modality_dict(self, include_hands: bool = False) -> dict[str, int]:
+        """Get dictionary of modalities and their dimensions based on configuration.
+
+        Args:
+            include_hands: Whether to include hand rotations in modalities
+
+        Returns:
+            Dictionary mapping modality names to their dimensions
+        """
+        num_smplh_jnts = CFG.smplh.num_joints
+
+        # Common modalities for both absolute and velocity modes
+        modality_dims = {
+            "betas": 16,
+            "body_rotmats": (num_smplh_jnts - 1) * 9,
+            "contacts": num_smplh_jnts,
+        }
+
+        # Add hand rotations if specified
+        if include_hands:
+            modality_dims["hand_rotmats"] = 30 * 9
+
+        # Add mode-specific modalities
+        if self.is_velocity_mode():
+            # Velocity mode uses temporal offsets
+            modality_dims.update(
+                {
+                    "R_world_root_tm1_t": 9,  # 3x3 rotation matrix
+                    "t_world_root_tm1_t": 3,  # 3D translation vector
+                }
+            )
+        else:
+            # Absolute mode uses direct positions
+            modality_dims.update(
+                {
+                    "R_world_root": 9,  # 3x3 rotation matrix
+                    "t_world_root": 3,  # 3D translation vector
+                }
+            )
+
+        return modality_dims
 
 
 class BaseDenoiseTraj(TensorDataclass, ABC, Generic[T]):
@@ -481,17 +534,20 @@ class VelocityDenoiseTraj(BaseDenoiseTraj):
     t_world_root: Float[Tensor, "*batch timesteps 3"]
     """Global translation vector of the root joint."""
 
-    R_world_root_tm1_t: Float[Tensor, "*batch timesteps 3 3"]
+    R_world_root_tm1_t: Float[Tensor, "*batch timesteps 3 3"] | None = None
     """Relative rotation between consecutive frames (t-1 to t)."""
 
-    t_world_root_tm1_t: Float[Tensor, "*batch timesteps 3"]
+    t_world_root_tm1_t: Float[Tensor, "*batch timesteps 3"] | None = None
     """Relative translation between consecutive frames (t-1 to t)."""
 
-    R_world_root_acc: Float[Tensor, "*batch timesteps 3 3"]
+    R_world_root_acc: Float[Tensor, "*batch timesteps 3 3"] | None = None
     """Acceleration of rotation between consecutive frames."""
 
-    t_world_root_acc: Float[Tensor, "*batch timesteps 3"]
+    t_world_root_acc: Float[Tensor, "*batch timesteps 3"] | None = None
     """Acceleration of translation between consecutive frames."""
+
+    def __post_init__(self) -> None:
+        self._compute_temporal_offsets()
 
     @staticmethod
     def get_packed_dim(include_hands: bool) -> int:
@@ -510,42 +566,45 @@ class VelocityDenoiseTraj(BaseDenoiseTraj):
             packed_dim += 30 * 9  # hand_rotmats
         return packed_dim
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._compute_temporal_offsets()
-
     def _compute_temporal_offsets(self) -> None:
         """Compute relative rotations and translations between consecutive frames."""
         batch_shape = self.R_world_root.shape[:-2]
         device = self.R_world_root.device
         dtype = self.R_world_root.dtype
 
-        # Compute relative rotations
-        self.R_world_root_tm1_t = torch.matmul(
-            self.R_world_root[:, 1:], self.R_world_root[:, :-1].transpose(-2, -1)
-        )
-        # Pad with identity matrix for first frame
+        # Compute relative rotations using SO3
+        R_curr = SO3.from_matrix(self.R_world_root[:, 1:])
+        R_prev = SO3.from_matrix(self.R_world_root[:, :-1])
+        R_rel = R_curr.multiply(R_prev.inverse())
         self.R_world_root_tm1_t = torch.cat(
             [
-                torch.eye(3, device=device, dtype=dtype).expand(*batch_shape, 1, 3, 3),
-                self.R_world_root_tm1_t,
+                torch.eye(3, device=device, dtype=dtype).expand(
+                    *batch_shape[:-1], 1, 3, 3
+                ),
+                R_rel.as_matrix(),
             ],
             dim=-3,
         )
 
-        # Compute relative translations
+        # Compute relative translations using SE3
+        T_curr = SE3.from_rotation_and_translation(
+            SO3.from_matrix(self.R_world_root), self.t_world_root
+        )
         self.t_world_root_tm1_t = torch.zeros_like(self.t_world_root)
         self.t_world_root_tm1_t[:, 1:] = (
-            self.t_world_root[:, 1:] - self.t_world_root[:, :-1]
+            T_curr.translation()[:, 1:] - T_curr.translation()[:, :-1]
         )
 
         # Compute accelerations
+        # For rotations, multiply consecutive relative rotations
+        R_rel_curr = SO3.from_matrix(self.R_world_root_tm1_t[:, 2:])
+        R_rel_prev = SO3.from_matrix(self.R_world_root_tm1_t[:, 1:-1])
         self.R_world_root_acc = torch.zeros_like(self.R_world_root)
-        self.R_world_root_acc[:, 2:] = torch.matmul(
-            self.R_world_root_tm1_t[:, 2:],
-            self.R_world_root_tm1_t[:, 1:-1].transpose(-2, -1),
-        )
+        self.R_world_root_acc[:, 2:] = R_rel_curr.multiply(
+            R_rel_prev.inverse()
+        ).as_matrix()
 
+        # For translations, compute difference of consecutive relative translations
         self.t_world_root_acc = torch.zeros_like(self.t_world_root)
         self.t_world_root_acc[:, 2:] = (
             self.t_world_root_tm1_t[:, 2:] - self.t_world_root_tm1_t[:, 1:-1]
@@ -563,15 +622,17 @@ class VelocityDenoiseTraj(BaseDenoiseTraj):
         time = self.R_world_root_tm1_t.shape[-3]
 
         # Initialize absolute positions with identity rotation and zero translation
-        R_world_root = torch.eye(3, device=device, dtype=dtype).expand(
-            *batch_shape, time, 3, 3
+        R_world_root = (
+            torch.eye(3, device=device, dtype=dtype).expand(*batch_shape, 3, 3).clone()
         )
-        t_world_root = torch.zeros((*batch_shape, time, 3), device=device, dtype=dtype)
+        t_world_root = torch.zeros((*batch_shape, 3), device=device, dtype=dtype)
 
         # Reconstruct absolute positions from temporal offsets
         for t in range(1, time):
-            R_world_root[..., t, :, :] = torch.matmul(
-                self.R_world_root_tm1_t[..., t, :, :], R_world_root[..., t - 1, :, :]
+            R_world_root[..., t, :, :] = (
+                SO3.from_matrix(self.R_world_root_tm1_t[..., t, :, :])
+                .multiply(SO3.from_matrix(R_world_root[..., t - 1, :, :]))
+                .as_matrix()
             )
             t_world_root[..., t, :] = (
                 t_world_root[..., t - 1, :] + self.t_world_root_tm1_t[..., t, :]
@@ -714,15 +775,17 @@ class VelocityDenoiseTraj(BaseDenoiseTraj):
         # Initialize absolute positions with identity rotation and zero translation
         device = x.device
         dtype = x.dtype
-        R_world_root = torch.eye(3, device=device, dtype=dtype).expand(
-            *batch, time, 3, 3
+        R_world_root = (
+            torch.eye(3, device=device, dtype=dtype).expand(*batch, time, 3, 3).clone()
         )
         t_world_root = torch.zeros((*batch, time, 3), device=device, dtype=dtype)
 
         # Reconstruct absolute positions from temporal offsets
         for t in range(1, time):
-            R_world_root[:, t] = torch.matmul(
-                R_world_root_tm1_t[:, t], R_world_root[:, t - 1]
+            R_world_root[:, t] = (
+                SO3.from_matrix(R_world_root_tm1_t[:, t])
+                .multiply(SO3.from_matrix(R_world_root[:, t - 1]))
+                .as_matrix()
             )
             t_world_root[:, t] = t_world_root[:, t - 1] + t_world_root_tm1_t[:, t]
 
@@ -745,8 +808,11 @@ class VelocityDenoiseTraj(BaseDenoiseTraj):
     ) -> dict[str, Float[Tensor, ""]]:
         """Compute loss between this trajectory and another using velocity-based representations."""
         batch, time = mask.shape[:2]
-        vel_mask = mask[:, 1:] & mask[:, :-1]
-        acc_mask = mask[:, 2:] & mask[:, 1:-1] & mask[:, :-2]
+
+        vel_mask = torch.zeros_like(mask, dtype=torch.bool)
+        vel_mask[:, 1:] = mask[:, 1:] & mask[:, :-1]
+        acc_mask = torch.zeros_like(mask, dtype=torch.bool)
+        acc_mask[:, 2:] = mask[:, 2:] & mask[:, 1:-1] & mask[:, :-2]
 
         loss_terms = {
             # Beta loss remains absolute since it's shape parameters
@@ -802,7 +868,7 @@ class VelocityDenoiseTraj(BaseDenoiseTraj):
 
 @jaxtyped(typechecker=typeguard.typechecked)
 @dataclass
-class EgoDenoiserConfig:
+class EgoDenoiserConfig(DenoisingConfig):
     # Basic parameters
     max_t: int = 1000
     fourier_enc_freqs: int = 3
@@ -912,6 +978,7 @@ class EgoDenoiserConfig:
             index_embeddings = None
 
         if self.joint_cond_mode == "vel_acc_plus":
+            # TODO: this should be deprectaed now, as it lacks logical soundness now.
             # 1. Compute hierarchical joint representation
             # Root (pelvis) as base
             root_pos = masked_joints[..., 0:1, :]
@@ -919,54 +986,72 @@ class EgoDenoiserConfig:
             # Get relative positions to parent joints using kinematic chain
             # This removes redundant global motion information
             rel_to_parent = torch.zeros_like(masked_joints)
-            kinematic_chain = (
-                get_kinematic_chain()
+            kinematic_chain = get_kinematic_chain(
+                use_smplh=True
             )  # Define this based on SMPL skeleton
             for joint_idx, parent_idx in kinematic_chain:
                 rel_to_parent[..., joint_idx, :] = (
                     masked_joints[..., joint_idx, :] - masked_joints[..., parent_idx, :]
                 )
 
-            # 2. Compute motion features and masks
-            # Calculate velocity mask (both current and previous frame must be visible)
-            vel_mask = torch.zeros_like(visible_joints_mask)
-            vel_mask[:, 1:] = visible_joints_mask[:, 1:] & visible_joints_mask[:, :-1]
+            # Define the rel_to_parent mask
+            rel_to_parent_visible_mask: Float[Tensor, "batch time 22"] = (
+                torch.zeros_like(visible_joints_mask)
+            )
+            # Handle pelvis (root) joint separately
+            rel_to_parent_visible_mask[..., 0] = visible_joints_mask[..., 0]
+            # For all other joints, require both joint and parent to be visible
+            for joint_idx, parent_idx in kinematic_chain:
+                rel_to_parent_visible_mask[..., joint_idx] = (
+                    visible_joints_mask[..., joint_idx]
+                    & visible_joints_mask[..., parent_idx]
+                )
 
-            # Calculate acceleration mask (current and two previous frames must be visible)
-            acc_mask = torch.zeros_like(visible_joints_mask)
-            acc_mask[:, 2:] = (
-                visible_joints_mask[:, 2:]
-                & visible_joints_mask[:, 1:-1]
-                & visible_joints_mask[:, :-2]
+            # 2. Compute motion features and masks using relative parent joint positions
+            # Calculate velocity mask (both current and previous frame must have valid relative parent positions)
+            vel_mask = torch.zeros_like(rel_to_parent_visible_mask)  # [batch, time, 22]
+            vel_mask[:, 1:] = (
+                rel_to_parent_visible_mask[:, 1:] & rel_to_parent_visible_mask[:, :-1]
             )
 
-            # Velocity (first order temporal difference)
-            velocity = torch.zeros_like(masked_joints[:, 1:])
-            velocity = masked_joints[:, 1:] - masked_joints[:, :-1]
-            velocity = velocity * vel_mask[:, 1:].unsqueeze(-1)
+            # Calculate acceleration mask (current and two previous frames must have valid relative parent positions)
+            acc_mask = torch.zeros_like(rel_to_parent_visible_mask)  # [batch, time, 22]
+            acc_mask[:, 2:] = (
+                rel_to_parent_visible_mask[:, 2:]
+                & rel_to_parent_visible_mask[:, 1:-1]
+                & rel_to_parent_visible_mask[:, :-2]
+            )
 
-            # Acceleration (second order temporal difference)
-            accel = torch.zeros_like(masked_joints[:, 2:])
-            accel = velocity[:, 1:] - velocity[:, :-1]
-            accel = accel * acc_mask[:, 2:].unsqueeze(-1)
+            # Velocity (first order temporal difference of relative parent positions)
+            velocity = torch.zeros_like(rel_to_parent)  # [batch, time, 22, 3]
+            velocity[:, 1:] = rel_to_parent[:, 1:] - rel_to_parent[:, :-1]
+            velocity = velocity * vel_mask.unsqueeze(-1)  # [batch, time, 22, 3]
 
-            # 3. Compute motion attention scores
-            # Higher scores for frames with significant motion changes
-            motion_magnitude = torch.norm(velocity, dim=-1)
+            # Acceleration (second order temporal difference of relative parent positions)
+            accel = torch.zeros_like(rel_to_parent)  # [batch, time, 22, 3]
+            accel[:, 2:] = velocity[:, 2:] - velocity[:, 1:-1]
+            accel = accel * acc_mask.unsqueeze(-1)  # [batch, time, 22, 3]
+
+            # 3. Compute motion attention scores based on relative motion
+            motion_magnitude = torch.norm(velocity, dim=-1)  # [batch, time-1, 22]
             attention_scores = torch.sigmoid(
                 motion_magnitude - motion_magnitude.mean(dim=1, keepdim=True)
-            )
+            )  # [batch, time-1, 22]
 
             # 4. Create decorrelated features
             components = [
-                # Global root motion
+                # Global root motion and its configuration
                 root_pos.reshape(batch, time, -1),
-                # Local joint configurations
+                # Local joint configurations and visibility
                 rel_to_parent.reshape(batch, time, -1),
-                # Temporal features - weighted by attention scores
-                (velocity * attention_scores[..., None]).reshape(batch, time - 1, -1),
-                (accel * attention_scores[..., None]).reshape(batch, time - 2, -1),
-                # Optional joint embeddings for semantic information
+                rel_to_parent_visible_mask.reshape(batch, time, -1),
+                # Motion features with attention weights
+                (velocity * attention_scores[..., None]).reshape(batch, time, -1),
+                (accel * attention_scores[..., None]).reshape(batch, time, -1),
+                # Motion feature masks
+                vel_mask.reshape(batch, time, -1),
+                acc_mask.reshape(batch, time, -1),
+                # Optional semantic information
                 index_embeddings.reshape(batch, time, -1)
                 if self.use_joint_embeddings
                 else None,
@@ -983,7 +1068,6 @@ class EgoDenoiserConfig:
 
         elif self.joint_cond_mode == "vel_acc":
             # Calculate velocity mask (both current and previous frame must be visible)
-            assert isinstance(visible_joints_mask, Bool[Tensor, "batch time 22"])
             vel_mask = torch.zeros_like(visible_joints_mask)
             vel_mask[:, 1:] = visible_joints_mask[:, 1:] & visible_joints_mask[:, :-1]
 
@@ -1271,17 +1355,8 @@ class EgoDenoiser(nn.Module):
         Activation = {"gelu": nn.GELU, "relu": nn.ReLU}[config.activation]
 
         # MLP encoders and decoders for each modality we want to denoise.
-        modality_dims: dict[str, int] = {
-            "betas": 16,
-            "body_rotmats": (CFG.smplh.num_joints - 1) * 9,
-            "contacts": CFG.smplh.num_joints,
-            "R_world_root": 9,
-            "t_world_root": 3,
-        }
-        if config.include_hands:
-            modality_dims["hand_rotmats"] = 30 * 9
+        modality_dims = config.fetch_modality_dict(config.include_hands)
 
-        assert sum(modality_dims.values()) == self.get_d_state()
         self.encoders = nn.ModuleDict(
             {
                 k: nn.Sequential(
@@ -1383,9 +1458,14 @@ class EgoDenoiser(nn.Module):
         """Forward pass with MAE-style masking."""
         config = self.config
 
-        x_t = AbsoluteDenoiseTraj.unpack(
-            x_t_packed, include_hands=self.config.include_hands
-        )
+        if self.config.is_velocity_mode():
+            x_t = VelocityDenoiseTraj.unpack(
+                x_t_packed, include_hands=self.config.include_hands
+            )
+        else:
+            x_t = AbsoluteDenoiseTraj.unpack(
+                x_t_packed, include_hands=self.config.include_hands
+            )
         (batch, time, num_body_joints, _, _) = x_t.body_rotmats.shape
         assert num_body_joints == 21
 
@@ -1394,9 +1474,24 @@ class EgoDenoiser(nn.Module):
             self.encoders["betas"](x_t.betas.reshape((batch, time, -1)))
             + self.encoders["body_rotmats"](x_t.body_rotmats.reshape((batch, time, -1)))
             + self.encoders["contacts"](x_t.contacts)
-            + self.encoders["R_world_root"](x_t.R_world_root.reshape((batch, time, -1)))
-            + self.encoders["t_world_root"](x_t.t_world_root.reshape((batch, time, -1)))
         )
+
+        # Add velocity-based or absolute-based encodings depending on trajectory type
+        if self.config.is_velocity_mode():
+            x_t_encoded = x_t_encoded + (
+                self.encoders["R_world_root_tm1_t"](
+                    x_t.R_world_root_tm1_t.reshape((batch, time, -1))
+                )
+                + self.encoders["t_world_root_tm1_t"](x_t.t_world_root_tm1_t)
+            )
+        else:
+            x_t_encoded = x_t_encoded + (
+                self.encoders["R_world_root"](
+                    x_t.R_world_root.reshape((batch, time, -1))
+                )
+                + self.encoders["t_world_root"](x_t.t_world_root)
+            )
+
         if self.config.include_hands:
             assert x_t.hand_rotmats is not None
             x_t_encoded = x_t_encoded + self.encoders["hand_rotmats"](
@@ -1409,17 +1504,10 @@ class EgoDenoiser(nn.Module):
         noise_emb = self.noise_emb(t - 1)
         assert noise_emb.shape == (batch, config.d_noise_emb)
 
-        # Create conditioning from visible joints only
-        # cond = config.make_cond(
-        #     visible_jnts=joints,
-        #     visible_joints_mask=visible_joints_mask,
-        # )
-        # breakpoint()
         cond = config.make_cond_with_masked_joints(
             joints=joints,
             visible_joints_mask=visible_joints_mask,
         )
-
         # Randomly drop out conditioning information; this serves as a
         # regularizer that aims to improve sample diversity.
         if cond_dropout_keep_mask is not None:
