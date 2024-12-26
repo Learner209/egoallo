@@ -898,7 +898,8 @@ class EgoDenoiserConfig:
         dtype = joints.dtype
 
         # !joints must be masked to prevent further motion information from being used
-        joints[~visible_joints_mask] = 0
+        masked_joints = joints.clone()
+        masked_joints[~visible_joints_mask] = 0
 
         # Create joint embeddings if enabled
         if self.use_joint_embeddings:
@@ -913,24 +914,41 @@ class EgoDenoiserConfig:
         if self.joint_cond_mode == "vel_acc_plus":
             # 1. Compute hierarchical joint representation
             # Root (pelvis) as base
-            root_pos = joints[..., 0:1, :]
+            root_pos = masked_joints[..., 0:1, :]
 
             # Get relative positions to parent joints using kinematic chain
             # This removes redundant global motion information
-            rel_to_parent = torch.zeros_like(joints)
+            rel_to_parent = torch.zeros_like(masked_joints)
             kinematic_chain = (
                 get_kinematic_chain()
             )  # Define this based on SMPL skeleton
             for joint_idx, parent_idx in kinematic_chain:
                 rel_to_parent[..., joint_idx, :] = (
-                    joints[..., joint_idx, :] - joints[..., parent_idx, :]
+                    masked_joints[..., joint_idx, :] - masked_joints[..., parent_idx, :]
                 )
 
-            # 2. Compute motion features
+            # 2. Compute motion features and masks
+            # Calculate velocity mask (both current and previous frame must be visible)
+            vel_mask = torch.zeros_like(visible_joints_mask)
+            vel_mask[:, 1:] = visible_joints_mask[:, 1:] & visible_joints_mask[:, :-1]
+
+            # Calculate acceleration mask (current and two previous frames must be visible)
+            acc_mask = torch.zeros_like(visible_joints_mask)
+            acc_mask[:, 2:] = (
+                visible_joints_mask[:, 2:]
+                & visible_joints_mask[:, 1:-1]
+                & visible_joints_mask[:, :-2]
+            )
+
             # Velocity (first order temporal difference)
-            velocity = joints[:, 1:] - joints[:, :-1]
+            velocity = torch.zeros_like(masked_joints[:, 1:])
+            velocity = masked_joints[:, 1:] - masked_joints[:, :-1]
+            velocity = velocity * vel_mask[:, 1:].unsqueeze(-1)
+
             # Acceleration (second order temporal difference)
+            accel = torch.zeros_like(masked_joints[:, 2:])
             accel = velocity[:, 1:] - velocity[:, :-1]
+            accel = accel * acc_mask[:, 2:].unsqueeze(-1)
 
             # 3. Compute motion attention scores
             # Higher scores for frames with significant motion changes
@@ -977,13 +995,19 @@ class EgoDenoiserConfig:
                 & visible_joints_mask[:, :-2]
             )
 
-            # Calculate velocities
+            # Calculate velocities and mask invisible parts
             velocities = torch.zeros_like(joints)
             velocities[:, 1:] = joints[:, 1:] - joints[:, :-1]
+            velocities = velocities * vel_mask.unsqueeze(
+                -1
+            )  # Mask out invisible velocities
 
-            # Calculate accelerations
+            # Calculate accelerations and mask invisible parts
             accelerations = torch.zeros_like(joints)
             accelerations[:, 2:] = velocities[:, 2:] - velocities[:, 1:-1]
+            accelerations = accelerations * acc_mask.unsqueeze(
+                -1
+            )  # Mask out invisible accelerations
 
             # Combine with visibility masks
             velocities_with_vis = torch.cat(
@@ -1007,7 +1031,7 @@ class EgoDenoiserConfig:
         elif self.joint_cond_mode == "absolute":
             # joints_with_vis (22*4) + index_embeddings (22*16 if enabled)
             joints_with_vis = torch.cat(
-                [joints, visible_joints_mask.unsqueeze(-1).to(dtype)], dim=-1
+                [masked_joints, visible_joints_mask.unsqueeze(-1).to(dtype)], dim=-1
             )
             components = [joints_with_vis.reshape(batch, time, -1)]
             if self.use_joint_embeddings:
@@ -1016,7 +1040,7 @@ class EgoDenoiserConfig:
 
         elif self.joint_cond_mode == "absrel_jnts":
             joints_with_vis = torch.cat(
-                [joints, visible_joints_mask.unsqueeze(-1).to(dtype)], dim=-1
+                [masked_joints, visible_joints_mask.unsqueeze(-1).to(dtype)], dim=-1
             )
             first_joint = joints_with_vis[..., 0:1, :]
             other_joints = joints_with_vis[..., 1:, :]
@@ -1041,7 +1065,7 @@ class EgoDenoiserConfig:
 
         elif self.joint_cond_mode == "absrel":
             joints_with_vis = torch.cat(
-                [joints, visible_joints_mask.unsqueeze(-1).to(dtype)], dim=-1
+                [masked_joints, visible_joints_mask.unsqueeze(-1).to(dtype)], dim=-1
             )
             abs_pos = joints_with_vis
             rel_pos = torch.zeros_like(joints_with_vis)
@@ -1057,7 +1081,7 @@ class EgoDenoiserConfig:
 
         elif self.joint_cond_mode == "absrel_global_deltas":
             joints_with_vis = torch.cat(
-                [joints, visible_joints_mask.unsqueeze(-1).to(dtype)], dim=-1
+                [masked_joints, visible_joints_mask.unsqueeze(-1).to(dtype)], dim=-1
             )
             first_frame = joints_with_vis[:, 0]
             current_frames = joints_with_vis
@@ -1350,7 +1374,6 @@ class EgoDenoiser(nn.Module):
         self,
         x_t_packed: Float[Tensor, "batch time state_dim"],
         t: Int[Tensor, "batch"],
-        *,
         project_output_rotmats: bool,
         joints: Float[Tensor, "batch time num_joints 3"],
         visible_joints_mask: Bool[Tensor, "batch time 22"],

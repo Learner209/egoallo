@@ -97,6 +97,7 @@ class SequenceProcessor:
     ) -> Tuple[AbsoluteDenoiseTraj, AbsoluteDenoiseTraj]:
         """Process a single sequence and return denoised trajectory."""
         # Run denoising with guidance
+        # breakpoint()
         denoised_traj = run_sampling_with_masked_data(
             denoiser_network=denoiser,
             body_model=self.body_model,
@@ -169,6 +170,7 @@ class TestRunner:
         denoised_body_quats = SO3.from_matrix(denoised_traj.body_rotmats).wxyz
         gt_body_quats = SO3.from_matrix(gt_traj.body_rotmats).wxyz
 
+        # breakpoint()
         torch.save(
             {
                 # Ground truth data
@@ -214,7 +216,6 @@ class TestRunner:
             )
 
             # Save visualizations if requested
-            output_name = output_name or f"sequence_{batch_idx}_{seq_idx}"
             if self.config.visualize_traj:
                 timestamp = time.strftime("%Y%m%d-%H%M%S")
                 gt_path, inferred_path = visualizer.save_visualization(
@@ -230,6 +231,11 @@ class TestRunner:
                     logger.info(f"gt_path: {gt_path}")
 
             # Save sequence data
+            assert (
+                output_name is not None
+                and output_name.endswith(".pt")
+                or output_name is None
+            )
             filename = (
                 output_name if output_name else f"sequence_{batch_idx}_{seq_idx}.pt"
             )
@@ -281,8 +287,6 @@ class TestRunner:
                     break
 
                 batch = batch.to(self.device)
-                temp_output_dir = Path("./logs/amass_visualization")
-                breakpoint()
                 self._process_batch(
                     batch,
                     batch_idx,
@@ -290,7 +294,6 @@ class TestRunner:
                     visualizer,
                     temp_output_dir,
                     save_gt_vis=True,
-                    output_name=f"sequence_{batch_idx}",
                 )
 
             if self.config.compute_metrics:

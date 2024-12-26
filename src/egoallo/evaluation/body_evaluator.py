@@ -228,6 +228,7 @@ class BodyEvaluator(BaseEvaluator):
         metrics_dict = {metric: np.zeros(num_sequences) for metric in metric_fields}
 
         # Single-threaded processing
+        assert num_sequences > 0
         for i in range(num_sequences):
             result = self.process_file(
                 pt_paths[i], None, use_mean_body_shape=use_mean_body_shape
