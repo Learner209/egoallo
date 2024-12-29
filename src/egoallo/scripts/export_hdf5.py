@@ -1,5 +1,7 @@
 """Translate data from HuMoR-style npz format to an hdf5-based one."""
 
+from dataclasses import dataclass
+import dataclasses
 import queue
 import threading
 import time
@@ -10,6 +12,7 @@ import torch
 import torch.cuda
 import tyro
 
+from egoallo import network
 from egoallo import fncsmpl
 from egoallo.data.dataclass import EgoTrainingData
 from egoallo import training_utils
@@ -57,10 +60,11 @@ def main(
                 device_body_model, npz_path, include_hands=include_hands
             )
             output_name = npz_path.stem + ".mp4"
-            train_traj = train_data.to_denoise_traj(include_hands=True)
-            output_path = Path("./exp/debug_frame_rate_diff/")
-            output_path.mkdir(parents=True, exist_ok=True)
+            train_traj = train_data.to_denoise_traj(include_hands=True, denoising_config=dataclasses.field(default_factory=network.DenoisingConfig))
 
+			# TODO: remove this once we have a proper visualization function
+            # output_path = Path("./exp/debug_frame_rate_diff/")
+            # output_path.mkdir(parents=True, exist_ok=True)
             # EgoTrainingData.visualize_ego_training_data(
             #     train_traj,
             #     body_model,

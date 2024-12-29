@@ -5,7 +5,7 @@ import logging
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, Union
 
 import torch
 import torch.utils.data
@@ -30,13 +30,11 @@ from egoallo.inference_utils import (
     load_denoiser,
     load_runtime_config,
 )
-from egoallo.network import EgoDenoiser, EgoDenoiserConfig, AbsoluteDenoiseTraj
+from egoallo.network import EgoDenoiser, EgoDenoiserConfig, AbsoluteDenoiseTraj, JointsOnlyTraj
 from egoallo.sampling import (
     CosineNoiseScheduleConstants,
     quadratic_ts,
     run_sampling_with_masked_data,
-    run_sampling_with_masked_data_ddpm,
-    run_sampling_with_masked_data_ddpm_hard_coded,
 )
 from egoallo.transforms import SE3, SO3
 from egoallo.utils.setup_logger import setup_logger
@@ -91,10 +89,10 @@ class SequenceProcessor:
         self,
         batch: EgoTrainingData,
         denoiser: EgoDenoiser,
+        runtime_config: EgoAlloTrainConfig,
         inference_config: InferenceConfig,
-        model_config: EgoDenoiserConfig,
         device: torch.device,
-    ) -> Tuple[AbsoluteDenoiseTraj, AbsoluteDenoiseTraj]:
+    ) -> Tuple[Union[AbsoluteDenoiseTraj, JointsOnlyTraj], Union[AbsoluteDenoiseTraj, JointsOnlyTraj]]:
         """Process a single sequence and return denoised trajectory."""
         # Run denoising with guidance
         # breakpoint()
@@ -102,6 +100,7 @@ class SequenceProcessor:
             denoiser_network=denoiser,
             body_model=self.body_model,
             masked_data=batch,
+            runtime_config=runtime_config,
             guidance_mode=inference_config.guidance_mode,
             guidance_post=inference_config.guidance_post,
             guidance_inner=inference_config.guidance_inner,
@@ -111,7 +110,7 @@ class SequenceProcessor:
             num_samples=1,
             device=self.device,
         )
-        gt_traj = batch.to_denoise_traj()
+        gt_traj = batch.to_denoise_traj(denoising_config=runtime_config.denoising)
         return gt_traj, denoised_traj
 
 
@@ -119,25 +118,26 @@ class TestRunner:
     """Main class for running the test pipeline."""
 
     def __init__(self, inference_config: InferenceConfig):
-        self.config = inference_config
+        self.inference_config = inference_config
         self.device = torch.device(inference_config.device)
         self._initialize_components()
 
     def _initialize_components(self) -> None:
         """Initialize all required components."""
-        self.denoiser, self.model_config = load_denoiser(self.config.checkpoint_dir)
+        runtime_config: EgoAlloTrainConfig = load_runtime_config(
+            self.inference_config.checkpoint_dir
+        )
+        self.runtime_config = runtime_config
+        self.denoiser, self.model_config = load_denoiser(self.inference_config.checkpoint_dir, runtime_config)
         self.denoiser = self.denoiser.to(self.device)
 
-        runtime_config: EgoAlloTrainConfig = load_runtime_config(
-            self.config.checkpoint_dir
-        )
         self.body_model = fncsmpl.SmplhModel.load(runtime_config.smplh_npz_path).to(
             self.device
         )
         # Override runtime config with inference config values
-        for field in dataclasses.fields(type(self.config)):
+        for field in dataclasses.fields(type(self.inference_config)):
             if hasattr(runtime_config, field.name):
-                setattr(runtime_config, field.name, getattr(self.config, field.name))
+                setattr(runtime_config, field.name, getattr(self.inference_config, field.name))
 
         self.dataloader = torch.utils.data.DataLoader(
             dataset=build_dataset(cfg=runtime_config)(config=runtime_config),
@@ -212,18 +212,20 @@ class TestRunner:
         for seq_idx in range(batch.T_world_cpf.shape[0]):
             # Process sequence to get denoised trajectory
             gt_traj, denoised_traj = processor.process_sequence(
-                batch, self.denoiser, self.config, self.model_config, self.device
+                batch, self.denoiser, self.runtime_config, self.inference_config, self.device
             )
 
             # Save visualizations if requested
-            if self.config.visualize_traj:
+            if self.inference_config.visualize_traj:
                 timestamp = time.strftime("%Y%m%d-%H%M%S")
                 gt_path, inferred_path = visualizer.save_visualization(
                     gt_traj[seq_idx],
                     denoised_traj[seq_idx],
                     self.body_model,
                     output_dir,
-                    output_name,
+                    output_name
+                    if output_name
+                    else f"sequence_{batch_idx}_{seq_idx}.mp4",
                     save_gt=save_gt_vis,
                 )
                 logger.info(f"pred_path: {inferred_path}")
@@ -247,16 +249,16 @@ class TestRunner:
     ) -> Optional[EgoAlloEvaluationMetrics]:
         """Compute evaluation metrics on processed sequences."""
         # try:
-        runtime_config = load_runtime_config(self.config.checkpoint_dir)
+        runtime_config = load_runtime_config(self.inference_config.checkpoint_dir)
         evaluator = BodyEvaluator(
             body_model_path=runtime_config.smplh_npz_path, device=self.device
         )
 
         return evaluator.evaluate_directory(
             dir_with_pt_files=dir_with_pt_files,
-            use_mean_body_shape=self.config.use_mean_body_shape,
+            use_mean_body_shape=self.inference_config.use_mean_body_shape,
             # Initialize experiment.
-            skip_confirm=self.config.skip_eval_confirm,
+            skip_confirm=self.inference_config.skip_eval_confirm,
         )
         # except Exception as e:
         #     logger.error(f"Error computing metrics: {str(e)}")
@@ -287,18 +289,26 @@ class TestRunner:
                     break
 
                 batch = batch.to(self.device)
+                save_gt_vis = (
+                    False if self.inference_config.dataset_type == "EgoExoDataset" else True
+                )
                 self._process_batch(
                     batch,
                     batch_idx,
                     processor,
                     visualizer,
                     temp_output_dir,
-                    save_gt_vis=True,
+                    save_gt_vis=save_gt_vis,
                 )
 
-            if self.config.compute_metrics:
+            # TODO: this is a hack to avoid computing metrics for EgoExo dataset.
+            breakpoint()
+            if (
+                self.inference_config.compute_metrics
+                and self.inference_config.dataset_type != "EgoExoDataset"
+            ):
                 # Create final output directory for saving metrics
-                final_output_dir = Path(self.config.output_dir)
+                final_output_dir = Path(self.inference_config.output_dir)
                 final_output_dir.mkdir(exist_ok=True, parents=True)
 
                 # Compute metrics using temp files and save to final directory

@@ -60,7 +60,7 @@ DatasetSliceStrategy = Literal[
 DatasetSplit = Literal["train", "val", "test", "just_humaneva"]
 
 JointCondMode = Literal[
-    "absolute", "absrel_jnts", "absrel", "absrel_global_deltas", "vel_acc"
+    "absolute", "absrel_jnts", "absrel", "absrel_global_deltas", "vel_acc", "joints_only"
 ]
 
 LossWeights = Dict[str, float]

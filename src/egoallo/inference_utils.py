@@ -36,7 +36,7 @@ local_config_file = CONFIG_FILE
 CFG = make_cfg(config_name="defaults", config_file=local_config_file, cli_args=[])
 
 
-def load_denoiser(checkpoint_dir: Path) -> tuple[EgoDenoiser, EgoDenoiserConfig]:
+def load_denoiser(checkpoint_dir: Path, runtime_config: EgoAlloTrainConfig) -> tuple[EgoDenoiser, EgoDenoiserConfig]:
     """Load a denoiser model."""
     checkpoint_dir = checkpoint_dir.absolute()
     experiment_dir = checkpoint_dir.parent
@@ -46,7 +46,7 @@ def load_denoiser(checkpoint_dir: Path) -> tuple[EgoDenoiser, EgoDenoiserConfig]
     )
     assert isinstance(model_config, EgoDenoiserConfig)
 
-    model = EgoDenoiser(model_config)
+    model = EgoDenoiser(runtime_config.model, modality_dims=runtime_config.denoising.fetch_modality_dict(runtime_config.model.include_hands))
     with safe_open(checkpoint_dir / "model.safetensors", framework="pt") as f:  # type: ignore
         state_dict = {k: f.get_tensor(k) for k in f.keys()}
     model.load_state_dict(state_dict)

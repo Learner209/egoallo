@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 import numpy as np
 import PIL
@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from egoallo.data.dataclass import EgoTrainingData
     from egoallo.fncsmpl import SmplhModel
-    from egoallo.network import AbsoluteDenoiseTraj
+    from egoallo.network import AbsoluteDenoiseTraj, VelocityDenoiseTraj, JointsOnlyTraj
 
 # On some systems, EGL does not start properly if OpenGL was already initialized, that's why it's better
 # to keep EGLContext import on top
@@ -248,7 +248,7 @@ class SMPLViewer(BaseRenderer):
 
     def render_sequence(
         self,
-        denoised_traj: AbsoluteDenoiseTraj,
+        denoised_traj: Union[AbsoluteDenoiseTraj, VelocityDenoiseTraj, JointsOnlyTraj],
         body_model: SmplhModel,
         output_path: str = "output.mp4",
     ) -> None:
@@ -259,14 +259,13 @@ class SMPLViewer(BaseRenderer):
         device = body_model.weights.device
 
         # Prepare SMPL sequence
-        denoised_traj = denoised_traj[0:400]
+        # denoised_traj = denoised_traj
 
         T_world_root = SE3.from_rotation_and_translation(
             SO3.from_matrix(denoised_traj.R_world_root),
             denoised_traj.t_world_root,
         ).parameters()
 
-        # breakpoint()
         denoised_traj = denoised_traj.map(
             lambda x: x.unsqueeze(0)
         )  # prepend a new axis to incorporate changes in `apply_to_body` function.
@@ -286,7 +285,6 @@ class SMPLViewer(BaseRenderer):
             dim=-1,
         )
 
-        # breakpoint()
         mesh = posed.lbs()
         T_world_cpf = SE3(get_T_world_cpf(mesh))
         # Convert SMPL data to sequence
@@ -435,7 +433,7 @@ class SMPLViewer(BaseRenderer):
 
 
 def visualize_ego_training_data(
-    denoised_traj: AbsoluteDenoiseTraj,
+    denoised_traj: Union[AbsoluteDenoiseTraj, VelocityDenoiseTraj, JointsOnlyTraj],
     body_model: SmplhModel,
     output_path: str = "output.mp4",
 ) -> None:

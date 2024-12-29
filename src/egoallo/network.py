@@ -104,12 +104,12 @@ class DenoisingConfig:
     and provides factory methods for creating appropriate trajectory objects.
     """
 
-    mode: Literal["absolute", "velocity"] = "absolute"
+    denoising_mode: Literal["absolute", "velocity", "joints_only"] = "absolute"
     temporal_window: int = 2
     use_acceleration: bool = False
     loss_weights: dict[str, float] | None = None
     joint_cond_mode: JointCondMode = "absrel"
-
+    include_hands: bool = False
     def __post_init__(self):
         if self.loss_weights is None:
             # Default loss weights for absolute mode
@@ -139,13 +139,20 @@ class DenoisingConfig:
                 "t_world_root_acc": 0.5,
             }
 
+            # Weights for joints-only mode
+            joints_only_weights = {
+                "joints": 100.0,
+            }
+
             self.loss_weights = (
-                velocity_weights if self.is_velocity_mode() else absolute_weights
+                velocity_weights if self.is_velocity_mode()
+                else joints_only_weights if self.denoising_mode == "joints_only"
+                else absolute_weights
             )
 
         # Set mode based on joint_cond_mode if not explicitly set
-        if self.mode == "absolute" and self.is_velocity_joint_cond():
-            self.mode = "velocity"
+        if self.denoising_mode == "absolute" and self.is_velocity_joint_cond():
+            self.denoising_mode = "velocity"
 
     def is_velocity_joint_cond(self) -> bool:
         """Check if the joint conditioning mode is velocity-based."""
@@ -153,27 +160,32 @@ class DenoisingConfig:
 
     def is_velocity_mode(self) -> bool:
         """Check if we're using velocity-based denoising."""
-        return self.mode == "velocity" or self.is_velocity_joint_cond()
+        return self.denoising_mode == "velocity" or self.is_velocity_joint_cond()
 
     def create_trajectory(
         self, *args, **kwargs
-    ) -> Union["AbsoluteDenoiseTraj", "VelocityDenoiseTraj"]:
-        """Factory method to create appropriate trajectory object based on configuration.
-
-        Args:
-            *args: Positional arguments to pass to trajectory constructor
-            **kwargs: Keyword arguments to pass to trajectory constructor
-
-        Returns:
-            Either AbsoluteDenoiseTraj or VelocityDenoiseTraj based on configuration
-        """
-        if self.is_velocity_mode():
+    ) -> Union["AbsoluteDenoiseTraj", "VelocityDenoiseTraj", "JointsOnlyTraj"]:
+        """Factory method to create appropriate trajectory object based on configuration."""
+        if self.denoising_mode == "joints_only":
+            return JointsOnlyTraj(*args, **kwargs)
+        elif self.is_velocity_mode():
             return VelocityDenoiseTraj(*args, **kwargs)
         return AbsoluteDenoiseTraj(*args, **kwargs)
 
+    def get_d_state(self) -> int:
+        """Get the dimension of the state vector."""
+        if self.denoising_mode == "joints_only":
+            return JointsOnlyTraj.get_packed_dim(include_hands=self.include_hands)
+        elif self.denoising_mode == "velocity":
+            return VelocityDenoiseTraj.get_packed_dim(include_hands=self.include_hands)
+        elif self.denoising_mode == "absolute":
+            return AbsoluteDenoiseTraj.get_packed_dim(include_hands=self.include_hands)
+        else:
+            raise ValueError(f"Invalid denoising mode: {self.denoising_mode}")
+
     @classmethod
     def from_joint_cond_mode(
-        cls, joint_cond_mode: JointCondMode, **kwargs
+        cls, joint_cond_mode: JointCondMode, include_hands: bool, **kwargs
     ) -> "DenoisingConfig":
         """Create config from joint conditioning mode.
 
@@ -184,10 +196,11 @@ class DenoisingConfig:
         Returns:
             Configured DenoisingConfig instance
         """
-        mode = (
-            "velocity" if joint_cond_mode in ("vel_acc", "vel_acc_plus") else "absolute"
-        )
-        return cls(mode=mode, joint_cond_mode=joint_cond_mode, **kwargs)
+        if joint_cond_mode == "joints_only":
+            mode = "joints_only"
+        else:
+            mode = "velocity" if joint_cond_mode in ("vel_acc", "vel_acc_plus") else "absolute"
+        return cls(denoising_mode=mode, joint_cond_mode=joint_cond_mode, include_hands=include_hands, **kwargs)
 
     def unpack_traj(
         self,
@@ -195,17 +208,10 @@ class DenoisingConfig:
         include_hands: bool = False,
         project_rotmats: bool = False,
     ) -> "BaseDenoiseTraj[Any]":
-        """Unpack trajectory data using appropriate trajectory class based on configuration.
-
-        Args:
-            x: Packed trajectory tensor
-            include_hands: Whether to include hand rotations in unpacking
-            project_rotmats: Whether to project rotation matrices to SO(3)
-
-        Returns:
-            Either AbsoluteDenoiseTraj or VelocityDenoiseTraj based on configuration
-        """
-        if self.is_velocity_mode():
+        """Unpack trajectory data using appropriate trajectory class based on configuration."""
+        if self.denoising_mode == "joints_only":
+            return JointsOnlyTraj.unpack(x)
+        elif self.is_velocity_mode():
             return VelocityDenoiseTraj.unpack(
                 x, include_hands=include_hands, project_rotmats=project_rotmats
             )
@@ -214,15 +220,13 @@ class DenoisingConfig:
         )
 
     def fetch_modality_dict(self, include_hands: bool = False) -> dict[str, int]:
-        """Get dictionary of modalities and their dimensions based on configuration.
-
-        Args:
-            include_hands: Whether to include hand rotations in modalities
-
-        Returns:
-            Dictionary mapping modality names to their dimensions
-        """
+        """Get dictionary of modalities and their dimensions based on configuration."""
         num_smplh_jnts = CFG.smplh.num_joints
+
+        if self.denoising_mode == "joints_only":
+            return {
+                "joints": num_smplh_jnts * 3,  # x,y,z coordinates for each joint
+            }
 
         # Common modalities for both absolute and velocity modes
         modality_dims = {
@@ -315,6 +319,116 @@ class BaseDenoiseTraj(TensorDataclass, ABC, Generic[T]):
     def apply_to_body(self, body_model: SmplhModel) -> SmplhShapedAndPosed:
         """Apply the trajectory data to a SMPL-H body model."""
         pass
+
+    @abstractmethod
+    def encode(
+        self,
+        encoders: nn.ModuleDict,
+        batch: int,
+        time: int,
+    ) -> Float[Tensor, "batch time d_latent"]:
+        """Encode trajectory into latent representation.
+        
+        Args:
+            encoders: Dictionary of encoder networks
+            batch: Batch size
+            time: Sequence length
+            
+        Returns:
+            Encoded representation of shape (batch, time, d_latent)
+        """
+        pass
+
+
+@dataclasses.dataclass
+class JointsOnlyTraj(BaseDenoiseTraj):
+    """Denoising trajectory that only predicts joint positions."""
+
+    joints: Float[Tensor, "*batch timesteps 22 3"]
+    """3D joint positions."""
+
+    def __init__(
+        self,
+        joints: Float[Tensor, "*batch timesteps 22 3"],
+        **kwargs # Ignore other parameters
+    ):
+        # TODO: Remove this once we have a proper constructor.
+        """Initialize JointsOnlyTraj with just joint positions.
+        
+        Args:
+            joints: Joint positions tensor of shape (*batch, timesteps, 22, 3)
+            **kwargs: Additional arguments that will be ignored
+        """
+        self.joints = joints
+
+    def compute_loss(
+        self,
+        other: "JointsOnlyTraj", 
+        mask: Bool[Tensor, "batch time"],
+        weight_t: Float[Tensor, "batch"],
+    ) -> dict[str, Float[Tensor, ""]]:
+        """Compute loss between this trajectory and another using joint positions only."""
+        batch, time = mask.shape[:2]
+
+        loss_terms = {
+            "joints": self._weight_and_mask_loss(
+                ((self.joints - other.joints) ** 2).reshape(batch, time, -1),
+                mask,
+                weight_t
+            ),
+        }
+
+        return loss_terms
+
+    @staticmethod
+    def get_packed_dim(include_hands: bool = False) -> int:
+        """Get dimension of packed state vector.
+
+        Args:
+            include_hands: Whether to include hand rotations (unused in this class).
+
+        Returns:
+            Total dimension of packed state vector.
+        """
+        # 22 joints * 3 coordinates per joint
+        return CFG.smplh.num_joints * 3
+
+    def pack(self) -> Float[Tensor, "*batch timesteps d_state"]:
+        """Pack trajectory into a single flattened vector."""
+        return self.joints.reshape(*self.joints.shape[:-2], -1)
+
+    @classmethod
+    def unpack(
+        cls,
+        x: Float[Tensor, "*batch timesteps d_state"],
+        include_hands: bool = False,
+        project_rotmats: bool = False,
+    ) -> "JointsOnlyTraj":
+        """Unpack trajectory from a single flattened vector."""
+        (*batch, time, d_state) = x.shape
+        assert d_state == cls.get_packed_dim(include_hands)
+        
+        joints = x.reshape(*batch, time, CFG.smplh.num_joints, 3)
+        return cls(joints=joints)
+
+    def apply_to_body(self, body_model: SmplhModel) -> SmplhShapedAndPosed:
+        """Apply the trajectory data to a SMPL-H body model.
+        
+        Note: This is not implemented for JointsOnlyTraj since we don't have
+        the necessary parameters to fully pose the SMPL-H model.
+        """
+        raise NotImplementedError(
+            "JointsOnlyTraj does not support applying to SMPL-H body model"
+        )
+
+    def encode(
+        self,
+        encoders: nn.ModuleDict,
+        batch: int,
+        time: int,
+    ) -> Float[Tensor, "batch time d_latent"]:
+        """Encode joints-only trajectory into latent space."""
+        return encoders["joints"](self.joints.reshape((batch, time, -1)))
 
 
 @dataclasses.dataclass
@@ -510,6 +624,18 @@ class AbsoluteDenoiseTraj(BaseDenoiseTraj):
             t_world_root=t_world_root,
         )
 
+    def encode(self, encoders: nn.ModuleDict, batch: int, time: int) -> Float[Tensor, "batch time d_latent"]:
+        """Encode absolute trajectory into latent space."""
+        encoded = (
+            encoders["betas"](self.betas.reshape((batch, time, -1)))
+            + encoders["body_rotmats"](self.body_rotmats.reshape((batch, time, -1)))
+            + encoders["contacts"](self.contacts)
+            + encoders["R_world_root"](self.R_world_root.reshape((batch, time, -1)))
+            + encoders["t_world_root"](self.t_world_root)
+        )
+        if self.hand_rotmats is not None:
+            encoded = encoded + encoders["hand_rotmats"](self.hand_rotmats.reshape((batch, time, -1)))
+        return encoded
 
 @dataclasses.dataclass
 class VelocityDenoiseTraj(BaseDenoiseTraj):
@@ -865,10 +991,23 @@ class VelocityDenoiseTraj(BaseDenoiseTraj):
 
         return loss_terms
 
+    def encode(self, encoders: nn.ModuleDict, batch: int, time: int) -> Float[Tensor, "batch time d_latent"]:
+        """Encode trajectory into latent space."""
+        encoded = (
+            encoders["betas"](self.betas.reshape((batch, time, -1)))
+            + encoders["body_rotmats"](self.body_rotmats.reshape((batch, time, -1)))
+            + encoders["contacts"](self.contacts)
+            + encoders["R_world_root_tm1_t"](self.R_world_root_tm1_t.reshape((batch, time, -1)))
+            + encoders["t_world_root_tm1_t"](self.t_world_root_tm1_t)
+        )
+        if self.hand_rotmats is not None:
+            encoded = encoded + encoders["hand_rotmats"](self.hand_rotmats.reshape((batch, time, -1)))
+        return encoded
+
 
 @jaxtyped(typechecker=typeguard.typechecked)
 @dataclass
-class EgoDenoiserConfig(DenoisingConfig):
+class EgoDenoiserConfig():
     # Basic parameters
     max_t: int = 1000
     fourier_enc_freqs: int = 3
@@ -934,7 +1073,7 @@ class EgoDenoiserConfig(DenoisingConfig):
             d_cond = (
                 spatial_dim + (spatial_dim * (num_joints - 1)) + joint_emb_contribution
             )
-        elif self.joint_cond_mode == "absrel":
+        elif self.joint_cond_mode == "absrel" or self.joint_cond_mode == "joints_only":
             # abs_pos (22*4) + rel_pos (22*4) + index_embeddings (22*16 if enabled)
             d_cond = (
                 (spatial_dim * num_joints)
@@ -1147,7 +1286,7 @@ class EgoDenoiserConfig(DenoisingConfig):
                 components.append(index_embeddings.reshape(batch, time, -1))
             cond = torch.cat(components, dim=-1)
 
-        elif self.joint_cond_mode == "absrel":
+        elif self.joint_cond_mode == "absrel" or self.joint_cond_mode == "joints_only":
             joints_with_vis = torch.cat(
                 [masked_joints, visible_joints_mask.unsqueeze(-1).to(dtype)], dim=-1
             )
@@ -1218,126 +1357,6 @@ class EgoDenoiserConfig(DenoisingConfig):
         assert cond.shape == (batch, time, self.d_cond)
         return cond
 
-    @jaxtyped(typechecker=typeguard.typechecked)
-    def make_cond(
-        self,
-        visible_jnts: Float[Tensor, "batch time num_visible_joints 3"],
-        visible_joints_mask: Bool[Tensor, "batch time 21"],
-    ) -> Float[Tensor, "batch time d_cond"]:
-        """Construct conditioning using visible joints, their indices, and floor height."""
-        batch, time = visible_joints_mask.shape[:2]
-        device = visible_jnts.device
-        dtype = visible_jnts.dtype
-
-        # Get indices of visible joints
-        visible_indices = visible_joints_mask.nonzero(as_tuple=True)[-1]
-
-        # Create learnable joint index embeddings
-        joint_embeddings = nn.Embedding(CFG.smplh.num_joints, self.joint_emb_dim).to(
-            device
-        )
-        num_visible_per_frame = visible_jnts.shape[2]
-        index_embeddings = joint_embeddings(visible_indices).reshape(
-            batch, time, num_visible_per_frame, self.joint_emb_dim
-        )
-
-        # Extract floor height from visible joints (assuming lowest joint represents floor contact)
-        # floor_height = visible_jnts[..., :, 2].min(dim=2, keepdim=True)[
-        #     0
-        # ]  # shape: (batch, time, 1)
-
-        if self.joint_cond_mode == "absolute":
-            # Concatenate positions, index embeddings, and floor height
-            cond = torch.cat(
-                [
-                    visible_jnts.reshape(batch, time, -1),  # Joint positions
-                    index_embeddings.reshape(batch, time, -1),  # Joint embeddings
-                    # floor_height,  # Floor height
-                ],
-                dim=-1,
-            )
-
-        elif self.joint_cond_mode == "absrel_jnts":
-            first_visible_jnt = visible_jnts[..., 0:1, :]
-            other_visible_jnts = visible_jnts[..., 1:, :]
-            local_coords = other_visible_jnts - first_visible_jnt
-
-            cond = torch.cat(
-                [
-                    first_visible_jnt.reshape(batch, time, -1),
-                    local_coords.reshape(batch, time, -1),
-                    index_embeddings.reshape(batch, time, -1),
-                    # floor_height,
-                ],
-                dim=-1,
-            )
-
-        elif self.joint_cond_mode == "absrel":
-            abs_pos = visible_jnts
-            rel_pos = torch.zeros_like(visible_jnts)
-            rel_pos[:, 1:] = visible_jnts[:, 1:] - visible_jnts[:, :-1]
-
-            cond = torch.cat(
-                [
-                    abs_pos.reshape(batch, time, -1),
-                    rel_pos.reshape(batch, time, -1),
-                    index_embeddings.reshape(batch, time, -1),
-                    # floor_height,
-                ],
-                dim=-1,
-            )
-
-        elif self.joint_cond_mode == "absrel_global_deltas":
-            first_frame = visible_jnts[:, 0]
-            current_frames = visible_jnts
-
-            first_centroid = first_frame.mean(dim=1, keepdim=True)
-            current_centroids = current_frames.mean(dim=2, keepdim=True)
-
-            first_centered = first_frame - first_centroid
-            current_centered = current_frames - current_centroids
-
-            first_centered_exp = first_centered.unsqueeze(1).expand(-1, time, -1, -1)
-            H = first_centered_exp.transpose(-2, -1) @ current_centered
-
-            U, _, Vh = torch.linalg.svd(H)
-            r_mat = Vh.transpose(-2, -1) @ U.transpose(-2, -1)
-
-            det = torch.linalg.det(r_mat)
-            reflection_fix = (
-                torch.eye(3, device=r_mat.device)
-                .unsqueeze(0)
-                .unsqueeze(0)
-                .expand(batch, time, -1, -1)
-                .clone()
-            )
-            reflection_fix[..., 2, 2] = det
-            r_mat = r_mat @ reflection_fix
-
-            t = current_centroids.squeeze(2) - torch.einsum(
-                "btij,bkj->bti", r_mat, first_centroid
-            )
-
-            cond = torch.cat(
-                [
-                    torch.cat([visible_jnts, index_embeddings], dim=-1).reshape(
-                        batch, time, -1
-                    ),
-                    r_mat.reshape(batch, time, 9),
-                    t.reshape(batch, time, 3),
-                    # floor_height,
-                ],
-                dim=-1,
-            )
-
-        else:
-            assert_never(self.joint_cond_mode)
-
-        # Apply Fourier encoding
-        cond = fourier_encode(cond, freqs=self.fourier_enc_freqs)
-        assert cond.shape == (batch, time, self.d_cond)
-        return cond
-
 
 class EgoDenoiser(nn.Module):
     """Denoising network for human motion.
@@ -1346,16 +1365,13 @@ class EgoDenoiser(nn.Module):
     Output is denoised trajectory.
     """
 
-    def __init__(self, config: EgoDenoiserConfig):
+    def __init__(self, config: EgoDenoiserConfig, modality_dims: dict[str, int]):
         super().__init__()
 
         self.config = config
         self.body_model = SmplhModel.load(config.smplh_npz_path)
 
         Activation = {"gelu": nn.GELU, "relu": nn.ReLU}[config.activation]
-
-        # MLP encoders and decoders for each modality we want to denoise.
-        modality_dims = config.fetch_modality_dict(config.include_hands)
 
         self.encoders = nn.ModuleDict(
             {
@@ -1441,13 +1457,10 @@ class EgoDenoiser(nn.Module):
             ]
         )
 
-    def get_d_state(self) -> int:
-        return AbsoluteDenoiseTraj.get_packed_dim(self.config.include_hands)
-
     @jaxtyped(typechecker=typeguard.typechecked)
     def forward(
         self,
-        x_t_packed: Float[Tensor, "batch time state_dim"],
+        x_t_unpacked: Union[VelocityDenoiseTraj, AbsoluteDenoiseTraj, JointsOnlyTraj],
         t: Int[Tensor, "batch"],
         project_output_rotmats: bool,
         joints: Float[Tensor, "batch time num_joints 3"],
@@ -1458,46 +1471,11 @@ class EgoDenoiser(nn.Module):
         """Forward pass with MAE-style masking."""
         config = self.config
 
-        if self.config.is_velocity_mode():
-            x_t = VelocityDenoiseTraj.unpack(
-                x_t_packed, include_hands=self.config.include_hands
-            )
-        else:
-            x_t = AbsoluteDenoiseTraj.unpack(
-                x_t_packed, include_hands=self.config.include_hands
-            )
-        (batch, time, num_body_joints, _, _) = x_t.body_rotmats.shape
-        assert num_body_joints == 21
+        (batch, time, num_body_joints, _) = joints.shape
+        assert num_body_joints == 22
 
         # Encode the trajectory into a single vector per timestep.
-        x_t_encoded = (
-            self.encoders["betas"](x_t.betas.reshape((batch, time, -1)))
-            + self.encoders["body_rotmats"](x_t.body_rotmats.reshape((batch, time, -1)))
-            + self.encoders["contacts"](x_t.contacts)
-        )
-
-        # Add velocity-based or absolute-based encodings depending on trajectory type
-        if self.config.is_velocity_mode():
-            x_t_encoded = x_t_encoded + (
-                self.encoders["R_world_root_tm1_t"](
-                    x_t.R_world_root_tm1_t.reshape((batch, time, -1))
-                )
-                + self.encoders["t_world_root_tm1_t"](x_t.t_world_root_tm1_t)
-            )
-        else:
-            x_t_encoded = x_t_encoded + (
-                self.encoders["R_world_root"](
-                    x_t.R_world_root.reshape((batch, time, -1))
-                )
-                + self.encoders["t_world_root"](x_t.t_world_root)
-            )
-
-        if self.config.include_hands:
-            assert x_t.hand_rotmats is not None
-            x_t_encoded = x_t_encoded + self.encoders["hand_rotmats"](
-                x_t.hand_rotmats.reshape((batch, time, -1))
-            )
-        assert x_t_encoded.shape == (batch, time, config.d_latent)
+        x_t_encoded = x_t_unpacked.encode(self.encoders, batch, time)
 
         # Embed the diffusion noise level.
         assert t.shape == (batch,)
@@ -1593,8 +1571,7 @@ class EgoDenoiser(nn.Module):
             ],
             dim=-1,
         )
-        assert packed_output.shape == (batch, time, self.get_d_state())
-
+        
         # Return packed output.
         return packed_output
 
@@ -1802,3 +1779,4 @@ def zero_module(module):
     for p in module.parameters():
         p.detach().zero_()
     return module
+

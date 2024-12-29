@@ -1,19 +1,22 @@
 from pathlib import Path
-
+from typing import Union, assert_never
 import numpy as np
 import torch
 import torch.utils.data
 import typeguard
 from jaxtyping import Bool, Float, jaxtyped, Array
 from egoallo.transforms import SO3, SE3
+from egoallo import network
 from torch import Tensor
+
+from egoallo.types import JointCondMode
 
 from .. import fncsmpl, fncsmpl_extensions
 from .. import transforms as tf
 from ..tensor_dataclass import TensorDataclass
 from typing import Optional
 
-from ..network import AbsoluteDenoiseTraj, BaseDenoiseTraj, EgoDenoiserConfig
+from ..network import AbsoluteDenoiseTraj, JointsOnlyTraj, EgoDenoiserConfig
 from ..viz.smpl_viewer import visualize_ego_training_data as viz_ego_data
 
 from jaxtyping import Float, jaxtyped
@@ -167,7 +170,7 @@ class EgoTrainingData(TensorDataclass):
             output_path=output_path,
         )
 
-    def to_denoise_traj(self, include_hands: bool = True) -> AbsoluteDenoiseTraj:
+    def to_denoise_traj(self, denoising_config: network.DenoisingConfig, include_hands: bool = True) -> Union[AbsoluteDenoiseTraj, JointsOnlyTraj]:
         """Convert EgoTrainingData instance to AbsoluteDenoiseTraj instance."""
         *batch, time, _ = self.T_world_root.shape
 
@@ -183,15 +186,23 @@ class EgoTrainingData(TensorDataclass):
         if self.hand_quats is not None and include_hands:
             hand_rotmats = SO3(self.hand_quats).as_matrix()
 
-        # Create and return AbsoluteDenoiseTraj instance
-        return AbsoluteDenoiseTraj(
-            betas=self.betas.expand((*batch, time, 16)),
-            body_rotmats=body_rotmats,
-            contacts=self.contacts,
-            hand_rotmats=hand_rotmats,
-            R_world_root=R_world_root,
-            t_world_root=t_world_root,
-        )
+        if denoising_config.joint_cond_mode == "absolute" or denoising_config.joint_cond_mode == "absrel_jnts":
+            # Create and return AbsoluteDenoiseTraj instance
+            return AbsoluteDenoiseTraj(
+                betas=self.betas.expand((*batch, time, 16)),
+                body_rotmats=body_rotmats,
+                contacts=self.contacts,
+                hand_rotmats=hand_rotmats,
+                R_world_root=R_world_root,
+                t_world_root=t_world_root,
+            )
+        elif denoising_config.joint_cond_mode == "joints_only":
+            # Create and return JointsOnlyTraj instance
+            return JointsOnlyTraj(
+                joints=self.joints_wrt_world,
+            )
+        else:
+            assert_never(denoising_config.joint_cond_mode)
 
 
 def collate_dataclass[T](batch: list[T]) -> T:
