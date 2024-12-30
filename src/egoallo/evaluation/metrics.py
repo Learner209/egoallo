@@ -18,43 +18,33 @@ class EgoAlloEvaluationMetrics:
     All arrays are runtime type-checked using typeguard and jaxtyping.
     """
 
-    # Per-sequence metrics with shape annotations
-    mpjpe: Float[np.ndarray, "N"]  # Mean per-joint position error
-    pampjpe: Float[np.ndarray, "N"]  # PA-MPJPE
-    head_ori: Float[np.ndarray, "N"]  # Head orientation error
-    head_trans: Float[np.ndarray, "N"]  # Head translation error
-    foot_skate: Float[np.ndarray, "N"]  # Foot skating metric
-    foot_contact: Float[np.ndarray, "N"]  # Foot contact ratio
-
-    # New metrics matching training losses
-    body_rotmats_error: Float[np.ndarray, "N"]  # Body rotation error
-    betas_error: Float[np.ndarray, "N"]  # Body shape error
-    R_world_root_error: Float[np.ndarray, "N"]  # Root rotation error
-    t_world_root_error: Float[np.ndarray, "N"]  # Root translation error
-
-    # Optional metrics
-    coco_mpjpe: Optional[Float[np.ndarray, "N"]] = None  # Optional COCO joint error
-
     # File paths for saved data
     metrics_file: Optional[Path] = None
     summary_file: Optional[Path] = None
+
+    def __init__(self, **metrics):
+        """Initialize with arbitrary metrics.
+        
+        Args:
+            **metrics: Arbitrary keyword arguments containing metric arrays
+        """
+        # Set file paths
+        self.metrics_file = None 
+        self.summary_file = None
+
+        # Store all provided metrics
+        for name, value in metrics.items():
+            setattr(self, name, value)
+
+        # Track metric names for iteration
+        self._metric_names = [name for name in metrics.keys() 
+                            if name not in ['metrics_file', 'summary_file']]
 
     @property
     def summary(self) -> Dict[str, Dict[str, float]]:
         """Get summary statistics for all metrics."""
         metrics_dict = {}
-        for field in [
-            "mpjpe",
-            "pampjpe",
-            "head_ori",
-            "head_trans",
-            "foot_skate",
-            "foot_contact",
-            "body_rotmats_error",
-            "betas_error",
-            "R_world_root_error",
-            "t_world_root_error",
-        ]:
+        for field in self._metric_names:
             values = getattr(self, field)
             if values is not None:
                 metrics_dict[field] = {
@@ -64,16 +54,6 @@ class EgoAlloEvaluationMetrics:
                         np.nanstd(values) / np.sqrt(np.count_nonzero(~np.isnan(values)))
                     ),
                 }
-
-        if self.coco_mpjpe is not None:
-            metrics_dict["coco_mpjpe"] = {
-                "average_sample_mean": float(np.nanmean(self.coco_mpjpe)),
-                "stddev_sample": float(np.nanstd(self.coco_mpjpe)),
-                "stderr_sample": float(
-                    np.nanstd(self.coco_mpjpe)
-                    / np.sqrt(np.count_nonzero(~np.isnan(self.coco_mpjpe)))
-                ),
-            }
         return metrics_dict
 
     def save(self, output_dir: Path, suffix: str = "") -> None:
@@ -85,8 +65,7 @@ class EgoAlloEvaluationMetrics:
         torch.save(
             {
                 field: getattr(self, field)
-                for field in self.__dataclass_fields__
-                if field not in ["metrics_file", "summary_file"]
+                for field in self._metric_names
             },
             self.metrics_file,
         )
@@ -139,27 +118,10 @@ class EgoAlloEvaluationMetrics:
         # Print raw metrics if verbose
         if verbose:
             log_func("\n=== Raw Metrics ===")
-            for field in [
-                "mpjpe",
-                "pampjpe",
-                "head_ori",
-                "head_trans",
-                "foot_skate",
-                "foot_contact",
-                "body_rotmats_error",
-                "betas_error",
-                "R_world_root_error",
-                "t_world_root_error",
-            ]:
+            for field in self._metric_names:
                 values = getattr(self, field)
                 if values is not None:
                     log_func(f"\n{field}:")
                     log_func(f"  shape: {values.shape}")
                     log_func(f"  min: {np.nanmin(values):.4f}")
                     log_func(f"  max: {np.nanmax(values):.4f}")
-
-            if self.coco_mpjpe is not None:
-                log_func("\ncoco_mpjpe:")
-                log_func(f"  shape: {self.coco_mpjpe.shape}")
-                log_func(f"  min: {np.nanmin(self.coco_mpjpe):.4f}")
-                log_func(f"  max: {np.nanmax(self.coco_mpjpe):.4f}")

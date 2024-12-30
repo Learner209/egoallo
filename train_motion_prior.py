@@ -301,11 +301,9 @@ def run_training(
                                 },
                                 step=step,
                             )
-
-            # Checkpointing and evaluation
-            steps_to_save = 1000000000000
-            if step % steps_to_save == 0 and step > 0:
-                # if step % steps_to_save == 0:
+            # Checkpointing
+            steps_to_save = 10000
+            if step % steps_to_save == 0:
                 # Save checkpoint.
                 checkpoint_path = experiment_dir / f"checkpoints_{step}"
                 accelerator.save_state(str(checkpoint_path))
@@ -318,11 +316,14 @@ def run_training(
                     None if step % steps_to_save == 0 else checkpoint_path
                 )
 
+            # Evaluation
+            steps_to_eval = 1000000000000
+            if step % steps_to_eval == 0:
                 # Create temporary directory for evaluation outputs
                 with tempfile.TemporaryDirectory() as temp_dir:
                     # Create inference config for evaluation
                     inference_config = InferenceConfig(
-                        checkpoint_dir=checkpoint_path,
+                        checkpoint_dir=experiment_dir / f"checkpoints_{step}",
                         output_dir=Path(temp_dir),
                         device=device,
                         visualize_traj=False,  # Don't generate videos during training

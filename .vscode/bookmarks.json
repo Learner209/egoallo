@@ -14,7 +14,7 @@
 			"path": "src/egoallo/network.py",
 			"bookmarks": [
 				{
-					"line": 443,
+					"line": 557,
 					"column": 0,
 					"label": "make_cond"
 				}

@@ -10,6 +10,7 @@ import yaml
 from tqdm.auto import tqdm
 
 from egoallo import fncsmpl
+from egoallo.config.train.train_config import EgoAlloTrainConfig
 from egoallo.evaluation.metrics import EgoAlloEvaluationMetrics
 from egoallo.transforms import SO3
 from egoallo.utilities import procrustes_align
@@ -208,6 +209,7 @@ class BodyEvaluator(BaseEvaluator):
 
     def evaluate_directory(
         self,
+        runtime_config: EgoAlloTrainConfig,
         dir_with_pt_files: PathLike,
         use_mean_body_shape: bool = False,
         suffix: str = "",

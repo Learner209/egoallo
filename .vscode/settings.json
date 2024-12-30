@@ -1,10 +1,10 @@
 {
-	"python.languageServer": "None",
-	"terminal.integrated.profiles.linux": {
-    "tmux": {
-				"path": "bash",
-				"args": ["-c", "tmux new-session -A -s feature/T_world_root_addition 'exec zsh'"],
-				"icon": "terminal-tmux"
-			},
-	}
+    "python.languageServer": "None",
+    "terminal.integrated.profiles.linux": {
+        "tmux": {
+            "path": "bash",
+            "args": ["-c", "tmux attach -t feature/T_world_root_addition"],
+            "icon": "terminal-tmux"
+        }
+    }
 }

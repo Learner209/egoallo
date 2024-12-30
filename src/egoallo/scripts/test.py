@@ -9,6 +9,7 @@ from typing import Any, Dict, Optional, Tuple, Union
 
 import torch
 import torch.utils.data
+from traitlets import default
 import typeguard
 from jaxtyping import jaxtyped
 from torch.utils.data import DataLoader
@@ -22,6 +23,7 @@ from egoallo.data import make_batch_collator, build_dataset
 from egoallo.config.train.train_config import (
     EgoAlloTrainConfig,
 )
+from egoallo.joints2smpl.fit_seq import main_call, Joints2SmplFittingConfig
 from egoallo.data.dataclass import EgoTrainingData, collate_dataclass
 from egoallo.evaluation.body_evaluator import BodyEvaluator
 from egoallo.evaluation.metrics import EgoAlloEvaluationMetrics
@@ -30,7 +32,7 @@ from egoallo.inference_utils import (
     load_denoiser,
     load_runtime_config,
 )
-from egoallo.network import EgoDenoiser, EgoDenoiserConfig, AbsoluteDenoiseTraj, JointsOnlyTraj
+from egoallo.network import EgoDenoiser, EgoDenoiserConfig, AbsoluteDenoiseTraj, JointsOnlyTraj, VelocityDenoiseTraj
 from egoallo.sampling import (
     CosineNoiseScheduleConstants,
     quadratic_ts,
@@ -160,19 +162,20 @@ class TestRunner:
 
     def _save_sequence_data(
         self,
-        gt_traj: AbsoluteDenoiseTraj,
-        denoised_traj: AbsoluteDenoiseTraj,
+        gt_traj: Union[AbsoluteDenoiseTraj, JointsOnlyTraj, VelocityDenoiseTraj],
+        denoised_traj: Union[AbsoluteDenoiseTraj, JointsOnlyTraj, VelocityDenoiseTraj], 
         seq_idx: int,
         output_path: Path,
     ) -> None:
         """Save sequence data for evaluation."""
-        # Convert rotation matrices to quaternions for saving
-        denoised_body_quats = SO3.from_matrix(denoised_traj.body_rotmats).wxyz
-        gt_body_quats = SO3.from_matrix(gt_traj.body_rotmats).wxyz
+        save_dict = {}
 
-        # breakpoint()
-        torch.save(
-            {
+        if isinstance(gt_traj, (AbsoluteDenoiseTraj, VelocityDenoiseTraj)):
+            # Convert rotation matrices to quaternions for saving
+            denoised_body_quats = SO3.from_matrix(denoised_traj.body_rotmats).wxyz # type: ignore
+            gt_body_quats = SO3.from_matrix(gt_traj.body_rotmats).wxyz # type: ignore
+
+            save_dict.update({
                 # Ground truth data
                 "groundtruth_betas": gt_traj.betas[seq_idx, :]
                 .mean(dim=0, keepdim=True)
@@ -183,9 +186,8 @@ class TestRunner:
                 )
                 .parameters()
                 .cpu(),
-                "groundtruth_body_quats": gt_body_quats[
-                    seq_idx, ..., :21, :
-                ].cpu(),  # Denoised trajectory data
+                "groundtruth_body_quats": gt_body_quats[seq_idx, ..., :21, :].cpu(),
+                # Denoised trajectory data
                 "sampled_betas": denoised_traj.betas.mean(dim=1, keepdim=True).cpu(),
                 "sampled_T_world_root": SE3.from_rotation_and_translation(
                     SO3.from_matrix(denoised_traj.R_world_root),
@@ -194,9 +196,17 @@ class TestRunner:
                 .parameters()
                 .cpu(),
                 "sampled_body_quats": denoised_body_quats[..., :21, :].cpu(),
-            },
-            output_path,
-        )
+            })
+
+        elif isinstance(gt_traj, JointsOnlyTraj):
+            save_dict.update({
+                # Ground truth data
+                "groundtruth_joints": gt_traj.joints[seq_idx].cpu(),
+                # Denoised trajectory data  
+                "sampled_joints": denoised_traj.joints.cpu(),
+            })
+
+        torch.save(save_dict, output_path)
 
     def _process_batch(
         self,
@@ -214,9 +224,15 @@ class TestRunner:
             gt_traj, denoised_traj = processor.process_sequence(
                 batch, self.denoiser, self.runtime_config, self.inference_config, self.device
             )
+            if self.runtime_config.denoising.denoising_mode == "joints_only":
+                # import ipdb; ipdb.set_trace()
+                denoised_traj = denoised_traj[seq_idx]
+                gt_traj = gt_traj[seq_idx]
+                # main_call(Joints2SmplFittingConfig(), denoised_traj.joints.shape[0], denoised_traj.joints.cpu(), output_dir)
+                main_call(Joints2SmplFittingConfig(), gt_traj.joints.shape[0], gt_traj.joints.cpu(), output_dir)
 
             # Save visualizations if requested
-            if self.inference_config.visualize_traj:
+            if self.inference_config.visualize_traj and self.runtime_config.denoising.denoising_mode != "joints_only":
                 timestamp = time.strftime("%Y%m%d-%H%M%S")
                 gt_path, inferred_path = visualizer.save_visualization(
                     gt_traj[seq_idx],
@@ -242,19 +258,20 @@ class TestRunner:
                 output_name if output_name else f"sequence_{batch_idx}_{seq_idx}.pt"
             )
             output_path = output_dir / filename
-            self._save_sequence_data(gt_traj, denoised_traj, seq_idx, output_path)
+            if self.runtime_config.denoising.denoising_mode != "joints_only":
+                self._save_sequence_data(gt_traj, denoised_traj, seq_idx, output_path)
 
     def _compute_metrics(
         self, dir_with_pt_files: Path
     ) -> Optional[EgoAlloEvaluationMetrics]:
         """Compute evaluation metrics on processed sequences."""
         # try:
-        runtime_config = load_runtime_config(self.inference_config.checkpoint_dir)
         evaluator = BodyEvaluator(
-            body_model_path=runtime_config.smplh_npz_path, device=self.device
+            body_model_path=self.runtime_config.smplh_npz_path, device=self.device
         )
 
         return evaluator.evaluate_directory(
+            runtime_config=self.runtime_config,
             dir_with_pt_files=dir_with_pt_files,
             use_mean_body_shape=self.inference_config.use_mean_body_shape,
             # Initialize experiment.
@@ -302,10 +319,11 @@ class TestRunner:
                 )
 
             # TODO: this is a hack to avoid computing metrics for EgoExo dataset.
-            breakpoint()
+            # breakpoint()
             if (
                 self.inference_config.compute_metrics
                 and self.inference_config.dataset_type != "EgoExoDataset"
+                and self.runtime_config.denoising.denoising_mode != "joints_only"
             ):
                 # Create final output directory for saving metrics
                 final_output_dir = Path(self.inference_config.output_dir)
@@ -316,6 +334,8 @@ class TestRunner:
                 if metrics:
                     metrics.save(final_output_dir)
                 return metrics
+            elif self.runtime_config.denoising.denoising_mode == "joints_only":
+                return None
 
         return None
 
