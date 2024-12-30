@@ -23,8 +23,12 @@ tags
 
 diff.bak
 
-# *.mp4
-*.mp4
+**/*.mp4
+**/*.ply
+**/*.pkl
+**/*.npz
+**/*.npy
+**/*.pt
 
 /experiments
 /exp

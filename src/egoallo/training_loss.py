@@ -14,6 +14,7 @@ from torch.nn.parallel import DistributedDataParallel
 
 from egoallo.config import CONFIG_FILE, make_cfg
 from egoallo.utils.setup_logger import setup_logger
+from egoallo.types import DenoiseTrajType
 
 if TYPE_CHECKING:
     from egoallo.config.train.train_config import EgoAlloTrainConfig
@@ -82,10 +83,10 @@ class TrainingLossComputer:
         num_joints = CFG.smplh.num_joints
         assert num_joints == 22
         # Create trajectory using denoising config factory method
-        x_0: Union[AbsoluteDenoiseTraj, VelocityDenoiseTraj, JointsOnlyTraj] = (
+        x_0: DenoiseTrajType = (
             train_config.denoising.create_trajectory(
-                **train_batch.to_denoise_traj(
-                    denoising_config=train_config.denoising,
+                **train_config.denoising.from_ego_data(
+                    train_batch,
                     include_hands=unwrapped_model.config.include_hands
                 ).__dict__
             )

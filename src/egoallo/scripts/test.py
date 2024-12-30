@@ -15,6 +15,7 @@ from jaxtyping import jaxtyped
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+from egoallo.types import DenoiseTrajType
 from egoallo import fncsmpl, fncsmpl_extensions
 from egoallo import transforms as tf
 from egoallo.config import CONFIG_FILE, make_cfg
@@ -94,7 +95,7 @@ class SequenceProcessor:
         runtime_config: EgoAlloTrainConfig,
         inference_config: InferenceConfig,
         device: torch.device,
-    ) -> Tuple[Union[AbsoluteDenoiseTraj, JointsOnlyTraj], Union[AbsoluteDenoiseTraj, JointsOnlyTraj]]:
+    ) -> Tuple[DenoiseTrajType, DenoiseTrajType]:
         """Process a single sequence and return denoised trajectory."""
         # Run denoising with guidance
         # breakpoint()
@@ -112,7 +113,7 @@ class SequenceProcessor:
             num_samples=1,
             device=self.device,
         )
-        gt_traj = batch.to_denoise_traj(denoising_config=runtime_config.denoising)
+        gt_traj = runtime_config.denoising.from_ego_data(batch, include_hands=True)
         return gt_traj, denoised_traj
 
 
@@ -162,8 +163,8 @@ class TestRunner:
 
     def _save_sequence_data(
         self,
-        gt_traj: Union[AbsoluteDenoiseTraj, JointsOnlyTraj, VelocityDenoiseTraj],
-        denoised_traj: Union[AbsoluteDenoiseTraj, JointsOnlyTraj, VelocityDenoiseTraj], 
+        gt_traj: DenoiseTrajType,
+        denoised_traj: DenoiseTrajType, 
         seq_idx: int,
         output_path: Path,
     ) -> None:

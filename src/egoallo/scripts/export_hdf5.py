@@ -59,9 +59,10 @@ def main(
             train_data = EgoTrainingData.load_from_npz(
                 device_body_model, npz_path, include_hands=include_hands
             )
-            output_name = npz_path.stem + ".mp4"
-            train_traj = train_data.to_denoise_traj(include_hands=True, denoising_config=dataclasses.field(default_factory=network.DenoisingConfig))
 
+            # output_name = npz_path.stem + ".mp4"
+            # FIXME: the from_ego_data function is an instance moethod of network.DenoisingConfig
+            # train_traj = network.DenoisingConfig.from_ego_data(train_data, include_hands=True)
 			# TODO: remove this once we have a proper visualization function
             # output_path = Path("./exp/debug_frame_rate_diff/")
             # output_path.mkdir(parents=True, exist_ok=True)

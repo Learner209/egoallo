@@ -31,7 +31,7 @@ from rotary_embedding_torch import RotaryEmbedding
 from torch import Tensor, nn
 
 from egoallo.config import CONFIG_FILE, make_cfg
-from egoallo.types import JointCondMode
+from egoallo.types import JointCondMode, DenoiseTrajType
 
 from .fncsmpl import SmplhModel, SmplhShapedAndPosed
 from .tensor_dataclass import TensorDataclass
@@ -164,7 +164,7 @@ class DenoisingConfig:
 
     def create_trajectory(
         self, *args, **kwargs
-    ) -> Union["AbsoluteDenoiseTraj", "VelocityDenoiseTraj", "JointsOnlyTraj"]:
+    ) -> DenoiseTrajType:
         """Factory method to create appropriate trajectory object based on configuration."""
         if self.denoising_mode == "joints_only":
             return JointsOnlyTraj(*args, **kwargs)
@@ -258,6 +258,63 @@ class DenoisingConfig:
             )
 
         return modality_dims
+
+    @jaxtyped(typechecker=typeguard.typechecked)
+    def from_ego_data(
+        self,
+        ego_data: "EgoTrainingData",
+        include_hands: bool = True,
+    ) -> DenoiseTrajType:
+        """Convert EgoTrainingData instance to appropriate DenoiseTraj based on config.
+        
+        Args:
+            ego_data: Input EgoTrainingData instance
+            include_hands: Whether to include hand data in the output trajectory
+            
+        Returns:
+            Appropriate trajectory object based on denoising mode
+        """
+        *batch, time, _ = ego_data.T_world_root.shape
+
+        # Extract rotation and translation from T_world_root
+        R_world_root = SO3(ego_data.T_world_root[..., :4]).as_matrix()
+        t_world_root = ego_data.T_world_root[..., 4:7]
+
+        # Convert body quaternions to rotation matrices
+        body_rotmats = SO3(ego_data.body_quats).as_matrix()
+
+        # Handle hand data if present
+        hand_rotmats = None
+        if ego_data.hand_quats is not None and include_hands:
+            hand_rotmats = SO3(ego_data.hand_quats).as_matrix()
+
+        # Create appropriate trajectory based on denoising mode
+        if self.denoising_mode == "joints_only":
+            return JointsOnlyTraj(
+                joints=ego_data.joints_wrt_world,
+            )
+        elif self.is_velocity_mode():
+            # For velocity mode, create VelocityDenoiseTraj
+            traj = VelocityDenoiseTraj(
+                betas=ego_data.betas.expand((*batch, time, 16)),
+                body_rotmats=body_rotmats,
+                contacts=ego_data.contacts,
+                hand_rotmats=hand_rotmats,
+                R_world_root=R_world_root,
+                t_world_root=t_world_root,
+            )
+            # VelocityDenoiseTraj will compute temporal offsets in __post_init__
+            return traj
+        else:
+            # For absolute mode, create AbsoluteDenoiseTraj
+            return AbsoluteDenoiseTraj(
+                betas=ego_data.betas.expand((*batch, time, 16)),
+                body_rotmats=body_rotmats,
+                contacts=ego_data.contacts,
+                hand_rotmats=hand_rotmats,
+                R_world_root=R_world_root,
+                t_world_root=t_world_root,
+            )
 
 
 class BaseDenoiseTraj(TensorDataclass, ABC, Generic[T]):

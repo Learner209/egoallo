@@ -1,5 +1,7 @@
 from pathlib import Path
-from typing import Dict, List, Literal, Optional, Tuple, Union, TypeVar
+from typing import Dict, List, Literal, Optional, Tuple, Union, TypeVar, TYPE_CHECKING
+if TYPE_CHECKING:
+    from egoallo.network import AbsoluteDenoiseTraj, JointsOnlyTraj, VelocityDenoiseTraj
 
 import numpy as np
 import torch
@@ -64,3 +66,5 @@ JointCondMode = Literal[
 ]
 
 LossWeights = Dict[str, float]
+
+DenoiseTrajType = Union["AbsoluteDenoiseTraj", "JointsOnlyTraj", "VelocityDenoiseTraj"]

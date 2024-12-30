@@ -13,6 +13,7 @@ from torch import Tensor
 from tqdm import tqdm
 from videoio import VideoWriter
 
+from egoallo.types import DenoiseTrajType
 from egoallo.fncsmpl import (
     SE3,
     SO3,
@@ -248,7 +249,7 @@ class SMPLViewer(BaseRenderer):
 
     def render_sequence(
         self,
-        denoised_traj: Union[AbsoluteDenoiseTraj, VelocityDenoiseTraj, JointsOnlyTraj],
+        denoised_traj: DenoiseTrajType,
         body_model: SmplhModel,
         output_path: str = "output.mp4",
     ) -> None:
@@ -433,7 +434,7 @@ class SMPLViewer(BaseRenderer):
 
 
 def visualize_ego_training_data(
-    denoised_traj: Union[AbsoluteDenoiseTraj, VelocityDenoiseTraj, JointsOnlyTraj],
+    denoised_traj: DenoiseTrajType,
     body_model: SmplhModel,
     output_path: str = "output.mp4",
 ) -> None:
