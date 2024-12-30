@@ -18,10 +18,10 @@ from egoallo.types import DenoiseTrajType
 
 if TYPE_CHECKING:
     from egoallo.config.train.train_config import EgoAlloTrainConfig
+    from .network import AbsoluteDenoiseTraj, VelocityDenoiseTraj, JointsOnlyTraj
 
 from . import network
 from .data.dataclass import EgoTrainingData
-from .network import AbsoluteDenoiseTraj, VelocityDenoiseTraj, JointsOnlyTraj
 from .sampling import CosineNoiseScheduleConstants
 from .transforms import SO3
 from .types import LossWeights
@@ -112,7 +112,7 @@ class TrainingLossComputer:
         x_t_packed = (
             torch.sqrt(alpha_bar_t) * x_0_packed + torch.sqrt(1.0 - alpha_bar_t) * eps
         )
-        x_t_unpacked: Union[VelocityDenoiseTraj, AbsoluteDenoiseTraj, JointsOnlyTraj] = train_config.denoising.unpack_traj(x_t_packed, include_hands=unwrapped_model.config.include_hands, project_rotmats=False) # type: ignore
+        x_t_unpacked: DenoiseTrajType = train_config.denoising.unpack_traj(x_t_packed, include_hands=unwrapped_model.config.include_hands, project_rotmats=False) # type: ignore
 
         # define per-time step weighting scheme and construct weighting function.
         weight_t = self.weight_t[t].to(device)

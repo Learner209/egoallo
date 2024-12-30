@@ -16,6 +16,9 @@ import glob
 from typing import Optional, Tuple
 from torch import Tensor
 from pathlib import Path
+from jaxtyping import Float, jaxtyped
+import typeguard
+from pathlib import Path
 
 from yacs.config import CfgNode as CN
 # from egoego.config import make_cfg, CONFIG_FILE
@@ -25,11 +28,6 @@ from yacs.config import CfgNode as CN
 
 from egoallo.utils.setup_logger import setup_logger
 local_logger = setup_logger(output=None, name=__name__)
-
-
-# type annotation type aliases
-NDArray = np.ndarray
-Tensor = torch.Tensor
 
 def find_numerical_key_in_dict(d):
     res = []
@@ -246,9 +244,10 @@ def ensure_path(path: str | Path) -> Path:
     """Convert path-like object to Path."""
     return Path(path) if not isinstance(path, Path) else path
 
+@jaxtyped(typechecker=typeguard.typechecked)
 def procrustes_align(
-    points_y: Tensor,
-    points_x: Tensor,
+    points_y: Float[Tensor, "*batch time 3"],
+    points_x: Float[Tensor, "*batch time 3"],
     fix_scale: bool = False,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """

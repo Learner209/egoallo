@@ -15,6 +15,10 @@ from egoallo.evaluation.metrics import EgoAlloEvaluationMetrics
 from egoallo.transforms import SO3
 from egoallo.utilities import procrustes_align
 from egoallo.utils.setup_logger import setup_logger
+from jaxtyping import Float, jaxtyped
+from torch import Tensor
+
+import typeguard
 
 from .base import BaseEvaluator
 from egoallo.constants import (
@@ -45,9 +49,12 @@ class BodyEvaluator(BaseEvaluator):
         """Load the SMPL body model."""
         return fncsmpl.SmplhModel.load(model_path).to(self.device)
 
+    @classmethod
+    @jaxtyped(typechecker=typeguard.typechecked)
     def compute_foot_skate(
-        self,
+        cls,
         pred_Ts_world_joint: BatchedJointTransforms,
+        device: torch.device,
     ) -> FloatArray:
         """Compute foot skate metric in millimeters."""
         num_samples, time = pred_Ts_world_joint.shape[
@@ -58,7 +65,7 @@ class BodyEvaluator(BaseEvaluator):
         pred_Ts_world_joint = pred_Ts_world_joint.clone()
         pred_Ts_world_joint[..., 6] -= torch.min(pred_Ts_world_joint[..., 6])
 
-        foot_indices = torch.tensor(FOOT_INDICES, device=self.device)  # [4]
+        foot_indices = torch.tensor(FOOT_INDICES, device=device)  # [4]
         foot_positions = pred_Ts_world_joint[:, :, foot_indices, 4:7]  # [N, T, 4, 3]
         foot_positions_diff = (
             foot_positions[:, 1:, :, :2] - foot_positions[:, :-1, :, :2]
@@ -69,7 +76,7 @@ class BodyEvaluator(BaseEvaluator):
 
         H_thresh = torch.tensor(
             FOOT_HEIGHT_THRESHOLDS,
-            device=self.device,
+            device=device,
             dtype=torch.float32,
         )
 
@@ -84,15 +91,19 @@ class BodyEvaluator(BaseEvaluator):
 
         return fs_per_sample.cpu().numpy()
 
+
+    @classmethod
+    @jaxtyped(typechecker=typeguard.typechecked)
     def compute_foot_contact(
-        self,
+        cls,
         pred_Ts_world_joint: BatchedJointTransforms,
+        device: torch.device,
     ) -> FloatArray:
         """Compute foot contact metric as a ratio of frames with proper ground contact."""
-        foot_indices = torch.tensor(FOOT_INDICES, device=self.device)
+        foot_indices = torch.tensor(FOOT_INDICES, device=device)
         H_thresh = torch.tensor(
             FOOT_HEIGHT_THRESHOLDS,
-            device=self.device,
+            device=device,
             dtype=torch.float32,
         )
 
@@ -109,10 +120,13 @@ class BodyEvaluator(BaseEvaluator):
 
         return contact_ratio.cpu().numpy()
 
+    @classmethod
+    @jaxtyped(typechecker=typeguard.typechecked)
     def compute_head_ori(
-        self,
+        cls,
         label_Ts_world_joint: JointTransforms,
         pred_Ts_world_joint: BatchedJointTransforms,
+        device: torch.device,
     ) -> FloatArray:
         """Compute head orientation error."""
         pred_head_rot = pred_Ts_world_joint[:, :, HEAD_JOINT_INDEX, :4]
@@ -125,7 +139,7 @@ class BodyEvaluator(BaseEvaluator):
         pred_matrix = pred_matrix.squeeze(0)  # Now shape: [127, 3, 3]
         # Use transpose() to only transpose last two dimensions
         matrix_errors = pred_matrix @ label_matrix.transpose(-2, -1) - torch.eye(
-            3, device=self.device
+            3, device=device
         )
         errors = torch.linalg.norm(
             matrix_errors.reshape(pred_Ts_world_joint.shape[0], -1, 9), dim=-1
@@ -134,66 +148,71 @@ class BodyEvaluator(BaseEvaluator):
 
         return mean_errors.cpu().numpy()
 
+    @classmethod
     def compute_head_trans(
-        self,
-        label_Ts_world_joint: JointTransforms,
-        pred_Ts_world_joint: BatchedJointTransforms,
+        cls,
+        label_Ts_world_joint: Float[Tensor, "time num_joints 3"],
+        pred_Ts_world_joint: Float[Tensor, "num_samples time num_joints 3"],
+        device: torch.device,
     ) -> FloatArray:
         """Compute head translation error in millimeters."""
         errors = (
-            pred_Ts_world_joint[:, :, HEAD_JOINT_INDEX, 4:7]
-            - label_Ts_world_joint[:, HEAD_JOINT_INDEX, 4:7]
+            pred_Ts_world_joint[:, :, HEAD_JOINT_INDEX]
+            - label_Ts_world_joint[:, HEAD_JOINT_INDEX]
         )
         mean_errors = (
             torch.mean(torch.linalg.norm(errors, dim=-1), dim=-1) * 1000.0
         )  # Convert to mm
         return mean_errors.cpu().numpy()
 
+    @classmethod
+    @jaxtyped(typechecker=typeguard.typechecked)
     def compute_mpjpe(
-        self,
-        label_T_world_root: RootTransforms,
-        label_Ts_world_joint: JointTransforms,
-        pred_T_world_root: BatchedRootTransforms,
-        pred_Ts_world_joint: BatchedJointTransforms,
+        cls,
+        label_root_pos: Float[Tensor, "time 3"],
+        label_joint_pos: Float[Tensor, "time num_joints 3"],
+        pred_root_pos: Float[Tensor, "num_samples time 3"],
+        pred_joint_pos: Float[Tensor, "num_samples time num_joints 3"],
         per_frame_procrustes_align: bool,
+        device: torch.device,
     ) -> FloatArray:
-        """Compute Mean Per Joint Position Error."""
-        num_samples = pred_Ts_world_joint.shape[0]
+        """Compute Mean Per Joint Position Error in millimeters."""
+        num_samples = pred_joint_pos.shape[0]
 
         # Concatenate root and joints
-        label_Ts_world_joint = torch.cat(
-            [label_T_world_root.unsqueeze(1), label_Ts_world_joint], dim=1
-        )  # [T, J+1, 7]
-        pred_Ts_world_joint = torch.cat(
-            [pred_T_world_root.unsqueeze(2), pred_Ts_world_joint], dim=2
-        )  # [N, T, J+1, 7]
+        label_positions = torch.cat(
+            [label_root_pos.unsqueeze(1), label_joint_pos], dim=1
+        )  # [T, J+1, 3]
+        pred_positions = torch.cat(
+            [pred_root_pos.unsqueeze(2), pred_joint_pos], dim=2
+        )  # [N, T, J+1, 3]
 
-        pred_joint_positions = pred_Ts_world_joint[:, :, :, 4:7]  # [N, T, J+1, 3]
-        label_joint_positions = (
-            label_Ts_world_joint[:, :, 4:7].unsqueeze(0).repeat(num_samples, 1, 1, 1)
-        )  # [N, T, J+1, 7]
+        # Expand label positions to match prediction batch size
+        label_positions = label_positions.unsqueeze(0).repeat(num_samples, 1, 1, 1)
 
         if per_frame_procrustes_align:
-            pred_joint_positions = self.procrustes_align(
-                points_y=label_joint_positions,
-                points_x=pred_joint_positions,
+            pred_positions = cls.procrustes_align(
+                points_y=label_positions,
+                points_x=pred_positions,
                 output="aligned_x",
+                device=device,
             )
 
-        position_differences = (
-            pred_joint_positions - label_joint_positions
-        )  # [N, T, J+1, 3]
+        position_differences = pred_positions - label_positions  # [N, T, J+1, 3]
         pjpe = torch.linalg.norm(position_differences, dim=-1) * 1000.0  # [N, T, J+1]
         mpjpe = torch.mean(pjpe.reshape(num_samples, -1), dim=-1)  # [N]
 
         return mpjpe.cpu().numpy()
 
+    @classmethod
+    @jaxtyped(typechecker=typeguard.typechecked)
     def procrustes_align(
-        self,
-        points_y: torch.Tensor,
-        points_x: torch.Tensor,
+        cls,
+        points_y: Float[Tensor, "batch time 3"],
+        points_x: Float[Tensor, "batch time 3"],
         output: ProcrustesMode,
         fix_scale: bool = False,
+        device: torch.device = torch.device("cpu"),
     ) -> ProcrustesOutput:
         """Perform Procrustes alignment between point sets."""
         s, R, t = procrustes_align(points_y, points_x, fix_scale)
@@ -437,6 +456,7 @@ class BodyEvaluator(BaseEvaluator):
             unsqueeze_pred=True,
         )
 
+		# MPJPE under COCO kpts 
         if coco_regressor is not None:
             gt_mesh = gt_posed.lbs()
             gt_coco_joints = torch.einsum(
@@ -461,18 +481,18 @@ class BodyEvaluator(BaseEvaluator):
             )
             metrics["coco_mpjpe"] = float(coco_errors.mean().item())
 
-        # logger.info(f"Computed metrics for {path}: {metrics}")
-
         return metrics
 
+    @classmethod
     def compute_masked_error(
-        self,
+        cls,
         gt: torch.Tensor,
         pred: torch.Tensor,
         mask: Optional[torch.Tensor] = None,
         norm_dim: int = -1,
         unsqueeze_gt: bool = True,
         unsqueeze_pred: bool = True,
+        device: torch.device = torch.device("cpu"),
     ) -> float:
         """Compute masked error between ground truth and predicted tensors.
 
@@ -496,7 +516,7 @@ class BodyEvaluator(BaseEvaluator):
         # Create mask if not provided
         if mask is None:
             mask = torch.ones(
-                (gt.shape[0], gt.shape[1]), dtype=torch.bool, device=self.device
+                (gt.shape[0], gt.shape[1]), dtype=torch.bool, device=device
             )
         mask_sum = mask.sum()
 

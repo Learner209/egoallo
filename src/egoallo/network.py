@@ -11,6 +11,8 @@ from typing import (
     TypeVar,
     Union,
     assert_never,
+    Dict,
+    Optional,
 )
 
 import torch
@@ -31,7 +33,7 @@ from rotary_embedding_torch import RotaryEmbedding
 from torch import Tensor, nn
 
 from egoallo.config import CONFIG_FILE, make_cfg
-from egoallo.types import JointCondMode, DenoiseTrajType
+from egoallo.types import DenoiseTrajType, JointCondMode
 
 from .fncsmpl import SmplhModel, SmplhShapedAndPosed
 from .tensor_dataclass import TensorDataclass
@@ -487,6 +489,42 @@ class JointsOnlyTraj(BaseDenoiseTraj):
         """Encode joints-only trajectory into latent space."""
         return encoders["joints"](self.joints.reshape((batch, time, -1)))
 
+    def _compute_metrics(
+        self,
+        other: "JointsOnlyTraj",
+        body_model: Optional[SmplhModel] = None,
+        device: torch.device = torch.device("cpu"),
+    ) -> Dict[str, float]:
+        """Compute metrics between this trajectory and another.
+        Only computes joint position based metrics since this class only has joint data.
+        """
+        # TEMPORARY_FIX: import BodyEvaluator lazily to avoid circular imports
+        from egoallo.evaluation.body_evaluator import BodyEvaluator
+        metrics = {}
+
+        metrics["mpjpe"] = float(
+            BodyEvaluator.compute_mpjpe(
+                label_root_pos=other.joints[:, 0, :],  # [T, 3]
+                label_joint_pos=other.joints[..., 1:22, :],  # [T, 21, 3]
+                pred_root_pos=self.joints[:, 0, :],  # [N, T, 3]
+                pred_joint_pos=self.joints[..., 1:22, :],  # [N, T, 21, 3]
+                per_frame_procrustes_align=False,
+                device=device,
+            ).mean()
+        )
+
+        metrics["pampjpe"] = float(
+            BodyEvaluator.compute_mpjpe(
+                label_root_pos=other.joints[:, 0, :],  # [T, 3]
+                label_joint_pos=other.joints[..., 1:22, :],  # [T, 21, 3]
+                pred_root_pos=self.joints[:, 0, :],  # [N, T, 3]
+                pred_joint_pos=self.joints[..., 1:22, :],  # [N, T, 21, 3]
+                per_frame_procrustes_align=True,
+                device=device,
+            ).mean()
+        )
+
+        return metrics
 
 @dataclasses.dataclass
 class AbsoluteDenoiseTraj(BaseDenoiseTraj):
@@ -693,6 +731,137 @@ class AbsoluteDenoiseTraj(BaseDenoiseTraj):
         if self.hand_rotmats is not None:
             encoded = encoded + encoders["hand_rotmats"](self.hand_rotmats.reshape((batch, time, -1)))
         return encoded
+
+    def _compute_metrics(
+        self,
+        other: "AbsoluteDenoiseTraj",
+        body_model: Optional[SmplhModel] = None,
+        device: torch.device = torch.device("cpu"),
+    ) -> Dict[str, float]:
+        """Compute metrics between this trajectory and another.
+        Computes all relevant metrics since this class has complete pose data.
+        """
+        # TEMPORARY_FIX: import BodyEvaluator lazily to avoid circular imports
+        from egoallo.evaluation.body_evaluator import BodyEvaluator
+        metrics = {}
+
+        assert body_model is not None
+        gt_shaped = body_model.with_shape(other.betas)
+        gt_posed = gt_shaped.with_pose_decomposed(
+            T_world_root=SE3.from_rotation_and_translation(
+                SO3.from_matrix(other.R_world_root),
+                other.t_world_root,
+            ).parameters()
+            .to(device),
+            body_quats=SO3.from_matrix(other.body_rotmats).wxyz.to(device),
+        )
+        pred_shaped = body_model.with_shape(self.betas)
+        pred_posed = pred_shaped.with_pose_decomposed(
+            T_world_root=SE3.from_rotation_and_translation(
+                SO3.from_matrix(self.R_world_root),
+                self.t_world_root,
+            ).parameters()
+            .to(device),
+            body_quats=SO3.from_matrix(self.body_rotmats).wxyz.to(device),
+        )
+
+        # Body shape error
+        metrics["betas_error"] = float(
+            BodyEvaluator.compute_masked_error(
+                gt=other.betas,
+                pred=self.betas,
+                device=device
+            )
+        )
+
+        # Body rotation error
+        metrics["body_rotmats_error"] = float(
+            BodyEvaluator.compute_masked_error(
+                gt=other.body_rotmats,
+                pred=self.body_rotmats,
+                device=device
+            )
+        )
+
+        # Root transform errors
+        metrics["R_world_root_error"] = float(
+            BodyEvaluator.compute_masked_error(
+                gt=other.R_world_root,
+                pred=self.R_world_root,
+                device=device
+            )
+        )
+
+        metrics["t_world_root_error"] = float(
+            BodyEvaluator.compute_masked_error(
+                gt=other.t_world_root,
+                pred=self.t_world_root,
+                device=device
+            )
+        )
+
+        # Foot metrics
+        metrics["foot_skate"] = float(
+            BodyEvaluator.compute_foot_skate(
+                pred_Ts_world_joint=self.joints[..., 1:22, :],
+                device=device
+            ).mean()
+        )
+
+        metrics["foot_contact"] = float(
+            BodyEvaluator.compute_foot_contact(
+                pred_Ts_world_joint=self.Ts_world_joint,
+                device=device
+            ).mean()
+        )
+
+        metrics["mpjpe"] = float(
+            BodyEvaluator.compute_mpjpe(
+                label_root_pos=gt_posed.T_world_root,  # [T, 7]
+                label_joint_pos=gt_posed.Ts_world_joint[..., :21, :],  # [T, 21, 7]
+                pred_root_pos=pred_posed.T_world_root,  # [N, T, 7]
+                pred_joint_pos=pred_posed.Ts_world_joint[..., :21, :],  # [N, T, 21, 7]
+                per_frame_procrustes_align=False,
+                device=device
+            ).mean()
+        )
+
+        metrics["pampjpe"] = float(
+            BodyEvaluator.compute_mpjpe(
+                label_T_world_root=gt_posed.T_world_root,  # [T, 7]
+                label_Ts_world_joint=gt_posed.Ts_world_joint[..., :21, :],  # [T, 21, 7]
+                pred_T_world_root=sampled_T_world_root,  # [N, T, 7]
+                pred_Ts_world_joint=sampled_Ts_world_joint,  # [N, T, 21, 7]
+                per_frame_procrustes_align=True,
+            ).mean()
+        )
+
+        metrics["head_ori"] = float(
+            BodyEvaluator.compute_head_ori(
+                label_Ts_world_joint=gt_posed.Ts_world_joint[..., :21, :],  # [T, 21, 7]
+                pred_Ts_world_joint=sampled_Ts_world_joint,  # [N, T, 21, 7]
+            ).mean()
+        )
+
+        metrics["head_trans"] = float(
+            BodyEvaluator.compute_head_trans(
+                label_Ts_world_joint=gt_posed.Ts_world_joint[..., :21, :],  # [T, 21, 7]
+                pred_Ts_world_joint=sampled_Ts_world_joint,  # [N, T, 21, 7]
+            ).mean()
+        )
+
+        metrics["foot_skate"] = float(
+            BodyEvaluator.compute_foot_skate(
+                pred_Ts_world_joint=sampled_Ts_world_joint,  # [N, T, 21, 7]
+            ).mean()
+        )
+
+        metrics["foot_contact"] = float(
+            BodyEvaluator.compute_foot_contact(
+                pred_Ts_world_joint=sampled_Ts_world_joint,  # [N, T, 21, 7]
+            ).mean()
+        )
+        return metrics
 
 @dataclasses.dataclass
 class VelocityDenoiseTraj(BaseDenoiseTraj):
@@ -1060,6 +1229,83 @@ class VelocityDenoiseTraj(BaseDenoiseTraj):
         if self.hand_rotmats is not None:
             encoded = encoded + encoders["hand_rotmats"](self.hand_rotmats.reshape((batch, time, -1)))
         return encoded
+
+    def _compute_metrics(
+        self,
+        other: "VelocityDenoiseTraj", 
+        body_model: Optional[SmplhModel] = None,
+        device: torch.device = torch.device("cpu"),
+    ) -> Dict[str, float]:
+        """Compute metrics between this trajectory and another.
+        Focuses on velocity-based metrics while still computing absolute pose errors.
+        """
+        metrics = {}
+
+        # First reconstruct absolute poses
+        self_posed = self.apply_to_body(body_model=body_model)
+        other_posed = other.apply_to_body(body_model=body_model)
+
+        # Body shape error (absolute)
+        # TEMPORARY_FIX: import BodyEvaluator lazily to avoid circular imports
+        from egoallo.evaluation.body_evaluator import BodyEvaluator
+        metrics["betas_error"] = float(
+            BodyEvaluator.compute_masked_error(
+                gt=other.betas,
+                pred=self.betas,
+                device=device
+            )
+        )
+
+        # Velocity-based root transform errors
+        metrics["R_world_root_vel_error"] = float(
+            BodyEvaluator.compute_masked_error(
+                gt=other.R_world_root_tm1_t,
+                pred=self.R_world_root_tm1_t,
+                device=device
+            )
+        )
+
+        metrics["t_world_root_vel_error"] = float(
+            BodyEvaluator.compute_masked_error(
+                gt=other.t_world_root_tm1_t,
+                pred=self.t_world_root_tm1_t,
+                device=device
+            )
+        )
+
+        # Acceleration errors
+        metrics["R_world_root_acc_error"] = float(
+            BodyEvaluator.compute_masked_error(
+                gt=other.R_world_root_acc,
+                pred=self.R_world_root_acc,
+                device=device
+            )
+        )
+
+        metrics["t_world_root_acc_error"] = float(
+            BodyEvaluator.compute_masked_error(
+                gt=other.t_world_root_acc,
+                pred=self.t_world_root_acc,
+                device=device
+            )
+        )
+
+        # Compute foot metrics on reconstructed poses
+        metrics["foot_skate"] = float(
+            BodyEvaluator.compute_foot_skate(
+                pred_Ts_world_joint=self_posed.Ts_world_joint,
+                device=device
+            ).mean()
+        )
+
+        metrics["foot_contact"] = float(
+            BodyEvaluator.compute_foot_contact(
+                pred_Ts_world_joint=self_posed.Ts_world_joint,
+                device=device
+            ).mean()
+        )
+
+        return metrics
 
 
 @jaxtyped(typechecker=typeguard.typechecked)

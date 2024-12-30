@@ -9,14 +9,15 @@ from egoallo.transforms import SO3, SE3
 from egoallo import network
 from torch import Tensor
 
-from egoallo.types import JointCondMode
+from egoallo.types import DenoiseTrajType, JointCondMode
 
 from .. import fncsmpl, fncsmpl_extensions
 from .. import transforms as tf
 from ..tensor_dataclass import TensorDataclass
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
-from ..network import AbsoluteDenoiseTraj, JointsOnlyTraj, EgoDenoiserConfig
+if TYPE_CHECKING:
+    from ..network import EgoDenoiserConfig
 from ..viz.smpl_viewer import visualize_ego_training_data as viz_ego_data
 
 from jaxtyping import Float, jaxtyped
@@ -160,7 +161,7 @@ class EgoTrainingData(TensorDataclass):
 
     @staticmethod
     def visualize_ego_training_data(
-        data: AbsoluteDenoiseTraj,
+        data: DenoiseTrajType,
         body_model: fncsmpl.SmplhModel,
         output_path: str = "output.mp4",
     ):
@@ -169,41 +170,6 @@ class EgoTrainingData(TensorDataclass):
             body_model=body_model,
             output_path=output_path,
         )
-
-    def to_denoise_traj(self, denoising_config: network.DenoisingConfig, include_hands: bool = True) -> Union[AbsoluteDenoiseTraj, JointsOnlyTraj]:
-        """Convert EgoTrainingData instance to AbsoluteDenoiseTraj instance."""
-        *batch, time, _ = self.T_world_root.shape
-
-        # Extract rotation and translation from T_world_root
-        R_world_root = SO3(self.T_world_root[..., :4]).as_matrix()
-        t_world_root = self.T_world_root[..., 4:7]
-
-        # Convert body quaternions to rotation matrices
-        body_rotmats = SO3(self.body_quats).as_matrix()
-
-        # Handle hand data if present
-        hand_rotmats = None
-        if self.hand_quats is not None and include_hands:
-            hand_rotmats = SO3(self.hand_quats).as_matrix()
-
-        if denoising_config.joint_cond_mode == "absolute" or denoising_config.joint_cond_mode == "absrel_jnts":
-            # Create and return AbsoluteDenoiseTraj instance
-            return AbsoluteDenoiseTraj(
-                betas=self.betas.expand((*batch, time, 16)),
-                body_rotmats=body_rotmats,
-                contacts=self.contacts,
-                hand_rotmats=hand_rotmats,
-                R_world_root=R_world_root,
-                t_world_root=t_world_root,
-            )
-        elif denoising_config.joint_cond_mode == "joints_only":
-            # Create and return JointsOnlyTraj instance
-            return JointsOnlyTraj(
-                joints=self.joints_wrt_world,
-            )
-        else:
-            assert_never(denoising_config.joint_cond_mode)
-
 
 def collate_dataclass[T](batch: list[T]) -> T:
     """Collate function that works for dataclasses."""

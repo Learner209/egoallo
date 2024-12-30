@@ -13,6 +13,7 @@ from egoallo import fncsmpl
 from egoallo.guidance_optimizer_jax import GuidanceMode
 from egoallo.utilities import procrustes_align
 from egoallo.utils.setup_logger import setup_logger
+import typeguard
 
 from .base import BaseEvaluator
 from egoallo.constants import EGOEXO_NAMES_LEFT, EGOEXO_NAMES_RIGHT, VERTEX_IDS
@@ -167,10 +168,11 @@ class HandEvaluator(BaseEvaluator):
 
         return a - aligned_b
 
+    @jaxtyped(typechecker=typeguard.typechecked)
     def procrustes_align(
         self,
-        points_y: torch.Tensor,
-        points_x: torch.Tensor,
+        points_y: Float[Tensor, "*batch time 3"],
+        points_x: Float[Tensor, "*batch time 3"],
         output: ProcrustesMode,
         fix_scale: bool = False,
     ) -> ProcrustesOutput:

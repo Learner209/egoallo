@@ -1,7 +1,9 @@
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Dict, Optional, Union
+from jaxtyping import jaxtyped, Float
 from egoallo import fncsmpl
+import typeguard
 
 import torch
 from torch import Tensor
@@ -38,13 +40,16 @@ class BaseEvaluator(ABC):
         """Load the body model from file."""
         pass
 
+    @classmethod
     @abstractmethod
+    @jaxtyped(typechecker=typeguard.typechecked)
     def procrustes_align(
-        self,
-        points_y: Tensor,
-        points_x: Tensor,
+        cls,
+        points_y: Float[Tensor, "*batch time 3"],
+        points_x: Float[Tensor, "*batch time 3"],
         output: ProcrustesMode,
         fix_scale: bool = False,
+        device: torch.device = torch.device("cpu"),
     ) -> ProcrustesOutput:
         """
         Perform Procrustes alignment between point sets.
