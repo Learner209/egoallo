@@ -143,7 +143,7 @@ class TestRunner:
             if hasattr(runtime_config, field.name):
                 setattr(runtime_config, field.name, getattr(self.inference_config, field.name))
 
-		# FIXME: this is a temporary fix to use ExtendedBatchCollator for testing.
+        # FIXME: this is a temporary fix to use ExtendedBatchCollator for testing.
         runtime_config.data_collate_fn = "TensorOnlyDataclassBatchCollator"
         self.dataloader = torch.utils.data.DataLoader(
             dataset=build_dataset(cfg=runtime_config)(config=runtime_config),
@@ -349,8 +349,8 @@ class TestRunner:
                 desc="Enumerating test loader",
                 ascii=" >=",
             ):
-                if batch_idx == 5:
-                    break
+                # if batch_idx == 5:
+                #     break
 
                 batch = batch.to(self.device)
                 save_gt_vis = (
@@ -378,20 +378,20 @@ class TestRunner:
 
             metrics = denoised_trajs._compute_metrics(gt_trajs, body_model=self.body_model, device=self.device)
             metrics = EgoAlloEvaluationMetrics(**metrics)
-            breakpoint()
+            # breakpoint()
 
         return metrics
 
 
 def main(inference_config: InferenceConfig) -> None:
     """Main entry point."""
-    try:
-        runner = TestRunner(inference_config)
-        eval_metrics = runner.run()
-        eval_metrics.print_metrics(logger=logger, level="info")
-    except Exception as e:
-        logger.error(f"Test run failed: {str(e)}")
-        raise
+    # try:
+    runner = TestRunner(inference_config)
+    eval_metrics = runner.run()
+    eval_metrics.print_metrics(logger=logger, level="info")
+    # except Exception as e:
+    #     logger.error(f"Test run failed: {str(e)}")
+    #     raise
 
 
 if __name__ == "__main__":
