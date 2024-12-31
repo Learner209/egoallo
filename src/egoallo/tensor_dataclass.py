@@ -74,6 +74,46 @@ class TensorDataclass:
 
         return _map_impl(fn, self)
 
+    def _dict_map(self, fn: Callable[[str, torch.Tensor], torch.Tensor]) -> Self:
+        """Apply a function to all tensors in the dataclass.
+
+        Also recurses into lists, tuples, and dictionaries.
+
+        Args:
+            fn: The function to apply to each tensor. Takes attribute name and tensor value.
+
+        Returns:
+            A new dataclass.
+        """
+
+        def _map_impl[MapT](
+            fn: Callable[[str, torch.Tensor], torch.Tensor],
+            val: MapT,
+            name: str = "",
+        ) -> MapT:
+            if isinstance(val, torch.Tensor):
+                return fn(name, val)
+            elif isinstance(val, TensorDataclass):
+                # raise NotImplementedError("Not implemented for TensorDataclass")
+                # TODO: only implement for the first level of recursion.
+                return type(val)(**{
+                    k: _map_impl(fn, v, f"{name}" if name else k)
+                    for k, v in vars(val).items()
+                })
+            elif isinstance(val, (list, tuple)):
+                raise NotImplementedError("Not implemented for list or tuple")
+                return type(val)(_map_impl(fn, v, f"{name}[{i}]")
+                               for i, v in enumerate(val))
+            elif isinstance(val, dict):
+                raise NotImplementedError("Not implemented for dict")
+                assert type(val) is dict  # No subclass support.
+                return {k: _map_impl(fn, v, f"{name}[{k}]")
+                       for k, v in val.items()}  # type: ignore
+            else:
+                return val
+
+        return _map_impl(fn, self)
+
     def check_shapes(self, other: "TensorDataclass") -> bool:
         """Check if two TensorDataclass instances have the same shape across all attributes.
 

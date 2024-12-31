@@ -219,16 +219,28 @@ class TestRunner:
         output_dir: Path,
         save_gt_vis: bool = False,
         output_name: Optional[str] = None,
-    ) -> None:
+    ) -> Tuple[DenoiseTrajType, DenoiseTrajType]:
         """Process a batch of sequences."""
+
+        gt_trajs = None # shape: (batch_size, num_timesteps, ...)
+        denoised_trajs = None # shape: (num_samples==batch_size, num_timesteps, ...)
         for seq_idx in range(batch.T_world_cpf.shape[0]):
             # Process sequence to get denoised trajectory
             gt_traj, denoised_traj = processor.process_sequence(
                 batch, self.denoiser, self.runtime_config, self.inference_config, self.device
             )
-            # ! denoised_traj's shape: (num_samples, num_timesteps, ...), gt_traj's shape: (num_timesteps, ...)
-            denoised_traj = denoised_traj
-            gt_traj = gt_traj[seq_idx]
+
+            # breakpoint()
+            if gt_trajs is None:
+                gt_trajs = gt_traj
+            else:
+                gt_trajs = gt_trajs._dict_map(lambda key, value: torch.cat([value, getattr(gt_traj, key)], dim=0) if isinstance(value, torch.Tensor) else value)
+
+            if denoised_trajs is None:
+                denoised_trajs = denoised_traj
+            else:
+                denoised_trajs = denoised_trajs._dict_map(lambda key, value: torch.cat([value, getattr(denoised_traj, key)], dim=0) if isinstance(value, torch.Tensor) else value)
+            
             metrics = denoised_traj._compute_metrics(gt_traj, body_model=self.body_model, device=self.device)
             metrics = EgoAlloEvaluationMetrics(**metrics)
         
@@ -284,8 +296,10 @@ class TestRunner:
                 output_name if output_name else f"sequence_{batch_idx}_{seq_idx}.pt"
             )
             output_path = output_dir / filename
-            if self.runtime_config.denoising.denoising_mode != "joints_only":
-                self._save_sequence_data(gt_traj, denoised_traj, seq_idx, output_path)
+            # if self.runtime_config.denoising.denoising_mode != "joints_only":
+            #     self._save_sequence_data(gt_traj, denoised_traj, seq_idx, output_path)
+
+        return gt_trajs, denoised_trajs
 
     def _compute_metrics(
         self, dir_with_pt_files: Path
@@ -322,6 +336,9 @@ class TestRunner:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_output_dir = Path(temp_dir)
 
+            gt_trajs = None
+            denoised_trajs = None
+
             for batch_idx, batch in tqdm(
                 enumerate(self.dataloader),
                 total=len(self.dataloader),
@@ -335,7 +352,7 @@ class TestRunner:
                 save_gt_vis = (
                     False if self.inference_config.dataset_type == "EgoExoDataset" else True
                 )
-                self._process_batch(
+                gt_traj, denoised_traj = self._process_batch(
                     batch,
                     batch_idx,
                     processor,
@@ -344,28 +361,22 @@ class TestRunner:
                     save_gt_vis=save_gt_vis,
                 )
 
-            # TODO: this is a hack to avoid computing metrics for EgoExo dataset.
-            # breakpoint()
-            if (
-                self.inference_config.compute_metrics
-                and self.inference_config.dataset_type != "EgoExoDataset"
-                and self.runtime_config.denoising.denoising_mode != "joints_only"
-            ):
-                # Create final output directory for saving metrics
-                final_output_dir = Path(self.inference_config.output_dir)
-                final_output_dir.mkdir(exist_ok=True, parents=True)
+                # TODO: the current implementation assumes that the leading `TensorDataClass` batch size dim() returns `1`.
+                if gt_trajs is None:
+                    gt_trajs = gt_traj
+                else:
+                    gt_trajs = gt_trajs._dict_map(lambda key, value: torch.cat([value, getattr(gt_traj, key)], dim=1) if isinstance(value, torch.Tensor) else value)
 
-                # Compute metrics using temp files and save to final directory
-                metrics = self._compute_metrics(temp_output_dir)
-                if metrics:
-                    metrics.save(final_output_dir)
-                return metrics
-            elif self.runtime_config.denoising.denoising_mode == "joints_only":
-                return None
+                if denoised_trajs is None:
+                    denoised_trajs = denoised_traj
+                else:
+                    denoised_trajs = denoised_trajs._dict_map(lambda key, value: torch.cat([value, getattr(denoised_traj, key)], dim=1) if isinstance(value, torch.Tensor) else value)
 
+            metrics = denoised_trajs._compute_metrics(gt_trajs, body_model=self.body_model, device=self.device)
+            metrics = EgoAlloEvaluationMetrics(**metrics)
             # breakpoint()
 
-        return None
+        return metrics
 
 
 def main(inference_config: InferenceConfig) -> None:
