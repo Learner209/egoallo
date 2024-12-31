@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import sys
 from pathlib import Path
-from typing import Optional, Union
+from typing import Optional, Union, TYPE_CHECKING
 
 import numpy as np
 import PIL
@@ -13,7 +13,6 @@ from torch import Tensor
 from tqdm import tqdm
 from videoio import VideoWriter
 
-from egoallo.types import DenoiseTrajType
 from egoallo.fncsmpl import (
     SE3,
     SO3,
@@ -30,6 +29,7 @@ if TYPE_CHECKING:
     from egoallo.data.dataclass import EgoTrainingData
     from egoallo.fncsmpl import SmplhModel
     from egoallo.network import AbsoluteDenoiseTraj, VelocityDenoiseTraj, JointsOnlyTraj
+    from egoallo.types import DenoiseTrajType
 
 # On some systems, EGL does not start properly if OpenGL was already initialized, that's why it's better
 # to keep EGLContext import on top

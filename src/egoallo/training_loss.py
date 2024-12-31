@@ -14,11 +14,10 @@ from torch.nn.parallel import DistributedDataParallel
 
 from egoallo.config import CONFIG_FILE, make_cfg
 from egoallo.utils.setup_logger import setup_logger
-from egoallo.types import DenoiseTrajType
 
 if TYPE_CHECKING:
     from egoallo.config.train.train_config import EgoAlloTrainConfig
-    from .network import AbsoluteDenoiseTraj, VelocityDenoiseTraj, JointsOnlyTraj
+    from egoallo.types import DenoiseTrajType
 
 from . import network
 from .data.dataclass import EgoTrainingData
@@ -162,9 +161,9 @@ class TrainingLossComputer:
         loss_terms: dict[str, Tensor | float] = x_0_pred.compute_loss(other=x_0, mask=train_batch.mask, weight_t=weight_t)
 
         if train_config.denoising.denoising_mode == "joints_only":
-            assert isinstance(x_0, JointsOnlyTraj)
+            assert isinstance(x_0, network.JointsOnlyTraj)
         else:
-            assert isinstance(x_0, (AbsoluteDenoiseTraj, VelocityDenoiseTraj))
+            assert isinstance(x_0, (network.AbsoluteDenoiseTraj, network.VelocityDenoiseTraj))
             # Add joint position loss calculation
             # Get predicted joint positions through forward kinematics
             x_0_posed = x_0_pred.apply_to_body(
@@ -180,6 +179,7 @@ class TrainingLossComputer:
             assert pred_joints.shape == (batch, time, num_joints, 3)
 
             # Get ground truth joints from training batch
+            breakpoint()
             gt_joints = train_batch.joints_wrt_world  # (b, t, 22, 3)
             assert gt_joints.shape == (batch, time, num_joints, 3)
 

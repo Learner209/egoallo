@@ -5,17 +5,18 @@ import logging
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Dict, Optional, Tuple, Union, TYPE_CHECKING
 
 import torch
 import torch.utils.data
-from traitlets import default
 import typeguard
 from jaxtyping import jaxtyped
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from egoallo.types import DenoiseTrajType
+if TYPE_CHECKING:
+    from egoallo.types import DenoiseTrajType
+
 from egoallo import fncsmpl, fncsmpl_extensions
 from egoallo import transforms as tf
 from egoallo.config import CONFIG_FILE, make_cfg
@@ -24,7 +25,7 @@ from egoallo.data import make_batch_collator, build_dataset
 from egoallo.config.train.train_config import (
     EgoAlloTrainConfig,
 )
-from egoallo.joints2smpl.fit_seq import main_call, Joints2SmplFittingConfig
+from egoallo.joints2smpl.fit_seq import joints2smpl_fit_seq, Joints2SmplFittingConfig
 from egoallo.data.dataclass import EgoTrainingData, collate_dataclass
 from egoallo.evaluation.body_evaluator import BodyEvaluator
 from egoallo.evaluation.metrics import EgoAlloEvaluationMetrics
@@ -225,12 +226,36 @@ class TestRunner:
             gt_traj, denoised_traj = processor.process_sequence(
                 batch, self.denoiser, self.runtime_config, self.inference_config, self.device
             )
+            # ! denoised_traj's shape: (num_samples, num_timesteps, ...), gt_traj's shape: (num_timesteps, ...)
+            denoised_traj = denoised_traj
+            gt_traj = gt_traj[seq_idx]
+            metrics = denoised_traj._compute_metrics(gt_traj, body_model=self.body_model, device=self.device)
+            metrics = EgoAlloEvaluationMetrics(**metrics)
+        
             if self.runtime_config.denoising.denoising_mode == "joints_only":
                 # import ipdb; ipdb.set_trace()
                 denoised_traj = denoised_traj[seq_idx]
-                gt_traj = gt_traj[seq_idx]
-                # main_call(Joints2SmplFittingConfig(), denoised_traj.joints.shape[0], denoised_traj.joints.cpu(), output_dir)
-                main_call(Joints2SmplFittingConfig(), gt_traj.joints.shape[0], gt_traj.joints.cpu(), output_dir)
+                # joints2smpl_fit_seq(Joints2SmplFittingConfig(), self.body_model, denoised_traj.joints.shape[0], denoised_traj.joints.cpu(), output_dir)
+                # breakpoint()
+                fit_seq_data: "EgoTrainingData" = joints2smpl_fit_seq(Joints2SmplFittingConfig(), self.body_model, gt_traj.joints.shape[0], gt_traj.joints.cpu(), output_dir)
+                # FIXME: this is a temporary fix to visualize the fit_seq_traj, set denoising mode to absolute to use from_ego_data function from `AbsoluteDenoiseTraj`.
+                _ = self.runtime_config.denoising.denoising_mode
+                self.runtime_config.denoising.denoising_mode = "absolute"
+                fit_seq_traj = self.runtime_config.denoising.from_ego_data(fit_seq_data, include_hands=True)
+                self.runtime_config.denoising.denoising_mode = _
+
+                fit_seq_traj = fit_seq_traj.map(lambda x: x.to(self.device))
+                self.body_model = self.body_model.to(self.device)
+
+                output_path = Path("./exp/debug_frame_rate_diff/")
+                output_path.mkdir(parents=True, exist_ok=True)
+
+                EgoTrainingData.visualize_ego_training_data(
+                    # fit_seq_traj,
+                    gt_traj,
+                    self.body_model,
+                    output_path=str(output_path / "fit_seq_traj.mp4"),
+                )
 
             # Save visualizations if requested
             if self.inference_config.visualize_traj and self.runtime_config.denoising.denoising_mode != "joints_only":
@@ -337,6 +362,8 @@ class TestRunner:
                 return metrics
             elif self.runtime_config.denoising.denoising_mode == "joints_only":
                 return None
+
+            # breakpoint()
 
         return None
 

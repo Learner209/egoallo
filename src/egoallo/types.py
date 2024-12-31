@@ -1,7 +1,6 @@
 from pathlib import Path
-from typing import Dict, List, Literal, Optional, Tuple, Union, TypeVar, TYPE_CHECKING
-if TYPE_CHECKING:
-    from egoallo.network import AbsoluteDenoiseTraj, JointsOnlyTraj, VelocityDenoiseTraj
+from typing import Dict, List, Literal, Optional, Tuple, Union, TypeVar
+from egoallo.network import AbsoluteDenoiseTraj, JointsOnlyTraj, VelocityDenoiseTraj
 
 import numpy as np
 import torch

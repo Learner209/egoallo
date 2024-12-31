@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Union, assert_never
+from typing import Union, assert_never, TYPE_CHECKING
 import numpy as np
 import torch
 import torch.utils.data
@@ -9,7 +9,8 @@ from egoallo.transforms import SO3, SE3
 from egoallo import network
 from torch import Tensor
 
-from egoallo.types import DenoiseTrajType, JointCondMode
+if TYPE_CHECKING:
+    from egoallo.types import DenoiseTrajType
 
 from .. import fncsmpl, fncsmpl_extensions
 from .. import transforms as tf
@@ -119,7 +120,7 @@ class EgoTrainingData(TensorDataclass):
         )
 
         # Get initial x,y position offset (ignoring z)
-        initial_xy = T_world_root[1, 4:6]  # First frame x,y position
+        initial_xy = T_world_root[0, 4:6]  # First frame x,y position
 
         # Align positions by subtracting x,y offset only
         T_world_root_aligned = T_world_root.clone()
@@ -161,7 +162,7 @@ class EgoTrainingData(TensorDataclass):
 
     @staticmethod
     def visualize_ego_training_data(
-        data: DenoiseTrajType,
+        data: "DenoiseTrajType",
         body_model: fncsmpl.SmplhModel,
         output_path: str = "output.mp4",
     ):

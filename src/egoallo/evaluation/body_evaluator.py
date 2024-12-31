@@ -181,10 +181,10 @@ class BodyEvaluator(BaseEvaluator):
 
         # Concatenate root and joints
         label_positions = torch.cat(
-            [label_root_pos.unsqueeze(1), label_joint_pos], dim=1
+            [label_root_pos.unsqueeze(-2), label_joint_pos], dim=-2
         )  # [T, J+1, 3]
         pred_positions = torch.cat(
-            [pred_root_pos.unsqueeze(2), pred_joint_pos], dim=2
+            [pred_root_pos.unsqueeze(-2), pred_joint_pos], dim=-2
         )  # [N, T, J+1, 3]
 
         # Expand label positions to match prediction batch size
@@ -208,8 +208,8 @@ class BodyEvaluator(BaseEvaluator):
     @jaxtyped(typechecker=typeguard.typechecked)
     def procrustes_align(
         cls,
-        points_y: Float[Tensor, "batch time 3"],
-        points_x: Float[Tensor, "batch time 3"],
+        points_y: Float[Tensor, "*batch time 3"],
+        points_x: Float[Tensor, "*batch time 3"],
         output: ProcrustesMode,
         fix_scale: bool = False,
         device: torch.device = torch.device("cpu"),

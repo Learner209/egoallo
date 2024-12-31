@@ -13,6 +13,7 @@ from typing import (
     assert_never,
     Dict,
     Optional,
+    TYPE_CHECKING,
 )
 
 import torch
@@ -33,9 +34,12 @@ from rotary_embedding_torch import RotaryEmbedding
 from torch import Tensor, nn
 
 from egoallo.config import CONFIG_FILE, make_cfg
-from egoallo.types import DenoiseTrajType, JointCondMode
 
-from .fncsmpl import SmplhModel, SmplhShapedAndPosed
+if TYPE_CHECKING:
+    from egoallo.types import DenoiseTrajType, JointCondMode
+    from egoallo.data.dataclass import EgoTrainingData
+
+from .fncsmpl import SmplhModel, SmplhShaped, SmplhShapedAndPosed
 from .tensor_dataclass import TensorDataclass
 from .transforms import SE3, SO3
 
@@ -110,20 +114,21 @@ class DenoisingConfig:
     temporal_window: int = 2
     use_acceleration: bool = False
     loss_weights: dict[str, float] | None = None
-    joint_cond_mode: JointCondMode = "absrel"
+    joint_cond_mode: "JointCondMode" = "absrel"
     include_hands: bool = False
+
     def __post_init__(self):
         if self.loss_weights is None:
             # Default loss weights for absolute mode
             absolute_weights = {
                 "betas": 0.05,
-                "body_rotmats": 1.00,
+                "body_rotmats": 10.0,
                 "contacts": 0.05,
                 "hand_rotmats": 0.00,
-                "R_world_root": 0.5,
-                "t_world_root": 0.5,
-                "joints": 0.25,
-                "foot_skating": 0.1,
+                "R_world_root": 0.25,
+                "t_world_root": 0.25,
+                "joints": 0.0,
+                "foot_skating": 0.01,
                 "velocity": 0.01,
             }
 
@@ -152,9 +157,7 @@ class DenoisingConfig:
                 else absolute_weights
             )
 
-        # Set mode based on joint_cond_mode if not explicitly set
-        if self.denoising_mode == "absolute" and self.is_velocity_joint_cond():
-            self.denoising_mode = "velocity"
+        assert self.is_velocity_joint_cond() and self.denoising_mode == "velocity" or self.denoising_mode == "absolute" or self.denoising_mode == "joints_only"
 
     def is_velocity_joint_cond(self) -> bool:
         """Check if the joint conditioning mode is velocity-based."""
@@ -166,13 +169,16 @@ class DenoisingConfig:
 
     def create_trajectory(
         self, *args, **kwargs
-    ) -> DenoiseTrajType:
+    ) -> "DenoiseTrajType":
         """Factory method to create appropriate trajectory object based on configuration."""
         if self.denoising_mode == "joints_only":
             return JointsOnlyTraj(*args, **kwargs)
         elif self.is_velocity_mode():
             return VelocityDenoiseTraj(*args, **kwargs)
-        return AbsoluteDenoiseTraj(*args, **kwargs)
+        elif self.denoising_mode == "absolute":
+            return AbsoluteDenoiseTraj(*args, **kwargs)
+        else:
+            raise ValueError(f"Invalid denoising mode: {self.denoising_mode}")
 
     def get_d_state(self) -> int:
         """Get the dimension of the state vector."""
@@ -187,7 +193,7 @@ class DenoisingConfig:
 
     @classmethod
     def from_joint_cond_mode(
-        cls, joint_cond_mode: JointCondMode, include_hands: bool, **kwargs
+        cls, joint_cond_mode: "JointCondMode", include_hands: bool, **kwargs
     ) -> "DenoisingConfig":
         """Create config from joint conditioning mode.
 
@@ -266,7 +272,7 @@ class DenoisingConfig:
         self,
         ego_data: "EgoTrainingData",
         include_hands: bool = True,
-    ) -> DenoiseTrajType:
+    ) -> "DenoiseTrajType":
         """Convert EgoTrainingData instance to appropriate DenoiseTraj based on config.
         
         Args:
@@ -504,9 +510,9 @@ class JointsOnlyTraj(BaseDenoiseTraj):
 
         metrics["mpjpe"] = float(
             BodyEvaluator.compute_mpjpe(
-                label_root_pos=other.joints[:, 0, :],  # [T, 3]
+                label_root_pos=other.joints[..., 0, :],  # [T, 3]
                 label_joint_pos=other.joints[..., 1:22, :],  # [T, 21, 3]
-                pred_root_pos=self.joints[:, 0, :],  # [N, T, 3]
+                pred_root_pos=self.joints[..., 0, :],  # [N, T, 3]
                 pred_joint_pos=self.joints[..., 1:22, :],  # [N, T, 21, 3]
                 per_frame_procrustes_align=False,
                 device=device,
@@ -515,9 +521,9 @@ class JointsOnlyTraj(BaseDenoiseTraj):
 
         metrics["pampjpe"] = float(
             BodyEvaluator.compute_mpjpe(
-                label_root_pos=other.joints[:, 0, :],  # [T, 3]
+                label_root_pos=other.joints[..., 0, :],  # [T, 3]
                 label_joint_pos=other.joints[..., 1:22, :],  # [T, 21, 3]
-                pred_root_pos=self.joints[:, 0, :],  # [N, T, 3]
+                pred_root_pos=self.joints[..., 0, :],  # [N, T, 3]
                 pred_joint_pos=self.joints[..., 1:22, :],  # [N, T, 21, 3]
                 per_frame_procrustes_align=True,
                 device=device,
@@ -803,14 +809,14 @@ class AbsoluteDenoiseTraj(BaseDenoiseTraj):
         # Foot metrics
         metrics["foot_skate"] = float(
             BodyEvaluator.compute_foot_skate(
-                pred_Ts_world_joint=self.joints[..., 1:22, :],
+                pred_Ts_world_joint=pred_posed.Ts_world_joint[..., :21, :],
                 device=device
             ).mean()
         )
 
         metrics["foot_contact"] = float(
             BodyEvaluator.compute_foot_contact(
-                pred_Ts_world_joint=self.Ts_world_joint,
+                pred_Ts_world_joint=pred_posed.Ts_world_joint[..., :21, :],
                 device=device
             ).mean()
         )
@@ -828,37 +834,42 @@ class AbsoluteDenoiseTraj(BaseDenoiseTraj):
 
         metrics["pampjpe"] = float(
             BodyEvaluator.compute_mpjpe(
-                label_T_world_root=gt_posed.T_world_root,  # [T, 7]
-                label_Ts_world_joint=gt_posed.Ts_world_joint[..., :21, :],  # [T, 21, 7]
-                pred_T_world_root=sampled_T_world_root,  # [N, T, 7]
-                pred_Ts_world_joint=sampled_Ts_world_joint,  # [N, T, 21, 7]
+                label_root_pos=gt_posed.T_world_root,  # [T, 7]
+                label_joint_pos=gt_posed.Ts_world_joint[..., :21, :],  # [T, 21, 7]
+                pred_root_pos=pred_posed.T_world_root,  # [N, T, 7]
+                pred_joint_pos=pred_posed.Ts_world_joint[..., :21, :],  # [N, T, 21, 7]
                 per_frame_procrustes_align=True,
+                device=device,
             ).mean()
         )
 
         metrics["head_ori"] = float(
             BodyEvaluator.compute_head_ori(
                 label_Ts_world_joint=gt_posed.Ts_world_joint[..., :21, :],  # [T, 21, 7]
-                pred_Ts_world_joint=sampled_Ts_world_joint,  # [N, T, 21, 7]
+                pred_Ts_world_joint=pred_posed.Ts_world_joint[..., :21, :],  # [N, T, 21, 7]
+                device=device,
             ).mean()
         )
 
         metrics["head_trans"] = float(
             BodyEvaluator.compute_head_trans(
                 label_Ts_world_joint=gt_posed.Ts_world_joint[..., :21, :],  # [T, 21, 7]
-                pred_Ts_world_joint=sampled_Ts_world_joint,  # [N, T, 21, 7]
+                pred_Ts_world_joint=pred_posed.Ts_world_joint[..., :21, :],  # [N, T, 21, 7]
+                device=device,
             ).mean()
         )
 
         metrics["foot_skate"] = float(
             BodyEvaluator.compute_foot_skate(
-                pred_Ts_world_joint=sampled_Ts_world_joint,  # [N, T, 21, 7]
+                pred_Ts_world_joint=pred_posed.Ts_world_joint[..., :21, :],  # [N, T, 21, 7]
+                device=device,
             ).mean()
         )
 
         metrics["foot_contact"] = float(
             BodyEvaluator.compute_foot_contact(
-                pred_Ts_world_joint=sampled_Ts_world_joint,  # [N, T, 21, 7]
+                pred_Ts_world_joint=pred_posed.Ts_world_joint[..., :21, :],  # [N, T, 21, 7]
+                device=device,
             ).mean()
         )
         return metrics
@@ -1242,12 +1253,13 @@ class VelocityDenoiseTraj(BaseDenoiseTraj):
         metrics = {}
 
         # First reconstruct absolute poses
-        self_posed = self.apply_to_body(body_model=body_model)
-        other_posed = other.apply_to_body(body_model=body_model)
+        pred_posed: SmplhShapedAndPosed = self.apply_to_body(body_model=body_model)
+        gt_posed: SmplhShapedAndPosed = other.apply_to_body(body_model=body_model)
 
         # Body shape error (absolute)
         # TEMPORARY_FIX: import BodyEvaluator lazily to avoid circular imports
         from egoallo.evaluation.body_evaluator import BodyEvaluator
+        # Body shape error
         metrics["betas_error"] = float(
             BodyEvaluator.compute_masked_error(
                 gt=other.betas,
@@ -1256,52 +1268,96 @@ class VelocityDenoiseTraj(BaseDenoiseTraj):
             )
         )
 
-        # Velocity-based root transform errors
-        metrics["R_world_root_vel_error"] = float(
+        # Body rotation error
+        metrics["body_rotmats_error"] = float(
             BodyEvaluator.compute_masked_error(
-                gt=other.R_world_root_tm1_t,
-                pred=self.R_world_root_tm1_t,
+                gt=other.body_rotmats,
+                pred=self.body_rotmats,
                 device=device
             )
         )
 
-        metrics["t_world_root_vel_error"] = float(
+        # Root transform errors
+        metrics["R_world_root_error"] = float(
             BodyEvaluator.compute_masked_error(
-                gt=other.t_world_root_tm1_t,
-                pred=self.t_world_root_tm1_t,
+                gt=other.R_world_root,
+                pred=self.R_world_root,
                 device=device
             )
         )
 
-        # Acceleration errors
-        metrics["R_world_root_acc_error"] = float(
+        metrics["t_world_root_error"] = float(
             BodyEvaluator.compute_masked_error(
-                gt=other.R_world_root_acc,
-                pred=self.R_world_root_acc,
+                gt=other.t_world_root,
+                pred=self.t_world_root,
                 device=device
             )
         )
 
-        metrics["t_world_root_acc_error"] = float(
-            BodyEvaluator.compute_masked_error(
-                gt=other.t_world_root_acc,
-                pred=self.t_world_root_acc,
-                device=device
-            )
-        )
-
-        # Compute foot metrics on reconstructed poses
+        # Foot metrics
         metrics["foot_skate"] = float(
             BodyEvaluator.compute_foot_skate(
-                pred_Ts_world_joint=self_posed.Ts_world_joint,
+                pred_Ts_world_joint=pred_posed.Ts_world_joint[..., :21, :],
                 device=device
             ).mean()
         )
 
         metrics["foot_contact"] = float(
             BodyEvaluator.compute_foot_contact(
-                pred_Ts_world_joint=self_posed.Ts_world_joint,
+                pred_Ts_world_joint=pred_posed.Ts_world_joint[..., :21, :],
                 device=device
+            ).mean()
+        )
+
+        metrics["mpjpe"] = float(
+            BodyEvaluator.compute_mpjpe(
+                label_root_pos=gt_posed.T_world_root,  # [T, 7]
+                label_joint_pos=gt_posed.Ts_world_joint[..., :21, :],  # [T, 21, 7]
+                pred_root_pos=pred_posed.T_world_root,  # [N, T, 7]
+                pred_joint_pos=pred_posed.Ts_world_joint[..., :21, :],  # [N, T, 21, 7]
+                per_frame_procrustes_align=False,
+                device=device
+            ).mean()
+        )
+
+        metrics["pampjpe"] = float(
+            BodyEvaluator.compute_mpjpe(
+                label_root_pos=gt_posed.T_world_root,  # [T, 7]
+                label_joint_pos=gt_posed.Ts_world_joint[..., :21, :],  # [T, 21, 7]
+                pred_root_pos=pred_posed.T_world_root,  # [N, T, 7]
+                pred_joint_pos=pred_posed.Ts_world_joint[..., :21, :],  # [N, T, 21, 7]
+                per_frame_procrustes_align=True,
+                device=device,
+            ).mean()
+        )
+
+        metrics["head_ori"] = float(
+            BodyEvaluator.compute_head_ori(
+                label_Ts_world_joint=gt_posed.Ts_world_joint[..., :21, :],  # [T, 21, 7]
+                pred_Ts_world_joint=pred_posed.Ts_world_joint[..., :21, :],  # [N, T, 21, 7]
+                device=device,
+            ).mean()
+        )
+
+        metrics["head_trans"] = float(
+            BodyEvaluator.compute_head_trans(
+                label_Ts_world_joint=gt_posed.Ts_world_joint[..., :21, :],  # [T, 21, 7]
+                pred_Ts_world_joint=pred_posed.Ts_world_joint[..., :21, :],  # [N, T, 21, 7]
+                device=device,
+            ).mean()
+        )
+
+        metrics["foot_skate"] = float(
+            BodyEvaluator.compute_foot_skate(
+                pred_Ts_world_joint=pred_posed.Ts_world_joint[..., :21, :],  # [N, T, 21, 7]
+                device=device,
+            ).mean()
+        )
+
+        metrics["foot_contact"] = float(
+            BodyEvaluator.compute_foot_contact(
+                pred_Ts_world_joint=pred_posed.Ts_world_joint[..., :21, :],  # [N, T, 21, 7]
+                device=device,
             ).mean()
         )
 
@@ -1335,7 +1391,7 @@ class EgoDenoiserConfig():
     )
 
     # Joint position conditioning settings
-    joint_cond_mode: JointCondMode = "vel_acc"
+    joint_cond_mode: "JointCondMode" = "vel_acc"
     joint_emb_dim: int = 8
 
     # Add SMPL-H model path configuration

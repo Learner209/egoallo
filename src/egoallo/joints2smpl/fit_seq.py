@@ -13,8 +13,11 @@ import h5py
 from jaxtyping import jaxtyped, Float
 from torch import Tensor
 import typeguard
+from egoallo.evaluation.metrics import EgoAlloEvaluationMetrics
+from egoallo.data.dataclass import EgoTrainingData
 from egoallo.joints2smpl import smplify
 from egoallo.joints2smpl import joints2smpl_config
+from egoallo import fncsmpl
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -149,7 +152,7 @@ def main(opt: Joints2SmplFittingConfig):
         joblib.dump(param, dir_save / ("%04d"%idx + ".pkl"), compress=3)
 
 @jaxtyped(typechecker=typeguard.typechecked)
-def main_call(opt: Joints2SmplFittingConfig, batch_size: int, joints3d: Float[Tensor, "batch_size 22 3"], output_dir: Path):
+def joints2smpl_fit_seq(opt: Joints2SmplFittingConfig, body_model: fncsmpl.SmplhModel, batch_size: int, joints3d: Float[Tensor, "batch_size 22 3"], output_dir: Path):
 
 	# FIXME: the batch_size is set to passed in param instead of opt.batch_size, this is a temporary fix.
     device = torch.device("cuda:" + str(opt.gpu_ids) if opt.cuda else "cpu")
@@ -232,21 +235,22 @@ def main_call(opt: Joints2SmplFittingConfig, batch_size: int, joints3d: Float[Te
 
     # Prepare output data
     sequence_data = {
-        "poses": pred_pose[:, :66].cpu().numpy(),
-        "trans": pred_cam_t.cpu().numpy(),
-        "betas": pred_betas.cpu().numpy(),
+        "poses": pred_pose[:, :66].numpy(force=True),
+        "trans": pred_cam_t.numpy(force=True),
+        "betas": pred_betas.mean(dim=0).numpy(force=True),
         "gender": "male",
         "fps": 30,
-        "joints": pred_joints.cpu().numpy(),
-        "contacts": np.ones(pred_joints.shape[0]),  # contacts server as a boolean label, but for compatiblity with `load_from_npz` function, convert it to flaot32
-        "pose_hand": np.zeros(pred_joints.shape[0]),
-        "root_orient": pred_pose[:, :3].cpu().numpy(),
-        "pose_body": pred_pose[:, 3:66].cpu().numpy(),
+        "joints": pred_joints.numpy(force=True),
+        "contacts": np.ones((pred_joints.shape[0], 22)),  # contacts server as a boolean label, but for compatiblity with `load_from_npz` function, convert it to flaot32
+        "pose_hand": np.zeros((pred_joints.shape[0], 90)),
+        "root_orient": pred_pose[:, :3].numpy(force=True),
+        "pose_body": pred_pose[:, 3:66].numpy(force=True),
     }
     output_path = output_dir / "sequence.npz"
     output_path.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(output_path, **sequence_data)
-    # logger.info(f"Saved processed sequence to {output_path}")
+
+    return EgoTrainingData.load_from_npz(body_model=body_model, path=output_path, include_hands=True)
 
 
 if __name__ == "__main__":

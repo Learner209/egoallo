@@ -42,6 +42,8 @@ dependencies = [
     "jaxlie",
     "ipdb",
     "git+https://github.com/brentyi/jaxls.git",
+    "smplx",
+    "joblib",
 ]
 
 [tool.setuptools.package-data]
