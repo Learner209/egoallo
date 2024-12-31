@@ -487,7 +487,7 @@ def visualize_traj_and_hand_detections(
     T_world_root_numpy = T_world_root.numpy(force=True)
 
     def do_update() -> None:
-        breakpoint()
+        # breakpoint()
         t = gui_timestep.value
         cpf_handle.wxyz = T_world_root_numpy[t, :4]
         cpf_handle.position = T_world_root_numpy[t, 4:7]

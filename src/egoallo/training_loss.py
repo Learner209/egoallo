@@ -179,7 +179,7 @@ class TrainingLossComputer:
             assert pred_joints.shape == (batch, time, num_joints, 3)
 
             # Get ground truth joints from training batch
-            breakpoint()
+            # breakpoint()
             gt_joints = train_batch.joints_wrt_world  # (b, t, 22, 3)
             assert gt_joints.shape == (batch, time, num_joints, 3)
 
