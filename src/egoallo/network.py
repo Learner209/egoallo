@@ -964,18 +964,18 @@ class VelocityDenoiseTraj(BaseDenoiseTraj):
 
     def _compute_temporal_offsets(self) -> None:
         """Compute relative rotations and translations between consecutive frames."""
-        batch_shape = self.R_world_root.shape[:-2]
+        batch_shape = self.R_world_root.shape[:-3] # [batch, T, 3, 3]
         device = self.R_world_root.device
         dtype = self.R_world_root.dtype
 
         # Compute relative rotations using SO3
-        R_curr = SO3.from_matrix(self.R_world_root[:, 1:])
-        R_prev = SO3.from_matrix(self.R_world_root[:, :-1])
-        R_rel = R_curr.multiply(R_prev.inverse())
+        R_curr = SO3.from_matrix(self.R_world_root[..., 1:, :, :]) # [batch, T-1, 3, 3]
+        R_prev = SO3.from_matrix(self.R_world_root[..., :-1, :, :]) # [batch, T-1, 3, 3]
+        R_rel = R_curr.multiply(R_prev.inverse()) # [batch, T-1, 3, 3]
         self.R_world_root_tm1_t = torch.cat(
             [
                 torch.eye(3, device=device, dtype=dtype).expand(
-                    *batch_shape[:-1], 1, 3, 3
+                    *batch_shape, 1, 3, 3
                 ),
                 R_rel.as_matrix(),
             ],
@@ -985,25 +985,25 @@ class VelocityDenoiseTraj(BaseDenoiseTraj):
         # Compute relative translations using SE3
         T_curr = SE3.from_rotation_and_translation(
             SO3.from_matrix(self.R_world_root), self.t_world_root
-        )
-        self.t_world_root_tm1_t = torch.zeros_like(self.t_world_root)
-        self.t_world_root_tm1_t[:, 1:] = (
-            T_curr.translation()[:, 1:] - T_curr.translation()[:, :-1]
+        ) # [batch, T, 3, 3]
+        self.t_world_root_tm1_t = torch.zeros_like(self.t_world_root) # [batch, T, 3]
+        self.t_world_root_tm1_t[..., 1:, :] = (
+            T_curr.translation()[..., 1:, :] - T_curr.translation()[..., :-1, :]
         )
 
         # Compute accelerations
         # For rotations, multiply consecutive relative rotations
-        R_rel_curr = SO3.from_matrix(self.R_world_root_tm1_t[:, 2:])
-        R_rel_prev = SO3.from_matrix(self.R_world_root_tm1_t[:, 1:-1])
+        R_rel_curr = SO3.from_matrix(self.R_world_root_tm1_t[..., 2:, :, :])
+        R_rel_prev = SO3.from_matrix(self.R_world_root_tm1_t[..., 1:-1, :, :])
         self.R_world_root_acc = torch.zeros_like(self.R_world_root)
-        self.R_world_root_acc[:, 2:] = R_rel_curr.multiply(
+        self.R_world_root_acc[..., 2:, :, :] = R_rel_curr.multiply(
             R_rel_prev.inverse()
         ).as_matrix()
 
         # For translations, compute difference of consecutive relative translations
         self.t_world_root_acc = torch.zeros_like(self.t_world_root)
-        self.t_world_root_acc[:, 2:] = (
-            self.t_world_root_tm1_t[:, 2:] - self.t_world_root_tm1_t[:, 1:-1]
+        self.t_world_root_acc[..., 2:, :] = (
+            self.t_world_root_tm1_t[..., 2:, :] - self.t_world_root_tm1_t[..., 1:-1, :]
         )
 
     def apply_to_body(self, body_model: SmplhModel) -> SmplhShapedAndPosed:
@@ -1014,14 +1014,14 @@ class VelocityDenoiseTraj(BaseDenoiseTraj):
         """
         device = self.betas.device
         dtype = self.betas.dtype
-        batch_shape = self.R_world_root_tm1_t.shape[:-2]
+        batch_shape = self.R_world_root_tm1_t.shape[:-3] # [batch, T, 3, 3]
         time = self.R_world_root_tm1_t.shape[-3]
 
         # Initialize absolute positions with identity rotation and zero translation
         R_world_root = (
-            torch.eye(3, device=device, dtype=dtype).expand(*batch_shape, 3, 3).clone()
+            torch.eye(3, device=device, dtype=dtype).expand(*batch_shape, time, 3, 3).clone()
         )
-        t_world_root = torch.zeros((*batch_shape, 3), device=device, dtype=dtype)
+        t_world_root = torch.zeros((*batch_shape, time, 3), device=device, dtype=dtype)
 
         # Reconstruct absolute positions from temporal offsets
         for t in range(1, time):

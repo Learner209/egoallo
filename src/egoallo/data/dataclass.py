@@ -172,6 +172,7 @@ class EgoTrainingData(TensorDataclass):
             output_path=output_path,
         )
 
+
 def collate_dataclass[T](batch: list[T]) -> T:
     """Collate function that works for dataclasses."""
     keys = vars(batch[0]).keys()

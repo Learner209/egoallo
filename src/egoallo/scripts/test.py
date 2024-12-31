@@ -374,7 +374,7 @@ class TestRunner:
 
             metrics = denoised_trajs._compute_metrics(gt_trajs, body_model=self.body_model, device=self.device)
             metrics = EgoAlloEvaluationMetrics(**metrics)
-            # breakpoint()
+            breakpoint()
 
         return metrics
 
