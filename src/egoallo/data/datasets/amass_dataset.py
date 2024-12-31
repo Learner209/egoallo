@@ -449,6 +449,8 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         masked_joints[~visible_joints_mask] = 0
         kwargs["joints_wrt_world"] = masked_joints
 
+        kwargs["take_name"] = group
+
         return EgoTrainingData(**kwargs)
 
     def _load_sequence_data(

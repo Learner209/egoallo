@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 import dataclasses
 import queue
+from tarfile import AbsoluteLinkError
 import threading
 import time
 from pathlib import Path
@@ -11,7 +12,7 @@ import h5py
 import torch
 import torch.cuda
 import tyro
-
+import numpy as np
 from egoallo import network
 from egoallo import fncsmpl
 from egoallo.data.dataclass import EgoTrainingData
@@ -61,9 +62,10 @@ def main(
             )
 
             # output_name = npz_path.stem + ".mp4"
-            # FIXME: the from_ego_data function is an instance moethod of network.DenoisingConfig
-            # train_traj = network.DenoisingConfig.from_ego_data(train_data, include_hands=True)
-			# TODO: remove this once we have a proper visualization function
+            # # FIXME: the from_ego_data function is an instance moethod of network.DenoisingConfig
+            # denoising_config = network.DenoisingConfig(denoising_mode="absolute", include_hands=True)
+            # train_traj = denoising_config.from_ego_data(train_data)
+			# # TODO: remove this once we have a proper visualization function
             # output_path = Path("./exp/debug_frame_rate_diff/")
             # output_path.mkdir(parents=True, exist_ok=True)
             # EgoTrainingData.visualize_ego_training_data(
@@ -89,7 +91,7 @@ def main(
             for k, v in vars(train_data).items():
                 # No need to write the mask, which will always be ones when we
                 # load from the npz file!
-                if v is None:
+                if v is None or not isinstance(v, np.ndarray):
                     continue
 
                 # Chunk into 32 timesteps at a time.
@@ -109,18 +111,18 @@ def main(
                 f"{time.time() - start_time} seconds",
             )
 
-    workers = [
-        threading.Thread(target=worker, args=(0,))
-        # for i in range(torch.cuda.device_count())
-        for i in range(40)
-    ]
-    for w in workers:
-        w.start()
-    for w in workers:
-        w.join()
+    # workers = [
+    #     threading.Thread(target=worker, args=(0,))
+    #     # for i in range(torch.cuda.device_count())
+    #     for i in range(40)
+    # ]
+    # for w in workers:
+    #     w.start()
+    # for w in workers:
+    #     w.join()
 
     # Single-threaded version
-    # worker(0)
+    worker(0)
     output_list_file.write_text("\n".join(file_list))
 
 

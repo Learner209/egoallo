@@ -30,7 +30,6 @@ from jaxtyping import install_import_hook
 # with install_import_hook("egoallo", "typeguard.typechecked"):
 from egoallo import network, training_loss, training_utils
 from egoallo.data import make_batch_collator, build_dataset
-from egoallo.data.dataclass import collate_dataclass
 from egoallo.config.train.train_config import EgoAlloTrainConfig
 from egoallo.utils.utils import make_source_code_snapshot
 from egoallo.utils.setup_logger import setup_logger

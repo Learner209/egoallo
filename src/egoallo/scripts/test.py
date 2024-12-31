@@ -23,10 +23,10 @@ from egoallo.config import CONFIG_FILE, make_cfg
 from egoallo.config.inference.inference_defaults import InferenceConfig
 from egoallo.data import make_batch_collator, build_dataset
 from egoallo.config.train.train_config import (
-    EgoAlloTrainConfig,
+    EgoAlloTrainConfig
 )
 from egoallo.joints2smpl.fit_seq import joints2smpl_fit_seq, Joints2SmplFittingConfig
-from egoallo.data.dataclass import EgoTrainingData, collate_dataclass
+from egoallo.data.dataclass import EgoTrainingData
 from egoallo.evaluation.body_evaluator import BodyEvaluator
 from egoallo.evaluation.metrics import EgoAlloEvaluationMetrics
 from egoallo.guidance_optimizer_jax import GuidanceMode
@@ -143,6 +143,8 @@ class TestRunner:
             if hasattr(runtime_config, field.name):
                 setattr(runtime_config, field.name, getattr(self.inference_config, field.name))
 
+		# FIXME: this is a temporary fix to use ExtendedBatchCollator for testing.
+        runtime_config.data_collate_fn = "TensorOnlyDataclassBatchCollator"
         self.dataloader = torch.utils.data.DataLoader(
             dataset=build_dataset(cfg=runtime_config)(config=runtime_config),
             batch_size=1,
@@ -271,7 +273,9 @@ class TestRunner:
 
             # Save visualizations if requested
             if self.inference_config.visualize_traj and self.runtime_config.denoising.denoising_mode != "joints_only":
+                logger.info(f"this take name is: {batch.take_name}")
                 timestamp = time.strftime("%Y%m%d-%H%M%S")
+
                 gt_path, inferred_path = visualizer.save_visualization(
                     gt_traj[seq_idx],
                     denoised_traj[seq_idx],

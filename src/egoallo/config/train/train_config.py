@@ -36,7 +36,7 @@ class EgoAlloTrainConfig:
     """Only used if dataset_slice_strategy == 'random_variable_len'."""
     splits: tuple[DatasetSplit, ...] = ("train", "val")
     data_collate_fn: Literal[
-        "DefaultBatchCollator", "ExtendedBatchCollator", "EgoTrainingDataBatchCollator"
+        "DefaultBatchCollator", "ExtendedBatchCollator", "EgoTrainingDataBatchCollator", "TensorOnlyDataclassBatchCollator"
     ] = "EgoTrainingDataBatchCollator"
     dataset_type: DatasetType = "AdaptiveAmassHdf5Dataset"
     bodypose_anno_dir: Path | None = None

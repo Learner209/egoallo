@@ -102,14 +102,14 @@ class BaseRenderer:
 
     def _setup_context(self):
         """Initialize EGL context."""
-        logger.info("Initializing EGL and OpenGL")
+        # logger.info("Initializing EGL and OpenGL")
         self.context = EGLContext()
         if not self.context.initialize(*self.config.resolution):
             raise RuntimeError("Failed to initialize EGL context")
         # Test OpenGL context
 
         version = gl.glGetString(gl.GL_VERSION)
-        logger.info(f"OpenGL version: {version}")
+        # logger.info(f"OpenGL version: {version}")
 
     def _setup_buffers(self):
         """Set up OpenGL frame and render buffers."""
@@ -218,7 +218,7 @@ class SMPLViewer(BaseRenderer):
         pointcloud = trimesh_load_from_zip(str(self.scene_path), "*/pointcloud.ply")
         self.pointcloud.set_buffers(pointcloud)
         self.scene.add_object(self.pointcloud)
-        logger.info(f"Loaded scene mesh from {self.scene_path}")
+        # logger.info(f"Loaded scene mesh from {self.scene_path}")
 
     def _setup_lighting(self) -> None:
         """Set up scene lighting with shadows."""
@@ -426,7 +426,7 @@ class SMPLViewer(BaseRenderer):
     ) -> None:
         """Flush any remaining frames in the capture queue."""
         # Flush the remaining frames
-        logger.info("Flushing PBO queue")
+        # logger.info("Flushing PBO queue")
         color = capture.get_first_requested_color()
         while color is not None:
             video_writer.write(color)
