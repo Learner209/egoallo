@@ -451,7 +451,10 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
 
         kwargs["take_name"] = group
 
-        return EgoTrainingData(**kwargs)
+        ret = EgoTrainingData(**kwargs)
+        ret = ret.align_to_first_frame()
+
+        return ret
 
     def _load_sequence_data(
         self, group: str, start_t: int, end_t: int, total_t: int, seq_len: int

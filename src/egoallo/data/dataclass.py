@@ -174,3 +174,39 @@ class EgoTrainingData(TensorDataclass):
             body_model=body_model,
             output_path=output_path,
         )
+
+    @jaxtyped(typechecker=typeguard.typechecked)
+    def align_to_first_frame(self) -> "EgoTrainingData":
+        """
+        Creates a new EgoTrainingData instance with x,y coordinates aligned to the first frame.
+        Returns a new instance with modified positions.
+        """
+        # Get initial x,y position offset (ignoring z)
+        initial_xy = self.T_world_root[0, 4:6]  # First frame x,y position
+
+        # Align positions by subtracting x,y offset
+        T_world_root_aligned = self.T_world_root.clone()
+        T_world_root_aligned[..., 4:6] = self.T_world_root[..., 4:6] - initial_xy
+
+        # Align joints_wrt_world (x,y only)
+        joints_wrt_world_aligned = self.joints_wrt_world.clone()
+        joints_wrt_world_aligned[..., :2] = self.joints_wrt_world[..., :2] - initial_xy
+
+        # Align T_world_cpf (only x,y translation component)
+        T_world_cpf_aligned = self.T_world_cpf.clone()
+        T_world_cpf_aligned[..., 4:6] = self.T_world_cpf[..., 4:6] - initial_xy
+
+        return EgoTrainingData(
+            T_world_root=T_world_root_aligned,
+            contacts=self.contacts,
+            betas=self.betas,
+            joints_wrt_world=joints_wrt_world_aligned,
+            body_quats=self.body_quats,
+            T_world_cpf=T_world_cpf_aligned,
+            height_from_floor=self.height_from_floor,
+            joints_wrt_cpf=self.joints_wrt_cpf,  # No need to modify as it's relative to CPF
+            mask=self.mask,
+            hand_quats=self.hand_quats,
+            visible_joints_mask=self.visible_joints_mask,
+            take_name=self.take_name,
+        )
