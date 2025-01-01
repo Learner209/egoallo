@@ -63,25 +63,27 @@ def main(
 
             output_name = npz_path.stem + ".mp4"
             # FIXME: the from_ego_data function is an instance moethod of network.DenoisingConfig
-            denoising_config = network.DenoisingConfig(denoising_mode="absolute", include_hands=True)
-            train_traj = denoising_config.from_ego_data(train_data)
-            
-            # Adaptive sampling if sequence is longer than 1500 frames
-            if len(train_traj.t_world_root) > 1500:
-                # Calculate stride to get under 1500 frames
-                stride = len(train_traj.t_world_root) // 1499 + 1
-                train_traj = train_traj[::stride]
-            
-            output_path = Path("./exp/debug_frame_rate_diff/")
-            output_path.mkdir(parents=True, exist_ok=True)
-            
-            EgoTrainingData.visualize_ego_training_data(
-                train_traj,
-                body_model, 
-                output_path=str(output_path / output_name),
+            denoising_config = network.DenoisingConfig(
+                denoising_mode="absolute", include_hands=True
             )
+            train_traj = denoising_config.from_ego_data(train_data)
 
-            # Get the relative path after any of the input directories
+            # Adaptive sampling if sequence is longer than 1500 frames
+            # if len(train_traj.t_world_root) > 1500:
+            #     # Calculate stride to get under 1500 frames
+            #     stride = len(train_traj.t_world_root) // 1499 + 1
+            #     train_traj = train_traj[::stride]
+
+            # output_path = Path("./exp/debug_frame_rate_diff/")
+            # output_path.mkdir(parents=True, exist_ok=True)
+
+            # if not (output_path / output_name).exists():
+            #     EgoTrainingData.visualize_ego_training_data(
+            #         train_traj,
+            #         body_model,
+            #         output_path=str(output_path / output_name),
+            #     )
+
             for data_npz_dir in data_npz_dirs:
                 if str(data_npz_dir) in str(npz_path):
                     group_name = str(npz_path).partition(str(data_npz_dir) + "/")[2]
@@ -98,7 +100,7 @@ def main(
             for k, v in vars(train_data).items():
                 # No need to write the mask, which will always be ones when we
                 # load from the npz file!
-                if v is None or not isinstance(v, np.ndarray):
+                if v is None or not isinstance(v, torch.Tensor):
                     continue
 
                 # Chunk into 32 timesteps at a time.

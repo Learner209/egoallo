@@ -16,6 +16,12 @@ from pathlib import Path
 from typing import Literal
 import time
 
+import sys
+import pytest
+from pathlib import Path
+import train_motion_prior
+from unittest.mock import patch
+
 import torch.optim.lr_scheduler
 import torch.utils.data
 import tyro
@@ -120,7 +126,10 @@ def run_training(
         logger.add(experiment_dir / "trainlog.log", rotation="100 MB")
 
     # Setup.
-    model = network.EgoDenoiser(config.model, modality_dims=config.denoising.fetch_modality_dict(config.model.include_hands))
+    model = network.EgoDenoiser(
+        config.model,
+        modality_dims=config.denoising.fetch_modality_dict(config.model.include_hands),
+    )
 
     train_loader = torch.utils.data.DataLoader(
         dataset=build_dataset(cfg=config)(config=config),
@@ -280,9 +289,7 @@ def run_training(
                         {
                             "gradients/total_grad_norm": np.sqrt(total_grad_norm),
                             "gradients/param_norm": np.sqrt(param_norm),
-                            "gradients/grad_to_param_ratio": np.sqrt(
-                                total_grad_norm
-                            )
+                            "gradients/grad_to_param_ratio": np.sqrt(total_grad_norm)
                             / (np.sqrt(param_norm) + 1e-8),
                         },
                         step=step,
@@ -301,7 +308,7 @@ def run_training(
                                 step=step,
                             )
             # Checkpointing
-            steps_to_save = 10000
+            steps_to_save = 1e4
             if step % steps_to_save == 0:
                 # Save checkpoint.
                 checkpoint_path = experiment_dir / f"checkpoints_{step}"
@@ -316,8 +323,8 @@ def run_training(
                 )
 
             # Evaluation
-            steps_to_eval = 1000000000000
-            if step % steps_to_eval == 0:
+            steps_to_eval = 1e4
+            if step % steps_to_eval == 0 and step != 0:
                 # Create temporary directory for evaluation outputs
                 with tempfile.TemporaryDirectory() as temp_dir:
                     # Create inference config for evaluation
@@ -366,6 +373,40 @@ def run_training(
     # Finish wandb run
     if accelerator.is_main_process:
         wandb.finish()
+
+
+def test_run_training_cli():
+    # Store original argv
+    original_argv = sys.argv.copy()
+
+    try:
+        # Create test config directly instead of using CLI args
+        test_config = EgoAlloTrainConfig(
+            batch_size=64,
+            experiment_name="test_experiment",
+            learning_rate=1e-4,
+            dataset_hdf5_path=Path(
+                "./data/amass_rich_hps/processed_amass_rich_hps.hdf5"
+            ),
+            dataset_files_path=Path(
+                "./data/amass_rich_hps/processed_amass_rich_hps.txt"
+            ),
+            mask_ratio=0.0,
+            splits=("train", "val"),
+            joint_cond_mode="absrel",
+            use_fourier_in_masked_joints=False,
+            random_sample_mask_ratio=True,
+            data_collate_fn="TensorOnlyDataclassBatchCollator",
+        )
+
+        # Mock wandb to prevent actual wandb initialization
+        with patch("wandb.init"), patch("wandb.log"), patch("wandb.finish"):
+            # Run the main function
+            run_training(test_config)
+
+    finally:
+        # Restore original argv
+        sys.argv = original_argv
 
 
 if __name__ == "__main__":
