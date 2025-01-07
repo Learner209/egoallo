@@ -5,6 +5,7 @@ from pathlib import Path
 
 import torch
 
+from typing import Any
 from egoallo.types import DatasetType, DatasetSliceStrategy, DatasetSplit
 from egoallo.guidance_optimizer_jax import GuidanceMode
 
@@ -12,6 +13,9 @@ from egoallo.guidance_optimizer_jax import GuidanceMode
 @dataclasses.dataclass
 class InferenceConfig:
     """Configuration for inference."""
+
+    start_index: int = 0
+    """Start index of trajectory sequence to process"""
 
     traj_length: int = 128
     """Length of trajectory sequence to process"""
@@ -53,9 +57,6 @@ class InferenceConfig:
     visualize_traj: bool = False
     """Whether to visualize trajectories"""
 
-    anno_type: str = "manual"
-    """Type of annotations to use"""
-
     guidance_post: bool = False
     """Post guidance weight"""
 
@@ -73,8 +74,69 @@ class InferenceConfig:
 
     splits: tuple[DatasetSplit, ...] = ("test",)
     """Dataset splits to use"""
+    @dataclasses.dataclass
+    class EgoExoConfig:
+        """Configuration specific to EgoExo dataset."""
+        
+        dataset_path: Path = Path("./datasets/egoexo-default")
+        """Path to EgoExo dataset"""
+        
+        bodypose_anno_dir: tuple[Path, ...] = (
+            Path("./data/egoexo-default-gt-output/annotation/manual"),
+        )  # type: ignore
+        """Path to body pose annotation directory"""
+        
+        anno_type: str = "manual"
+        """Type of annotations to use (e.g. 'manual', 'auto')"""
 
-    bodypose_anno_dir: tuple[Path, ...] = (
-        Path("./data/egoexo-default-gt-output/annotation/manual"),
-    )  # type: ignore
-    """Path to body pose annotation directory, only for EgoExo dataset"""
+        # Test config attributes
+        split: str = "train"
+        """Dataset split to use"""
+
+        use_pseudo: bool = False
+        """Whether to use pseudo annotations"""
+
+        coord: str = "null" 
+        """Coordinate system to use"""
+
+        def __getitem__(self, key: str) -> Any:
+            """Enable dictionary-style access to attributes."""
+            return getattr(self, key)
+
+    # Add EgoExo config instance
+    egoexo: EgoExoConfig = dataclasses.field(default_factory=EgoExoConfig)
+    """EgoExo dataset specific configurations"""
+
+    def __getitem__(self, key: str) -> Any:
+        """Enable dictionary-style access to attributes."""
+        return getattr(self, key)
+
+    @property
+    def egoexo_dataset_path(self) -> Path:
+        """Backward compatibility property for egoexo_dataset_path"""
+        return self.egoexo.dataset_path
+    
+    @property
+    def bodypose_anno_dir(self) -> tuple[Path, ...]:
+        """Backward compatibility property for bodypose_anno_dir"""
+        return self.egoexo.bodypose_anno_dir
+        
+    @property
+    def anno_type(self) -> str:
+        """Backward compatibility property for anno_type"""
+        return self.egoexo.anno_type
+
+    @property
+    def split(self) -> str:
+        """Backward compatibility property for split"""
+        return self.egoexo.split
+    
+    @property
+    def use_pseudo(self) -> bool:
+        """Backward compatibility property for use_pseudo"""
+        return self.egoexo.use_pseudo
+    
+    @property
+    def coord(self) -> str:
+        """Backward compatibility property for coord"""
+        return self.egoexo.coord

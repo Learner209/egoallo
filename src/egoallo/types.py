@@ -52,6 +52,8 @@ DatasetType = Literal[
 	"AdaptiveAmassHdf5Dataset",
 	"VanillaEgoAmassHdf5Dataset",
 	"EgoExoDataset",
+    "AriaDataset",
+    "AriaInferenceDataset",
 ]
 
 DatasetSliceStrategy = Literal[

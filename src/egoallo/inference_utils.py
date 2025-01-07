@@ -89,13 +89,13 @@ class InferenceTrajectoryPaths:
 
     @staticmethod
     def find(traj_root: Path) -> InferenceTrajectoryPaths:
-        vrs_files = tuple(traj_root.glob("**/aria01.vrs"))
-        assert len(vrs_files) == 1, f"Found {len(vrs_files)} VRS files!"
+        vrs_files = sorted(tuple(traj_root.glob("**/*aria*.vrs")))
+        assert len(vrs_files) >= 1, f"Found {len(vrs_files)} VRS files!"
 
-        points_paths = tuple(traj_root.glob("**/semidense_points.csv.gz"))
+        points_paths = sorted(tuple(traj_root.glob("**/semidense_points.csv.gz")))
         assert len(points_paths) <= 1, f"Found multiple points files! {points_paths}"
         if len(points_paths) == 0:
-            points_paths = tuple(traj_root.glob("**/global_points.csv.gz"))
+            points_paths = sorted(tuple(traj_root.glob("**/global_points.csv.gz")))
         assert len(points_paths) == 1, f"Found {len(points_paths)} files!"
 
         hamer_outputs = traj_root / "hamer_outputs.pkl"

@@ -18,7 +18,14 @@ import skimage.io as io
 import torchvision.transforms as T
 from tqdm import tqdm
 import matplotlib.pyplot as plt
+# from egoallo.data.build import EgoTrainingData
+from typing import List, Dict, Any, Tuple
+from jaxtyping import Float, Bool, jaxtyped
+import typeguard
+from torch import Tensor
+from egoallo.mapping import EGOEXO4D_BODYPOSE_TO_SMPLH_INDICES
 from egoallo.utils.setup_logger import setup_logger
+
 logger = setup_logger(output=None, name=__name__)
 import joblib
 
@@ -26,17 +33,17 @@ import joblib
 random.seed(1)
 
 class Dataset_EgoExo(Dataset):
-    def __init__(self, opt):
+    def __init__(self, config: Dict[str, Any]):
         super(Dataset_EgoExo,self).__init__()
         
-        self.root = opt['root']
+        self.root = config['dataset_path']
         self.root_takes = os.path.join(self.root, "takes")
-        self.split = opt['split']
+        self.split = config['split']
         self.root_poses = os.path.join(self.root, "annotations", "ego_pose",self.split, "body")
-        self.use_pseudo = opt['use_pseudo']
-        self.coord = opt["coord"]
-        self.slice_window =  opt["window_size"]
-        # load sequences paths
+        self.use_pseudo = config['use_pseudo']
+        self.coord = config["coord"]
+        # self.slice_window =  config["window_size"]
+        self.slice_window = 128
         
         manually_annotated_takes = os.listdir(os.path.join(self.root_poses,"annotation"))
         self.manually_annotated_takes = [take.split(".")[0] for take in manually_annotated_takes]
@@ -64,8 +71,12 @@ class Dataset_EgoExo(Dataset):
             no_cam = 0
             no_cam_list = []
 
+            cnt = 0
             for take_uid in tqdm(self.takes_metadata, total=len(self.takes_metadata), desc="takes_metadata", ascii=' >='):
         
+                if cnt > 50:
+                    break
+                cnt += 1
                 if take_uid+".json" in self.cameras:
                     camera_json = json.load(open(os.path.join(self.root_poses.replace("body", "camera_pose"),take_uid+".json")))
                     take_name = camera_json['metadata']['take_name']
@@ -108,12 +119,12 @@ class Dataset_EgoExo(Dataset):
         self.joint_idxs = [i for i in range(17)] # 17 keypoints in total
 
         self.joint_names = ['nose','left-eye','right-eye','left-ear','right-ear','left-shoulder','right-shoulder','left-elbow','right-elbow','left-wrist','right-wrist','left-hip','right-hip','left-knee','right-knee','left-ankle','right-ankle']
-        self.single_joint = opt['single_joint']
-        print('Dataset lenght: {}'.format(len(self.valid_take_uids)))
-        print('Split: {}'.format(self.split))
-        # print('No Manually: {}'.format(no_man))
-        # print('No camera: {}'.format(no_cam))
-        # print('No camera list: {}'.format(no_cam_list))
+        # self.single_joint = opt['single_joint']
+        logger.info(f"Dataset lenght: {len(self.valid_take_uids)}")
+        logger.info(f"Split: {self.split}")
+        # logger.info('No Manually: {}'.format(no_man))
+        # logger.info('No camera: {}'.format(no_cam))
+        # logger.info('No camera list: {}'.format(no_cam_list))
 
     def translate_poses(self, anno, cams, coord):
         trajectory = {}
@@ -184,6 +195,54 @@ class Dataset_EgoExo(Dataset):
                 poses.append([-1,-1,-1]) #not visible
         return poses, flags
 
+    @jaxtyped(typechecker=typeguard.typechecked)
+    def _process_joints(
+        self,
+        data: Float[Tensor, "timesteps 17 3"],
+        vis: Float[Tensor, "timesteps 17"],
+        ground_height: float = 0.0,
+        return_smplh_joints: bool = True,
+        num_joints: int = 22,
+        debug_vis: bool = False,
+    ) -> Tuple[
+        Float[Tensor, "timesteps {num_joints} 3"],
+        Bool[Tensor, "timesteps {num_joints}"],
+    ]:
+        """Process joint data from annotations.
+
+        Args:
+            data: List of frame dictionaries containing body pose data
+            return_smplh_joints: If True, converts joints from EgoExo4D (17 joints) to SMPLH format (22 body joints).
+                Invalid mappings will be filled with zeros.
+            debug_vis: If True, visualize joints using polyscope (for debugging)
+
+        Returns:
+            Tuple of:
+            - joints_world: World coordinate joint positions (timesteps x J x 3) where J is 17 for EgoExo4D or 22 for SMPLH
+            - visible: Joint visibility mask (timesteps x J) where J is 17 for EgoExo4D or 22 for SMPLH
+        """
+        # Initialize SMPLH tensors with NaN for positions and False for visibility
+        if return_smplh_joints:
+            T = data.shape[0]
+            smplh_world = torch.full((T, 22, 3), float("nan"), dtype=torch.float32)
+            smplh_visible = torch.zeros((T, 22), dtype=torch.bool)
+
+            # Map joints using EGOEXO4D_BODYPOSE_TO_SMPLH_INDICES
+            for smplh_idx, ego_idx in enumerate(EGOEXO4D_BODYPOSE_TO_SMPLH_INDICES):
+                if ego_idx != -1:
+                    # Valid mapping - copy data
+                    smplh_world[:, smplh_idx] = data[:, ego_idx]
+                    smplh_visible[:, smplh_idx] = vis[:, ego_idx]
+
+            # Subtract ground height from world positions
+            smplh_world[..., 2] -= ground_height  # Subtract from z-coordinate
+
+            return smplh_world, smplh_visible
+        else:
+            # Subtract ground height from world positions for non-SMPLH case
+            data[..., 2] -= ground_height  # Subtract from z-coordinate
+            return data, vis.bool()
+
     def __getitem__(self, index):
         take_uid = self.valid_take_uids[index]
 
@@ -212,8 +271,9 @@ class Dataset_EgoExo(Dataset):
         capture_frames =  list(pose.keys())
 
         if self.split == "train":
-            frames_idx = random.randint(self.slice_window, len(capture_frames)-1)
-            frames_window = capture_frames[frames_idx-self.slice_window: frames_idx]
+            # frames_idx = random.randint(self.slice_window, len(capture_frames)-1)
+            # frames_window = capture_frames[frames_idx-self.slice_window: frames_idx]
+            frames_window = capture_frames
         else:
             frames_window = capture_frames
 
@@ -231,24 +291,50 @@ class Dataset_EgoExo(Dataset):
             aria_window.append(aria_trajectory[frame])
 
     
-        skeletons_window =  torch.Tensor(np.array(skeletons_window))
-        flags_window =  torch.Tensor(np.array(flags_window))
-        aria_window =  torch.Tensor(np.array(aria_window))
+        skeletons_window =  torch.Tensor(np.array(skeletons_window)) # T, 17, 3
+        flags_window =  torch.Tensor(np.array(flags_window)) # T, 17
+        aria_window =  torch.Tensor(np.array(aria_window)) # T, 3
         head_offset = aria_window.unsqueeze(1).repeat(1,17,1)
-        condition =  aria_window
+        # condition =  aria_window
         task = torch.tensor(self.takes_metadata[take_uid]['task_id'])
         take_name = self.takes_metadata[take_uid]['root_dir']
-        
+        take_name = take_name.split("takes/")[1]
+        # set invisible joints to nan
+        skeletons_window[~flags_window.bool()] = float("nan")
 
-        return {'cond': condition, 
-                'gt': skeletons_window,
-                'visible': flags_window,
-                't': frames_window,
-                'aria': aria_window,
-                'offset':head_offset,
-                'task':task,
-                'take_name':take_name,
-                'take_uid':take_uid}
+        joints_world, visible_mask = self._process_joints(
+            skeletons_window, # T, 17, 3
+            flags_window.float(), # T, 17
+            ground_height=0,
+            return_smplh_joints=True,
+            num_joints=22,
+            debug_vis=False,
+        )
+        masked_joints = joints_world.clone()
+        masked_joints[~visible_mask] = 0
+        # T_world_root = self._process_camera_poses(slice_data)
+        take_name = f"name_{take_name}_uid_{take_uid}_t{frames_window[0]}_{frames_window[-1]}"
+
+        from egoallo.data.dataclass import EgoTrainingData
+        ret = EgoTrainingData(
+            joints_wrt_world=masked_joints,  # Already computed above
+            joints_wrt_cpf=torch.zeros_like(masked_joints),  # Same shape as joints_world
+            T_world_root=torch.zeros((len(frames_window), 7)), # T x 7 for translation + quaternion
+            T_world_cpf=torch.zeros((len(frames_window), 7)),  # T x 7 for translation + quaternion
+            visible_joints_mask=visible_mask,  # Already computed above
+            mask=torch.ones(len(frames_window), dtype=torch.bool),  # T
+            betas=torch.zeros((1, 16)),  # 1 x 16 for SMPL betas
+            body_quats=torch.zeros((len(frames_window), 21, 4)),  # T x 21 x 4 for body joint rotations
+            hand_quats=torch.zeros((len(frames_window), 30, 4)),  # T x 30 x 4 for hand joint rotations
+            contacts=torch.zeros((len(frames_window), 22)),  # T x 22 for contact states
+            height_from_floor=torch.zeros((len(frames_window), 1)),  # T x 1
+            take_name=take_name,
+            frame_keys=tuple(int(f) for f in frames_window),  # Convert to tuple of ints
+        )
+        ret = ret.align_to_first_frame()
+        # breakpoint()
+        return ret
+       
 
     
     def __len__(self):
@@ -256,19 +342,19 @@ class Dataset_EgoExo(Dataset):
 
 
 class Dataset_EgoExo_inference(Dataset):
-    def __init__(self, opt):
+    def __init__(self, config: Dict[str, Any]):
         super(Dataset_EgoExo_inference,self).__init__()
         
-        self.root = opt['root']
+        self.root = config['dataset_path']
         self.root_takes = os.path.join(self.root, "takes")
-        self.split = opt['split'] #val or test
+        self.split = config['split'] #val or test
         self.camera_poses = os.path.join(self.root, "annotations", "ego_pose",self.split, "camera_pose")
-        self.use_pseudo = opt['use_pseudo']
-        self.coord = opt["coord"]
+        self.use_pseudo = config['use_pseudo']
+        self.coord = config["coord"]
 
         self.metadata = json.load(open(os.path.join(self.root,"takes.json")))
         
-        self.dummy_json = json.load(open(opt['dummy_json_path']))
+        self.dummy_json = json.load(open(config['dummy_json_path']))
         self.takes_uids = [*self.dummy_json]
         self.takes_metadata = {}
 

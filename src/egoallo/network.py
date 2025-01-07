@@ -35,6 +35,7 @@ from torch import Tensor, nn
 
 from egoallo.config import CONFIG_FILE, make_cfg
 
+# Move type imports inside TYPE_CHECKING block to avoid circular imports
 if TYPE_CHECKING:
     from egoallo.types import DenoiseTrajType, JointCondMode
     from egoallo.data.dataclass import EgoTrainingData
@@ -347,6 +348,8 @@ class DenoisingConfig:
                 hand_rotmats=hand_rotmats,
                 R_world_root=R_world_root,
                 t_world_root=t_world_root,
+                joints_wrt_world=ego_data.joints_wrt_world,  # Add joints data
+                visible_joints_mask=ego_data.visible_joints_mask,  # Add visibility mask
             )
 
 
@@ -583,6 +586,15 @@ class AbsoluteDenoiseTraj(BaseDenoiseTraj):
     t_world_root: Float[Tensor, "*batch timesteps 3"]
     """Global translation vector of the root joint."""
 
+    joints_wrt_world: Float[Tensor, "*batch timesteps 22 3"] | None
+    """Joint positions in world frame."""
+
+    visible_joints_mask: Float[Tensor, "*batch timesteps 22"] | None
+    """Mask for visible joints."""
+
+    frame_keys: tuple[int, ...]  | None = None
+    """Keys of the frames in the npz file."""
+
     def compute_loss(
         self,
         other: "AbsoluteDenoiseTraj",
@@ -751,6 +763,8 @@ class AbsoluteDenoiseTraj(BaseDenoiseTraj):
             hand_rotmats=hand_rotmats,
             R_world_root=R_world_root,
             t_world_root=t_world_root,
+            joints_wrt_world=None,  # Set to None since we don't have joints data when unpacking
+            visible_joints_mask=None,  # Set to None since we don't have visibility data when unpacking
         )
 
     def encode(

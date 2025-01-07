@@ -5,6 +5,7 @@ import time
 from pathlib import Path
 
 import os
+import cv2
 
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 
@@ -26,7 +27,6 @@ from egoallo.inference_utils import (
     load_denoiser,
 )
 from egoallo.sampling import (
-    run_sampling_with_stitching,
     run_sampling_with_masked_data,
 )
 from egoallo.transforms import SE3, SO3
@@ -34,156 +34,141 @@ from egoallo.vis_helpers import visualize_traj_and_hand_detections
 from egoallo.training_utils import ipdb_safety_net
 from egoallo.config.inference.inference_defaults import InferenceConfig
 
+from projectaria_tools.core import data_provider
 
-def main(config: InferenceConfig) -> None:
-    if config.use_ipdb:
-        import ipdb
+class AriaInference:
+    def __init__(self, config: InferenceConfig, traj_root: Path, output_path: Path, glasses_x_angle_offset: float = 0.0):
+        self.config = config
+        self.device = torch.device("cuda")
+        self.config.output_dir.mkdir(parents=True, exist_ok=True)
+        self.traj_paths = InferenceTrajectoryPaths.find(traj_root)
+        if self.traj_paths.splat_path is not None:
+            print("Found splat at", self.traj_paths.splat_path)
+        else:
+            print("No scene splat found.")
+            
+        # Read transforms from VRS / MPS, downsampled.
+        self.transforms = InferenceInputTransforms.load(
+            self.traj_paths.vrs_file, self.traj_paths.slam_root_dir, fps=30
+        ).to(device=self.device)
 
-        ipdb.set_trace()
-
-    device = torch.device("cuda")
-
-    config.output_dir.mkdir(parents=True, exist_ok=True)
-    traj_paths = InferenceTrajectoryPaths.find(
-        config.traj_root, config.output_dir, soft_link=False
-    )
-    if traj_paths.splat_path is not None:
-        print("Found splat at", traj_paths.splat_path)
-    else:
-        print("No scene splat found.")
-    # Get point cloud + floor.
-    points_data, floor_z = load_point_cloud_and_find_ground(
-        points_path=traj_paths.points_path
-    )
-
-    # Read transforms from VRS / MPS, downsampled.
-    transforms = InferenceInputTransforms.load(
-        traj_paths.vrs_file, traj_paths.slam_root_dir, fps=30
-    ).to(device=device)
-
-    # Note the off-by-one for Ts_world_cpf, which we need for relative transform computation.
-    config.traj_length = len(transforms.Ts_world_cpf) - config.start_index - 1
-    Ts_world_cpf = (
-        SE3(
-            transforms.Ts_world_cpf[
-                config.start_index : config.start_index + config.traj_length + 1
-            ]
-        )
-        @ SE3.from_rotation(
-            SO3.from_x_radians(
-                transforms.Ts_world_cpf.new_tensor(config.glasses_x_angle_offset)
+        # Note the off-by-one for Ts_world_cpf, which we need for relative transform computation.
+        self.config.traj_length = len(self.transforms.Ts_world_cpf) - self.config.start_index - 1
+        self.Ts_world_cpf = (
+            SE3(
+                self.transforms.Ts_world_cpf[
+                    self.config.start_index : self.config.start_index + self.config.traj_length + 1
+                ]
             )
+            @ SE3.from_rotation(
+                SO3.from_x_radians(
+                    self.transforms.Ts_world_cpf.new_tensor(glasses_x_angle_offset)
+                )
+            )
+        ).parameters()
+        self.pose_timestamps_sec = self.transforms.pose_timesteps[
+            self.config.start_index + 1 : self.config.start_index + self.config.traj_length + 1
+        ]
+        self.Ts_world_device = self.transforms.Ts_world_device[
+            self.config.start_index + 1 : self.config.start_index + self.config.traj_length + 1
+        ]
+        del self.transforms
+
+        self.setup_detections()
+        print(f"{self.Ts_world_cpf.shape=}")
+
+    def setup_detections(self):
+        # Get temporally corresponded HaMeR detections.
+        if self.traj_paths.hamer_outputs is not None:
+            self.hamer_detections = CorrespondedHamerDetections.load(
+                self.traj_paths.hamer_outputs,
+                self.pose_timestamps_sec,
+            ).to(self.device)
+        else:
+            print("No hand detections found.")
+            self.hamer_detections = None
+
+        # Get temporally corresponded Aria wrist and palm estimates.
+        if self.traj_paths.wrist_and_palm_poses_csv is not None:
+            self.aria_detections = CorrespondedAriaHandWristPoseDetections.load(
+                self.traj_paths.wrist_and_palm_poses_csv,
+                self.pose_timestamps_sec,
+                Ts_world_device=self.Ts_world_device.numpy(force=True),
+            ).to(self.device)
+        else:
+            print("No Aria hand detections found.")
+            self.aria_detections = None
+
+    def load_pc_and_find_ground(self) -> tuple[np.ndarray, float]:
+        """Load point cloud and find ground plane."""
+        points_data, floor_z = load_point_cloud_and_find_ground(
+            points_path=self.traj_paths.points_path,
+            cache_files=False
         )
-    ).parameters()
-    pose_timestamps_sec = transforms.pose_timesteps[
-        config.start_index + 1 : config.start_index + config.traj_length + 1
-    ]
-    Ts_world_device = transforms.Ts_world_device[
-        config.start_index + 1 : config.start_index + config.traj_length + 1
-    ]
-    del transforms
+        return points_data, floor_z
 
-    # Get temporally corresponded HaMeR detections.
-    if traj_paths.hamer_outputs is not None:
-        hamer_detections = CorrespondedHamerDetections.load(
-            traj_paths.hamer_outputs,
-            pose_timestamps_sec,
-        ).to(device)
-    else:
-        print("No hand detections found.")
-        hamer_detections = None
+    def extract_rgb_frames(self, times: list[float] | list[int] | None = None) -> list[np.ndarray]:
+        """Extract RGB frames from VRS file and save as video.
+        
+        Args:
+            times: Optional list of timestamps or frame indices to extract frames at. 
+                  If float values are provided, they are treated as timestamps in seconds.
+                  If int values are provided, they are treated as frame indices.
+                  If None, uses sequential frame indices.
+        """
+        vrs_data_provider = data_provider.create_vrs_data_provider(str(self.traj_paths.vrs_file))
+        rgb_stream_id = vrs_data_provider.get_stream_id_from_label("camera-rgb")
+        
+        rgb_frames = []
+        if times is not None:
+            # Check if times contains floats or ints
+            is_float = any(isinstance(t, float) for t in times)
+            
+            for time in times:
+                if is_float:
+                    # Use timestamp-based extraction for float values
+                    rgb_record = vrs_data_provider.get_image_data_by_time_ns(rgb_stream_id, int(time * 1e9))
+                else:
+                    # Use index-based extraction for int values
+                    rgb_record = vrs_data_provider.get_image_data_by_index(rgb_stream_id, time)
+                
+                if rgb_record is not None and rgb_record[0].pixel_frame is not None:
+                    rgb_frames.append(rgb_record[0].to_numpy_array())
+        else:
+            # Extract frames by sequential indices
+            for frame_idx in range(self.config.start_index, self.config.start_index + self.config.traj_length + 1):
+                rgb_record = vrs_data_provider.get_image_data_by_index(rgb_stream_id, frame_idx)
+                if rgb_record is not None and rgb_record[0].pixel_frame is not None:
+                    rgb_frames.append(rgb_record[0].to_numpy_array())
+        # print(f"Extracted {len(rgb_frames)} RGB frames")
+        
+        # Save frames as video
+        # if len(rgb_frames) > 0:
+        #     first_frame = rgb_frames[0]
+        #     height, width = first_frame.shape[:2]
+            
+        #     output_path = Path(self.config.output_dir) / "rgb_frames.mp4"
+        #     output_path.parent.mkdir(exist_ok=True, parents=True)
+            
+        #     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        #     out = cv2.VideoWriter(str(output_path), fourcc, 30.0, (width, height))
+            
+        #     for frame in rgb_frames:
+        #         out.write(cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
+                
+        #     out.release()
+        #     print(f"Saved RGB video to {output_path}")
+            
+        return rgb_frames
 
-    # Get temporally corresponded Aria wrist and palm estimates.
-    if traj_paths.wrist_and_palm_poses_csv is not None:
-        aria_detections = CorrespondedAriaHandWristPoseDetections.load(
-            traj_paths.wrist_and_palm_poses_csv,
-            pose_timestamps_sec,
-            Ts_world_device=Ts_world_device.numpy(force=True),
-        ).to(device)
-    else:
-        print("No Aria hand detections found.")
-        aria_detections = None
 
-    print(f"{Ts_world_cpf.shape=}")
-
-    server = None
-    if config.visualize_traj:
-        server = viser.ViserServer()
-        server.gui.configure_theme(dark_mode=True)
-
-    denoiser_network, train_config = load_denoiser(config.checkpoint_dir).to(device)
-    body_model = fncsmpl.SmplhModel.load(config.smplh_npz_path).to(device)
-
-    # traj = run_sampling_with_stitching(
-    traj = run_sampling_with_masked_data(
-        denoiser_network,
-        body_model=body_model,
-        guidance_mode=config.guidance_mode,
-        guidance_inner=config.guidance_inner,
-        guidance_post=config.guidance_post,
-        Ts_world_cpf=Ts_world_cpf,
-        hamer_detections=hamer_detections,
-        aria_detections=aria_detections,
-        num_samples=config.num_samples,
-        device=device,
-        floor_z=floor_z,
-    )
-
-    # Save outputs in case we want to visualize later.
-    if config.save_traj:
-        save_name = (
-            time.strftime("%Y%m%d-%H%M%S")
-            + f"_start_{config.start_index}_end_{config.start_index + config.traj_length}_guidance_mode_{config.guidance_mode}_guidance_post_{config.guidance_post}"
-        )
-        out_path = config.output_dir / "egoallo_outputs" / (save_name + ".npz")
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        assert not out_path.exists()
-        (config.output_dir / "egoallo_outputs" / (save_name + "_args.yaml")).write_text(
-            yaml.dump(dataclasses.asdict(config))
-        )
-
-        posed = traj.apply_to_body(body_model)
-        Ts_world_root = fncsmpl_extensions.get_T_world_root_from_cpf_pose(
-            posed, Ts_world_cpf[..., 1:, :]
-        )
-        print(f"Saving to {out_path}...", end="")
-        np.savez(
-            out_path,
-            Ts_world_cpf=Ts_world_cpf[1:, :].numpy(force=True),
-            Ts_world_root=Ts_world_root.numpy(force=True),
-            body_quats=posed.local_quats[..., :21, :].numpy(force=True),
-            left_hand_quats=posed.local_quats[..., 21:36, :].numpy(force=True),
-            right_hand_quats=posed.local_quats[..., 36:51, :].numpy(force=True),
-            contacts=traj.contacts.numpy(force=True),  # Sometimes we forgot this...
-            betas=traj.betas.numpy(force=True),
-            frame_nums=np.arange(
-                config.start_index, config.start_index + config.traj_length
-            ),
-            timestamps_ns=(np.array(pose_timestamps_sec) * 1e9).astype(np.int64),
-        )
-        print("saved!")
-
-    # Visualize.
-    if config.visualize_traj:
-        assert server is not None
-        loop_cb = visualize_traj_and_hand_detections(
-            server,
-            Ts_world_cpf[1:],
-            traj,
-            body_model,
-            hamer_detections,
-            aria_detections,
-            points_data=points_data,
-            splat_path=traj_paths.splat_path,
-            floor_z=floor_z,
-        )
-        while True:
-            loop_cb()
-
+def main(config: InferenceConfig, traj_root: Path, output_path: Path, glasses_x_angle_offset: float = 0.0) -> None:
+    inference = AriaInference(config, traj_root, output_path, glasses_x_angle_offset)
+    inference.extract_rgb_frames()
 
 if __name__ == "__main__":
     import tyro
 
     ipdb_safety_net()
+    tyro.cli(main)
 
-    main(tyro.cli(InferenceConfig))

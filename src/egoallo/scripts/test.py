@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple, Union, TYPE_CHECKING
 
+from jax import transfer_guard_device_to_host
 import torch
 import torch.utils.data
 import typeguard
@@ -20,6 +21,7 @@ import dill
 from multiprocessing import Process
 if TYPE_CHECKING:
     from egoallo.types import DenoiseTrajType
+    from egoallo.egoexo.egoexo_utils import EgoExoUtils
 
 from egoallo import fncsmpl, fncsmpl_extensions
 from egoallo import transforms as tf
@@ -51,6 +53,7 @@ from egoallo.sampling import (
 from egoallo.transforms import SE3, SO3
 from egoallo.utils.setup_logger import setup_logger
 from egoallo.training_utils import ipdb_safety_net
+# from egoallo.egoexo import EGOEXO_UTILS_INST
 
 local_config_file = CONFIG_FILE
 CFG = make_cfg(config_name="defaults", config_file=local_config_file, cli_args=[])
@@ -96,141 +99,16 @@ def save_single_traj(*,
     processor.save_sequence(traj=traj, output_path=save_path)
 
 
-# Visualize trajectories in parallel using subprocess
-def run_visualizaation(*, 
-    gt_path: Path,
-    est_path: Path | str,
-    denoise_traj_type: str,
-    take_name: str,
-    runtime_config: Any,
-    temp_output_dir: Path
-) -> None:
-    """Run visualization for a trajectory pair.
-    
-    Args:
-        gt_path: Path to ground truth trajectory file
-        est_path: Path to estimated trajectory file or empty string
-        denoise_traj_type: Type of denoising trajectory
-        take_name: Name of the take/sequence
-        runtime_config: Runtime configuration object
-        temp_output_dir: Temporary output directory
-    
-    Returns:
-        Subprocess handle for the visualization process
-    """
-    # Old subprocess implementation
-    # cmd = [
-    #     "python",
-    #     "src/egoallo/scripts/visualize_inference.py", 
-    #     "--trajectory-path", str(gt_path), str(est_path),
-    #     "--trajectory-type", denoise_traj_type,
-    #     "--smplh-model-path", str(runtime_config.smplh_npz_path),
-    #     "--output-dir", str(temp_output_dir / take_name),
-    #     "--combine-videos"
-    # ]
-
-    # # Run visualization process with inherited environment
-    # process = subprocess.Popen(
-    #     cmd,
-    #     env=os.environ.copy(),
-    #     stdout=subprocess.PIPE, 
-    #     stderr=subprocess.PIPE
-    # )
-    # return process
-
-    # Use direct API call instead
-    from egoallo.scripts.visualize_inference import visualize_saved_trajectory
-    
-    visualize_saved_trajectory(
-        trajectory_path=(gt_path, est_path) if est_path else (gt_path,),
-        trajectory_type=denoise_traj_type,
-        smplh_model_path=runtime_config.smplh_npz_path,
-        output_dir=temp_output_dir / take_name,
-        combine_videos=True if est_path else False,
-    )
-
-
 def compute_single_metrics_helper(kwargs: Dict[str, Union[DenoiseTrajType, fncsmpl.SmplhModel, torch.device]]) -> Dict[str, float]:
     return compute_single_metrics(**kwargs)
 
 def save_single_traj_helper(kwargs: Dict[str, Union[DenoiseTrajType, str, bool, SequenceProcessor, Path]]) -> None:
     return save_single_traj(**kwargs)
 
-def run_visualization_helper(kwargs: Dict[str, Union[Path, str, Any]]) -> subprocess.Popen:
-    return run_visualization(**kwargs)
 
 class DataVisualizer:
     """Handles visualization of trajectory data."""
 
-    @staticmethod
-    def save_visualization(
-        gt_traj: DenoiseTrajType,
-        denoised_traj: DenoiseTrajType,
-        body_model: fncsmpl.SmplhModel,
-        output_dir: Path,
-        output_name: str,
-        save_gt: bool = False,
-    ) -> Tuple[Path, Path]:
-        """Save visualization of ground truth and denoised trajectories."""
-        import cv2
-        import numpy as np
-
-        output_dir.mkdir(exist_ok=True, parents=True)
-
-        gt_path = output_dir / f"gt_traj_{output_name}.mp4"
-        inferred_path = output_dir / f"inferred_traj_{output_name}.mp4"
-        combined_path = output_dir / f"combined_{output_name}.mp4"
-
-        # Visualize ground truth and inference
-        if save_gt:
-            EgoTrainingData.visualize_ego_training_data(
-                gt_traj, body_model, str(gt_path)
-            )
-
-        EgoTrainingData.visualize_ego_training_data(
-            denoised_traj, body_model, str(inferred_path)
-        )
-
-        # Combine videos side by side if ground truth exists
-        if save_gt:
-            # Open both videos
-            gt_video = cv2.VideoCapture(str(gt_path))
-            inferred_video = cv2.VideoCapture(str(inferred_path))
-
-            # Get video properties
-            width = int(gt_video.get(cv2.CAP_PROP_FRAME_WIDTH))
-            height = int(gt_video.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            fps = gt_video.get(cv2.CAP_PROP_FPS)
-
-            # Create video writer for combined video
-            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-            out = cv2.VideoWriter(str(combined_path), fourcc, fps, (width*2, height))
-
-            while True:
-                ret1, frame1 = gt_video.read()
-                ret2, frame2 = inferred_video.read()
-                
-                if not ret1 or not ret2:
-                    break
-
-                # Add text labels
-                cv2.putText(frame1, 'Ground Truth', (10, 30), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255), 2)
-                cv2.putText(frame2, 'Inference', (10, 30),
-                           cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255), 2)
-
-                # Combine frames side by side
-                combined_frame = np.hstack((frame1, frame2))
-                out.write(combined_frame)
-
-            # Release everything
-            gt_video.release()
-            inferred_video.release()
-            out.release()
-
-            return gt_path, combined_path
-        
-        return gt_path, inferred_path
 
 class SequenceProcessor:
     """Handles processing of individual sequences."""
@@ -278,6 +156,15 @@ class SequenceProcessor:
             device=self.device,
         )
         gt_traj = runtime_config.denoising.from_ego_data(batch, include_hands=True)
+
+        # assign joints_wrt_world and visible_joints_mask
+        denoised_traj.joints_wrt_world = gt_traj.joints_wrt_world
+        denoised_traj.visible_joints_mask = gt_traj.visible_joints_mask
+
+        if batch.frame_keys is not None and len(batch.frame_keys) > 0:
+            gt_traj.frame_keys = batch.frame_keys
+            denoised_traj.frame_keys = batch.frame_keys
+
         return gt_traj, denoised_traj
 
 class TestRunner:
@@ -311,10 +198,17 @@ class TestRunner:
                     getattr(self.inference_config, field.name),
                 )
 
-        # FIXME: this is a temporary fix to use ExtendedBatchCollator for testing.
-        runtime_config.data_collate_fn = "TensorOnlyDataclassBatchCollator"
+        # Set collate function based on dataset type
+        if runtime_config.dataset_type == "AriaDataset" or runtime_config.dataset_type == "AriaInferenceDataset":
+            # runtime_config.data_collate_fn = "DefaultBatchCollator"
+            runtime_config.data_collate_fn = "TensorOnlyDataclassBatchCollator"
+            ds_init_config = self.inference_config.egoexo
+        else:
+            runtime_config.data_collate_fn = "TensorOnlyDataclassBatchCollator"
+            ds_init_config = runtime_config
+     
         self.dataloader = torch.utils.data.DataLoader(
-            dataset=build_dataset(cfg=runtime_config)(config=runtime_config),
+            dataset=build_dataset(cfg=runtime_config)(config=ds_init_config),
             batch_size=1,
             shuffle=False,
             # num_workers=runtime_config.num_workers,
@@ -391,7 +285,6 @@ class TestRunner:
         batch: EgoTrainingData,
         batch_idx: int,
         processor: SequenceProcessor,
-        visualizer: DataVisualizer,
         output_dir: Path,
         save_gt_vis: bool = False,
         output_name: Optional[str] = None,
@@ -428,7 +321,7 @@ class TestRunner:
             #     gt_trajs, body_model=self.body_model, device=self.device)
             # metrics = EgoAlloEvaluationMetrics(**metrics)
 
-			
+            
             # TODO: this is previous implementation of visualization routine, which would cause GPU OOM.
             # if self.runtime_config.denoising.denoising_mode == "joints_only":
             #     # import ipdb; ipdb.set_trace()
@@ -552,12 +445,9 @@ class TestRunner:
         #     return None
 
     def run(self) -> Optional[EgoAlloEvaluationMetrics]:
-        """Run the test pipeline.
-
-        Returns:
-            Dict containing paths to metrics files if metrics computed, None otherwise
-        """
+        """Run the test pipeline."""
         import tempfile
+        import shutil
 
         processor = SequenceProcessor(self.body_model, self.device)
 
@@ -589,17 +479,13 @@ class TestRunner:
                 #     "./exp/experiments_Jan_02_foot_skating_loss_combined_dataset_eval_on_egoexo"
                 # )
                 temp_output_dir.mkdir(parents=True, exist_ok=True)
-                visualizer = DataVisualizer()
                 gt_traj, denoised_traj = self._process_batch(
                     batch,
                     batch_idx,
                     processor,
-                    visualizer,
                     temp_output_dir,
                     save_gt_vis=save_gt_vis,
                 )
-                del visualizer
-
                 # TODO: the current implementation assumes that the leading `TensorDataClass` batch size dim() returns `1`.
                 gt_trajs.append(gt_traj)
                 denoised_trajs.append(denoised_traj)
@@ -688,7 +574,13 @@ class TestRunner:
             for take_name in identifiers:
                 gt_path = temp_output_dir / f"gt_{take_name}.pt" if not self.inference_config.dataset_type == "EgoExoDataset" else ""
                 est_path = temp_output_dir / f"est_{take_name}.pt" 
-                
+                # egoexo_utils: EgoExoUtils = EGOEXO_UTILS_INST
+                # Parse out take_uid from take_name
+                take_uid = take_name.split("uid_")[1].split("_t")[0]
+                this_take_name = take_name.split("name_")[1].split("_uid_")[0]
+                # breakpoint()
+                this_take_path = Path(self.inference_config.egoexo_dataset_path) / Path(this_take_name)
+
                 cmd = [
                     "python",
                     "src/egoallo/scripts/visualize_inference.py",
@@ -696,15 +588,28 @@ class TestRunner:
                     "--trajectory-type", denoise_traj_type,
                     "--smplh-model-path", str(self.runtime_config.smplh_npz_path),
                     "--output-dir", str(temp_output_dir / take_name),
-                    "--combine-videos" if gt_path else "--no-combine-videos"
+                    "--dataset-type", self.inference_config.dataset_type,
+                    "--traj-root", str(this_take_path)
                 ]
                 
                 # Remove empty arguments
                 cmd = [arg for arg in cmd if arg]
                 logger.info(f"Running command: {' '.join(cmd)}")
+                breakpoint()
                 
                 # Call visualization process
                 subprocess.call(cmd, env=os.environ.copy())
+
+            # After all operations complete successfully, copy temp dir contents to persistent location
+            persistent_output_dir = Path(self.inference_config.output_dir)
+            persistent_output_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Move contents from temp dir to persistent dir
+            for item in temp_output_dir.glob("*"):
+                if item.is_file():
+                    shutil.move(item, persistent_output_dir)
+                else:
+                    shutil.move(item, persistent_output_dir / item.name)
 
         return metrics
 

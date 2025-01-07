@@ -1,4 +1,4 @@
-valid_kpts_num_thresh: 9
+valid_kpts_num_thresh: 4
 
 gt_bodypose:
     run_demo: false

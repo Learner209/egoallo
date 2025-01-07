@@ -73,6 +73,9 @@ class EgoTrainingData(TensorDataclass):
     take_name: str = ""
     """Name of the take."""
 
+    frame_keys: tuple[int, ...] = ()
+    """Keys of the frames in the npz file."""
+
     @staticmethod
     def load_from_npz(
         body_model: fncsmpl.SmplhModel,
@@ -181,8 +184,14 @@ class EgoTrainingData(TensorDataclass):
         Creates a new EgoTrainingData instance with x,y coordinates aligned to the first frame.
         Returns a new instance with modified positions.
         """
-        # Get initial x,y position offset (ignoring z)
-        initial_xy = self.T_world_root[0, 4:6]  # First frame x,y position
+        # Get initial x,y position offset from visible joints in first frame
+        if self.visible_joints_mask is not None:
+            # Use mean of visible joints as reference point
+            visible_joints = self.joints_wrt_world[0][self.visible_joints_mask[0]]  # [num_visible, 3] 
+            initial_xy = visible_joints[..., :2].mean(dim=0)  # [2]
+        else:
+            # If no visibility mask, use mean of all joints
+            initial_xy = self.joints_wrt_world[0, :, :2].mean(dim=0)  # [2]
 
         # Align positions by subtracting x,y offset
         T_world_root_aligned = self.T_world_root.clone()
@@ -209,4 +218,5 @@ class EgoTrainingData(TensorDataclass):
             hand_quats=self.hand_quats,
             visible_joints_mask=self.visible_joints_mask,
             take_name=self.take_name,
+            frame_keys=self.frame_keys,
         )

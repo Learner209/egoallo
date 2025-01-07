@@ -210,7 +210,7 @@ class EgoExoDataset(torch.utils.data.Dataset[EgoTrainingData]):
             # end_t = start_t + self._subseq_len
         # Load slice of data
         seq_len = end_t - start_t  # +1 for exclusive end
-        frame_keys = sorted([k for k in data.keys() if isinstance(k, int)])
+        frame_keys: tuple[int, ...] = tuple(sorted([k for k in data.keys() if isinstance(k, int)]))
         slice_data = [
             data[frame_keys[t]] for t in range(start_t, end_t)
         ]  # Skip metadata key and get frame data
@@ -230,7 +230,7 @@ class EgoExoDataset(torch.utils.data.Dataset[EgoTrainingData]):
         take_name = f"name_{data['metadata']['take_name']}_uid_{data['metadata']['take_uid']}_t{start_t}_{end_t}"
 
         # Create EgoTrainingData object
-        return EgoTrainingData(
+        ret =  EgoTrainingData(
             joints_wrt_world=masked_joints,
             joints_wrt_cpf=joints_cam,
             T_world_root=torch.zeros((seq_len, 7)),
@@ -244,7 +244,10 @@ class EgoExoDataset(torch.utils.data.Dataset[EgoTrainingData]):
             hand_quats=torch.zeros((seq_len, 30, 4)),  # No hand data
             contacts=torch.zeros((seq_len, 22)),  # Default contacts
             height_from_floor=torch.zeros((seq_len, 1)),  # Default height
+            frame_keys=frame_keys, # type: ignore
         )
+        ret = ret.align_to_first_frame()
+        return ret
 
     def _process_joints(
         self,

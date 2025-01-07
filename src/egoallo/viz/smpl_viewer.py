@@ -263,13 +263,13 @@ class SMPLViewer(BaseRenderer):
 
     def render_sequence(
         self,
-        denoised_traj: DenoiseTrajType,
+        traj: DenoiseTrajType,
         body_model: SmplhModel,
         output_path: str = "output.mp4",
     ) -> None:
         """Render SMPL sequence to video using denoised trajectory data."""
         assert (
-            denoised_traj.R_world_root.dim() == 3
+            traj.R_world_root.dim() == 3
         ), "The batch size should be zero when visualizing."
         device = body_model.weights.device
 
@@ -277,18 +277,18 @@ class SMPLViewer(BaseRenderer):
         # denoised_traj = denoised_traj
 
         T_world_root = SE3.from_rotation_and_translation(
-            SO3.from_matrix(denoised_traj.R_world_root),
-            denoised_traj.t_world_root,
+            SO3.from_matrix(traj.R_world_root),
+            traj.t_world_root,
         ).parameters()
 
-        denoised_traj = denoised_traj.map(
+        traj = traj.map(
             lambda x: x.unsqueeze(0)
         )  # prepend a new axis to incorporate changes in `apply_to_body` function.
-        posed: SmplhShapedAndPosed = denoised_traj.apply_to_body(body_model)
+        posed: SmplhShapedAndPosed = traj.apply_to_body(body_model)
         posed = posed.map(
             lambda x: x.squeeze(0)
         )  # remove the first dim as a compensation for the denoised_traj unsqueeze operation.
-        denoised_traj = denoised_traj.map(lambda x: x.squeeze(0))  # restore the state
+        traj = traj.map(lambda x: x.squeeze(0))  # restore the state
         global_root_orient_aa = SO3(posed.T_world_root[..., :4]).log()
 
         pose = torch.cat(
@@ -309,26 +309,43 @@ class SMPLViewer(BaseRenderer):
             motion_sequence.append(
                 {
                     "pose": pose[i].cpu().numpy(),
-                    "shape": denoised_traj.betas[0, :10].cpu().numpy(),
+                    "shape": traj.betas[0, :10].cpu().numpy(),
                     "translation": T_world_root[i, 4:].cpu().numpy(),
                 }
             )
 
         keypoint_sequence = []
-        for i in range(posed.Ts_world_joint.shape[0]):
-            # Get joint positions from Ts_world_joint
-            vertices = posed.Ts_world_joint[i, :, 4:].cpu().numpy()  # [J, 3]
-            # Create colors array for each joint
-            colors = np.tile(
-                np.array([255, 0, 0, 128], dtype=np.uint8),
-                (vertices.shape[0], 1)
-            )  # [J, 4]
-            keypoint_sequence.append(
-                {
-                    "vertices": vertices,
-                    "colors": colors,
-                }
-            )
+        # breakpoint()
+        for i in range(traj.joints_wrt_world.shape[0]):
+            # Get visible joints for this frame
+            visible_mask = traj.visible_joints_mask[i]  # [J]
+            if visible_mask is not None:
+                # Get only visible joint positions
+                visible_joints = traj.joints_wrt_world[i][visible_mask].cpu().numpy()  # [num_visible, 3]
+                # Create colors array for visible joints
+                colors = np.tile(
+                    np.array([255, 0, 0, 255], dtype=np.uint8),
+                    (visible_joints.shape[0], 1)
+                )  # [num_visible, 4]
+                keypoint_sequence.append(
+                    {
+                        "vertices": visible_joints,
+                        "colors": colors,
+                    }
+                )
+            else:
+                # If no visibility mask, use all joints
+                joints = traj.joints_wrt_world[i].cpu().numpy()  # [J, 3]
+                colors = np.tile(
+                    np.array([255, 0, 0, 255], dtype=np.uint8),
+                    (joints.shape[0], 1)
+                )  # [J, 4]
+                keypoint_sequence.append(
+                    {
+                        "vertices": joints,
+                        "colors": colors,
+                    }
+                )
       
 
 
