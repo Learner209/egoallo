@@ -49,6 +49,7 @@ try:
     from third_party.cloudrender.cloudrender.render import (
         DirectionalLight,
         SimplePointcloud,
+        AnimatablePointcloud,
     )
     from third_party.cloudrender.cloudrender.scene import Scene
     from third_party.cloudrender.cloudrender.utils import trimesh_load_from_zip
@@ -88,6 +89,7 @@ class RendererConfig:
     resolution: Tuple[int, int] = (1280, 720)
     fps: float = 30.0
     fov: float = 75.0
+    use_blending: bool = True
 
 
 class BaseRenderer:
@@ -96,6 +98,7 @@ class BaseRenderer:
     def __init__(self, config: RendererConfig = RendererConfig()):
         self.config = config
         self.context = None
+        self.use_blending = config.use_blending
         self._setup_context()
         self._setup_buffers()
         self._configure_gl()
@@ -155,6 +158,10 @@ class BaseRenderer:
         gl.glDepthMask(gl.GL_TRUE)
         gl.glDepthFunc(gl.GL_LESS)
         gl.glDepthRange(0.0, 1.0)
+        if self.use_blending:
+            gl.glEnable(gl.GL_BLEND)
+            gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA)
+
 
 
 class SMPLViewer(BaseRenderer):
@@ -188,12 +195,14 @@ class SMPLViewer(BaseRenderer):
         # Initialize instance variables
         self.camera: Optional[PerspectiveCameraModel] = None
         self.pointcloud: Optional[SimplePointcloud] = None
+        self.keypoint_renderer: Optional[AnimatablePointcloud] = None
         self.smpl_renderer: Optional[AnimatableSMPLModel] = None
         self.shadow_map = None
 
         # Setup rendering components
         self._setup_camera()
         self._setup_scene()
+        # breakpoint()
         self._setup_lighting()
         self._setup_smpl_renderer()
 
@@ -213,6 +222,10 @@ class SMPLViewer(BaseRenderer):
         self.pointcloud = SimplePointcloud(camera=self.camera)
         self.pointcloud.generate_shadows = False
         self.pointcloud.init_context()
+
+        self.keypoint_renderer = AnimatablePointcloud(camera=self.camera)
+        self.keypoint_renderer.generate_shadows = False
+        self.keypoint_renderer.init_context()
 
         # Load scene mesh if available
         pointcloud = trimesh_load_from_zip(str(self.scene_path), "*/pointcloud.ply")
@@ -243,6 +256,7 @@ class SMPLViewer(BaseRenderer):
             gender="male",  # Can be parameterized if needed
             smpl_root="./assets/smpl_based_model",  # Update path as needed
             model_type="smplh",
+            device=torch.device("cuda" if torch.cuda.is_available() else "cpu"),
         )
         self.smpl_renderer.draw_shadows = False
         self.smpl_renderer.init_context()
@@ -270,12 +284,13 @@ class SMPLViewer(BaseRenderer):
         denoised_traj = denoised_traj.map(
             lambda x: x.unsqueeze(0)
         )  # prepend a new axis to incorporate changes in `apply_to_body` function.
-        posed = denoised_traj.apply_to_body(body_model)
+        posed: SmplhShapedAndPosed = denoised_traj.apply_to_body(body_model)
         posed = posed.map(
             lambda x: x.squeeze(0)
         )  # remove the first dim as a compensation for the denoised_traj unsqueeze operation.
         denoised_traj = denoised_traj.map(lambda x: x.squeeze(0))  # restore the state
         global_root_orient_aa = SO3(posed.T_world_root[..., :4]).log()
+
         pose = torch.cat(
             [
                 global_root_orient_aa,
@@ -289,9 +304,9 @@ class SMPLViewer(BaseRenderer):
         mesh = posed.lbs()
         T_world_cpf = SE3(get_T_world_cpf(mesh))
         # Convert SMPL data to sequence
-        sequence = []
+        motion_sequence = []
         for i in range(T_world_root.shape[0]):
-            sequence.append(
+            motion_sequence.append(
                 {
                     "pose": pose[i].cpu().numpy(),
                     "shape": denoised_traj.betas[0, :10].cpu().numpy(),
@@ -299,13 +314,37 @@ class SMPLViewer(BaseRenderer):
                 }
             )
 
+        keypoint_sequence = []
+        for i in range(posed.Ts_world_joint.shape[0]):
+            # Get joint positions from Ts_world_joint
+            vertices = posed.Ts_world_joint[i, :, 4:].cpu().numpy()  # [J, 3]
+            # Create colors array for each joint
+            colors = np.tile(
+                np.array([255, 0, 0, 128], dtype=np.uint8),
+                (vertices.shape[0], 1)
+            )  # [J, 4]
+            keypoint_sequence.append(
+                {
+                    "vertices": vertices,
+                    "colors": colors,
+                }
+            )
+      
+
+
         # Setup SMPL renderer
         # import ipdb; ipdb.set_trace()
         self.smpl_renderer.set_sequence(
-            sequence, default_frame_time=1 / self.config.fps
+            motion_sequence, default_frame_time=1 / self.config.fps
         )
         self.smpl_renderer.set_material(0.3, 1, 0, 0)
         self.scene.add_object(self.smpl_renderer)
+
+        self.keypoint_renderer.set_sequence(
+            keypoint_sequence, default_frame_time=1 / self.config.fps
+        )
+        self.scene.add_object(self.keypoint_renderer)
+
 
         # Camera looks from behind and slightly above
         camera_offset = SE3.from_rotation_and_translation(
@@ -335,9 +374,12 @@ class SMPLViewer(BaseRenderer):
                     video_writer=vw,
                     capture=capturing,
                     camera_pose=T_world_cam,
+                    body_model=body_model,
                 )
 
             self._flush_remaining_frames(video_writer=vw, capture=capturing)
+
+        del motion_sequence
 
     def _render_frame(
         self,
@@ -346,10 +388,13 @@ class SMPLViewer(BaseRenderer):
         video_writer: VideoWriter,
         capture: AsyncPBOCapture,
         camera_pose: SE3,
+        **kwargs,
     ) -> None:
         """Render a single frame with camera pose and shadow updates."""
         # Update SMPL frame
-        self.smpl_renderer.set_current_frame(frame_idx)
+        self.smpl_renderer.set_current_frame(frame_idx, **kwargs)
+        self.keypoint_renderer.set_current_frame(frame_idx)
+
         current_smpl_params = self.smpl_renderer.params_sequence[
             self.smpl_renderer.current_sequence_frame_ind
         ]
@@ -358,7 +403,6 @@ class SMPLViewer(BaseRenderer):
             current_smpl_params["shape"],
             current_smpl_params["pose"],
         )
-
         # Calculate camera position relative to SMPL model
         # Keep camera at fixed distance and height from model
         distance = 2.0  # Distance from model
@@ -446,5 +490,7 @@ def visualize_ego_training_data(
         body_model: SMPL body model for mesh generation
         output_path: Path to save the output video
     """
+    # breakpoint()
     viewer = SMPLViewer()
     viewer.render_sequence(denoised_traj, body_model, output_path)
+    del viewer

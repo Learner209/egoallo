@@ -122,7 +122,7 @@ class DenoisingConfig:
             # Default loss weights for absolute mode
             absolute_weights = {
                 "betas": 0.05,
-                "body_rotmats": 1.0,
+                "body_rotmats": 10.0,
                 "contacts": 0.05,
                 "hand_rotmats": 0.00,
                 "R_world_root": 0.25,
@@ -173,6 +173,17 @@ class DenoisingConfig:
     def is_velocity_mode(self) -> bool:
         """Check if we're using velocity-based denoising."""
         return self.denoising_mode == "velocity" or self.is_velocity_joint_cond()
+
+    def _repr_denoise_traj_type(self) -> str:
+        """Get the string representation of the denoising mode."""
+        if self.denoising_mode == "joints_only":
+            return "JointsOnlyTraj"
+        elif self.is_velocity_mode():
+            return "VelocityDenoiseTraj"
+        elif self.denoising_mode == "absolute":
+            return "AbsoluteDenoiseTraj"
+        else:
+            raise ValueError(f"Invalid denoising mode: {self.denoising_mode}")
 
     def create_trajectory(self, *args, **kwargs) -> "DenoiseTrajType":
         """Factory method to create appropriate trajectory object based on configuration."""

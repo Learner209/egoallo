@@ -13,7 +13,11 @@ import typeguard
 from jaxtyping import jaxtyped
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-
+import multiprocessing
+import subprocess
+import os
+import dill
+from multiprocessing import Process
 if TYPE_CHECKING:
     from egoallo.types import DenoiseTrajType
 
@@ -22,9 +26,7 @@ from egoallo import transforms as tf
 from egoallo.config import CONFIG_FILE, make_cfg
 from egoallo.config.inference.inference_defaults import InferenceConfig
 from egoallo.data import make_batch_collator, build_dataset
-from egoallo.config.train.train_config import (
-    EgoAlloTrainConfig
-)
+from egoallo.config.train.train_config import EgoAlloTrainConfig
 from egoallo.joints2smpl.fit_seq import joints2smpl_fit_seq, Joints2SmplFittingConfig
 from egoallo.data.dataclass import EgoTrainingData
 from egoallo.evaluation.body_evaluator import BodyEvaluator
@@ -34,7 +36,13 @@ from egoallo.inference_utils import (
     load_denoiser,
     load_runtime_config,
 )
-from egoallo.network import EgoDenoiser, EgoDenoiserConfig, AbsoluteDenoiseTraj, JointsOnlyTraj, VelocityDenoiseTraj
+from egoallo.network import (
+    EgoDenoiser,
+    EgoDenoiserConfig,
+    AbsoluteDenoiseTraj,
+    JointsOnlyTraj,
+    VelocityDenoiseTraj,
+)
 from egoallo.sampling import (
     CosineNoiseScheduleConstants,
     quadratic_ts,
@@ -51,25 +59,129 @@ CFG = make_cfg(config_name="defaults", config_file=local_config_file, cli_args=[
 logger = setup_logger(output="logs/test", name=__name__)
 
 
+class DillProcess(Process):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._target = dill.dumps(self._target)  # Save the target function as bytes, using dill
+
+    def run(self):
+        if self._target:
+            self._target = dill.loads(self._target)    # Unpickle the target function before executing
+            self._target(*self._args, **self._kwargs)  # Execute the target function
+
+
+
+# Some helper functions to ensure compatibility with multiprocessing module, used in `TestRunner.run` class.
+# reference: https://stackoverflow.com/questions/72766345/attributeerror-cant-pickle-local-object-in-multiprocessing
+# ! FIXME: the `compute_single_metrics` function is set as top-level functions to ensure compatibility with multiprocessing module, since the latter relies on pickling objects to work.
+def compute_single_metrics(
+    *, 
+    gt_traj: DenoiseTrajType,
+    est_traj: DenoiseTrajType, 
+    body_model: fncsmpl.SmplhModel,
+    device: torch.device
+) -> Dict[str, float]:
+    return est_traj._compute_metrics(gt_traj, body_model=body_model, device=device)
+
+def save_single_traj(*, 
+    traj: DenoiseTrajType,
+    take_name: str, 
+    is_gt: bool,
+    processor: SequenceProcessor,
+    output_dir: Path
+) -> None:
+    prefix = "gt" if is_gt else "est"
+    save_path = output_dir / f"{prefix}_{take_name}.pt"
+    processor.save_sequence(traj=traj, output_path=save_path)
+
+
+# Visualize trajectories in parallel using subprocess
+def run_visualizaation(*, 
+    gt_path: Path,
+    est_path: Path | str,
+    denoise_traj_type: str,
+    take_name: str,
+    runtime_config: Any,
+    temp_output_dir: Path
+) -> None:
+    """Run visualization for a trajectory pair.
+    
+    Args:
+        gt_path: Path to ground truth trajectory file
+        est_path: Path to estimated trajectory file or empty string
+        denoise_traj_type: Type of denoising trajectory
+        take_name: Name of the take/sequence
+        runtime_config: Runtime configuration object
+        temp_output_dir: Temporary output directory
+    
+    Returns:
+        Subprocess handle for the visualization process
+    """
+    # Old subprocess implementation
+    # cmd = [
+    #     "python",
+    #     "src/egoallo/scripts/visualize_inference.py", 
+    #     "--trajectory-path", str(gt_path), str(est_path),
+    #     "--trajectory-type", denoise_traj_type,
+    #     "--smplh-model-path", str(runtime_config.smplh_npz_path),
+    #     "--output-dir", str(temp_output_dir / take_name),
+    #     "--combine-videos"
+    # ]
+
+    # # Run visualization process with inherited environment
+    # process = subprocess.Popen(
+    #     cmd,
+    #     env=os.environ.copy(),
+    #     stdout=subprocess.PIPE, 
+    #     stderr=subprocess.PIPE
+    # )
+    # return process
+
+    # Use direct API call instead
+    from egoallo.scripts.visualize_inference import visualize_saved_trajectory
+    
+    visualize_saved_trajectory(
+        trajectory_path=(gt_path, est_path) if est_path else (gt_path,),
+        trajectory_type=denoise_traj_type,
+        smplh_model_path=runtime_config.smplh_npz_path,
+        output_dir=temp_output_dir / take_name,
+        combine_videos=True if est_path else False,
+    )
+
+
+def compute_single_metrics_helper(kwargs: Dict[str, Union[DenoiseTrajType, fncsmpl.SmplhModel, torch.device]]) -> Dict[str, float]:
+    return compute_single_metrics(**kwargs)
+
+def save_single_traj_helper(kwargs: Dict[str, Union[DenoiseTrajType, str, bool, SequenceProcessor, Path]]) -> None:
+    return save_single_traj(**kwargs)
+
+def run_visualization_helper(kwargs: Dict[str, Union[Path, str, Any]]) -> subprocess.Popen:
+    return run_visualization(**kwargs)
+
 class DataVisualizer:
     """Handles visualization of trajectory data."""
 
     @staticmethod
     def save_visualization(
-        gt_traj: AbsoluteDenoiseTraj,
-        denoised_traj: AbsoluteDenoiseTraj,
+        gt_traj: DenoiseTrajType,
+        denoised_traj: DenoiseTrajType,
         body_model: fncsmpl.SmplhModel,
         output_dir: Path,
         output_name: str,
         save_gt: bool = False,
     ) -> Tuple[Path, Path]:
         """Save visualization of ground truth and denoised trajectories."""
+        import cv2
+        import numpy as np
+
         output_dir.mkdir(exist_ok=True, parents=True)
 
         gt_path = output_dir / f"gt_traj_{output_name}.mp4"
         inferred_path = output_dir / f"inferred_traj_{output_name}.mp4"
+        combined_path = output_dir / f"combined_{output_name}.mp4"
 
-        # Visualize ground truth
+        # Visualize ground truth and inference
         if save_gt:
             EgoTrainingData.visualize_ego_training_data(
                 gt_traj, body_model, str(gt_path)
@@ -79,27 +191,78 @@ class DataVisualizer:
             denoised_traj, body_model, str(inferred_path)
         )
 
-        return gt_path, inferred_path
+        # Combine videos side by side if ground truth exists
+        if save_gt:
+            # Open both videos
+            gt_video = cv2.VideoCapture(str(gt_path))
+            inferred_video = cv2.VideoCapture(str(inferred_path))
 
+            # Get video properties
+            width = int(gt_video.get(cv2.CAP_PROP_FRAME_WIDTH))
+            height = int(gt_video.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            fps = gt_video.get(cv2.CAP_PROP_FPS)
+
+            # Create video writer for combined video
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            out = cv2.VideoWriter(str(combined_path), fourcc, fps, (width*2, height))
+
+            while True:
+                ret1, frame1 = gt_video.read()
+                ret2, frame2 = inferred_video.read()
+                
+                if not ret1 or not ret2:
+                    break
+
+                # Add text labels
+                cv2.putText(frame1, 'Ground Truth', (10, 30), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255), 2)
+                cv2.putText(frame2, 'Inference', (10, 30),
+                           cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255), 2)
+
+                # Combine frames side by side
+                combined_frame = np.hstack((frame1, frame2))
+                out.write(combined_frame)
+
+            # Release everything
+            gt_video.release()
+            inferred_video.release()
+            out.release()
+
+            return gt_path, combined_path
+        
+        return gt_path, inferred_path
 
 class SequenceProcessor:
     """Handles processing of individual sequences."""
 
     def __init__(self, body_model: fncsmpl.SmplhModel, device: torch.device):
-        self.body_model = body_model
+        self.body_model = body_model 
         self.device = device
+
+    def save_sequence(self, traj: DenoiseTrajType, output_path: Path) -> None:
+        """Save trajectory data to disk.
+        
+        Args:
+            traj: Trajectory data to save
+            output_path: Path to save the trajectory file
+        """
+        # Create parent directories if they don't exist
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Move trajectory to CPU using map function with force=True
+        traj_cpu = traj.map(lambda x: x.cpu().detach() if isinstance(x, torch.Tensor) else x)
+        torch.save(traj_cpu, output_path)
 
     def process_sequence(
         self,
         batch: EgoTrainingData,
-        denoiser: EgoDenoiser,
+        denoiser: EgoDenoiser, 
         runtime_config: EgoAlloTrainConfig,
         inference_config: InferenceConfig,
         device: torch.device,
     ) -> Tuple[DenoiseTrajType, DenoiseTrajType]:
         """Process a single sequence and return denoised trajectory."""
         # Run denoising with guidance
-        # breakpoint()
         denoised_traj = run_sampling_with_masked_data(
             denoiser_network=denoiser,
             body_model=self.body_model,
@@ -117,7 +280,6 @@ class SequenceProcessor:
         gt_traj = runtime_config.denoising.from_ego_data(batch, include_hands=True)
         return gt_traj, denoised_traj
 
-
 class TestRunner:
     """Main class for running the test pipeline."""
 
@@ -132,7 +294,9 @@ class TestRunner:
             self.inference_config.checkpoint_dir
         )
         self.runtime_config = runtime_config
-        self.denoiser, self.model_config = load_denoiser(self.inference_config.checkpoint_dir, runtime_config)
+        self.denoiser, self.model_config = load_denoiser(
+            self.inference_config.checkpoint_dir, runtime_config
+        )
         self.denoiser = self.denoiser.to(self.device)
 
         self.body_model = fncsmpl.SmplhModel.load(runtime_config.smplh_npz_path).to(
@@ -141,7 +305,11 @@ class TestRunner:
         # Override runtime config with inference config values
         for field in dataclasses.fields(type(self.inference_config)):
             if hasattr(runtime_config, field.name):
-                setattr(runtime_config, field.name, getattr(self.inference_config, field.name))
+                setattr(
+                    runtime_config,
+                    field.name,
+                    getattr(self.inference_config, field.name),
+                )
 
         # FIXME: this is a temporary fix to use ExtendedBatchCollator for testing.
         runtime_config.data_collate_fn = "TensorOnlyDataclassBatchCollator"
@@ -167,7 +335,7 @@ class TestRunner:
     def _save_sequence_data(
         self,
         gt_traj: DenoiseTrajType,
-        denoised_traj: DenoiseTrajType, 
+        denoised_traj: DenoiseTrajType,
         seq_idx: int,
         output_path: Path,
     ) -> None:
@@ -176,39 +344,45 @@ class TestRunner:
 
         if isinstance(gt_traj, (AbsoluteDenoiseTraj, VelocityDenoiseTraj)):
             # Convert rotation matrices to quaternions for saving
-            denoised_body_quats = SO3.from_matrix(denoised_traj.body_rotmats).wxyz # type: ignore
-            gt_body_quats = SO3.from_matrix(gt_traj.body_rotmats).wxyz # type: ignore
+            denoised_body_quats = SO3.from_matrix(denoised_traj.body_rotmats).wxyz  # type: ignore
+            gt_body_quats = SO3.from_matrix(gt_traj.body_rotmats).wxyz  # type: ignore
 
-            save_dict.update({
-                # Ground truth data
-                "groundtruth_betas": gt_traj.betas[seq_idx, :]
-                .mean(dim=0, keepdim=True)
-                .cpu(),
-                "groundtruth_T_world_root": SE3.from_rotation_and_translation(
-                    SO3.from_matrix(gt_traj.R_world_root[seq_idx]),
-                    gt_traj.t_world_root[seq_idx],
-                )
-                .parameters()
-                .cpu(),
-                "groundtruth_body_quats": gt_body_quats[seq_idx, ..., :21, :].cpu(),
-                # Denoised trajectory data
-                "sampled_betas": denoised_traj.betas.mean(dim=1, keepdim=True).cpu(),
-                "sampled_T_world_root": SE3.from_rotation_and_translation(
-                    SO3.from_matrix(denoised_traj.R_world_root),
-                    denoised_traj.t_world_root,
-                )
-                .parameters()
-                .cpu(),
-                "sampled_body_quats": denoised_body_quats[..., :21, :].cpu(),
-            })
+            save_dict.update(
+                {
+                    # Ground truth data
+                    "groundtruth_betas": gt_traj.betas[seq_idx, :]
+                    .mean(dim=0, keepdim=True)
+                    .cpu(),
+                    "groundtruth_T_world_root": SE3.from_rotation_and_translation(
+                        SO3.from_matrix(gt_traj.R_world_root[seq_idx]),
+                        gt_traj.t_world_root[seq_idx],
+                    )
+                    .parameters()
+                    .cpu(),
+                    "groundtruth_body_quats": gt_body_quats[seq_idx, ..., :21, :].cpu(),
+                    # Denoised trajectory data
+                    "sampled_betas": denoised_traj.betas.mean(
+                        dim=1, keepdim=True
+                    ).cpu(),
+                    "sampled_T_world_root": SE3.from_rotation_and_translation(
+                        SO3.from_matrix(denoised_traj.R_world_root),
+                        denoised_traj.t_world_root,
+                    )
+                    .parameters()
+                    .cpu(),
+                    "sampled_body_quats": denoised_body_quats[..., :21, :].cpu(),
+                }
+            )
 
         elif isinstance(gt_traj, JointsOnlyTraj):
-            save_dict.update({
-                # Ground truth data
-                "groundtruth_joints": gt_traj.joints[seq_idx].cpu(),
-                # Denoised trajectory data  
-                "sampled_joints": denoised_traj.joints.cpu(),
-            })
+            save_dict.update(
+                {
+                    # Ground truth data
+                    "groundtruth_joints": gt_traj.joints[seq_idx].cpu(),
+                    # Denoised trajectory data
+                    "sampled_joints": denoised_traj.joints.cpu(),
+                }
+            )
 
         torch.save(save_dict, output_path)
 
@@ -224,15 +398,22 @@ class TestRunner:
     ) -> Tuple[DenoiseTrajType, DenoiseTrajType]:
         """Process a batch of sequences."""
 
-        gt_trajs = None # shape: (batch_size, num_timesteps, ...)
-        denoised_trajs = None # shape: (num_samples==batch_size, num_timesteps, ...)
+        gt_trajs = None  # shape: (batch_size, num_timesteps, ...)
+        denoised_trajs = None  # shape: (num_samples==batch_size, num_timesteps, ...)
+
         for seq_idx in range(batch.T_world_cpf.shape[0]):
+            torch.cuda.empty_cache()
             # Process sequence to get denoised trajectory
             gt_traj, denoised_traj = processor.process_sequence(
-                batch, self.denoiser, self.runtime_config, self.inference_config, self.device
+                batch,
+                self.denoiser,
+                self.runtime_config,
+                self.inference_config,
+                self.device,
             )
+            # processor.save_sequence(gt_traj, output_dir / f"gt_traj_{seq_idx}.pt")
+            # processor.save_sequence(denoised_traj, output_dir / f"denoised_traj_{seq_idx}.pt")
 
-            # breakpoint()
             if gt_trajs is None:
                 gt_trajs = gt_traj
             else:
@@ -242,66 +423,111 @@ class TestRunner:
                 denoised_trajs = denoised_traj
             else:
                 denoised_trajs = denoised_trajs._dict_map(lambda key, value: torch.cat([value, getattr(denoised_traj, key)], dim=0) if isinstance(value, torch.Tensor) else value)
-            
-            metrics = denoised_traj._compute_metrics(gt_traj, body_model=self.body_model, device=self.device)
-            metrics = EgoAlloEvaluationMetrics(**metrics)
-        
-            if self.runtime_config.denoising.denoising_mode == "joints_only":
-                # import ipdb; ipdb.set_trace()
-                denoised_traj = denoised_traj[seq_idx]
-                # joints2smpl_fit_seq(Joints2SmplFittingConfig(), self.body_model, denoised_traj.joints.shape[0], denoised_traj.joints.cpu(), output_dir)
-                # breakpoint()
-                fit_seq_data: "EgoTrainingData" = joints2smpl_fit_seq(Joints2SmplFittingConfig(), self.body_model, gt_traj.joints.shape[0], gt_traj.joints.cpu(), output_dir)
-                # FIXME: this is a temporary fix to visualize the fit_seq_traj, set denoising mode to absolute to use from_ego_data function from `AbsoluteDenoiseTraj`.
-                _ = self.runtime_config.denoising.denoising_mode
-                self.runtime_config.denoising.denoising_mode = "absolute"
-                fit_seq_traj = self.runtime_config.denoising.from_ego_data(fit_seq_data, include_hands=True)
-                self.runtime_config.denoising.denoising_mode = _
 
-                fit_seq_traj = fit_seq_traj.map(lambda x: x.to(self.device))
-                self.body_model = self.body_model.to(self.device)
+            # metrics = denoised_trajs._compute_metrics(
+            #     gt_trajs, body_model=self.body_model, device=self.device)
+            # metrics = EgoAlloEvaluationMetrics(**metrics)
 
-                output_path = Path("./exp/debug_frame_rate_diff/")
-                output_path.mkdir(parents=True, exist_ok=True)
+			
+            # TODO: this is previous implementation of visualization routine, which would cause GPU OOM.
+            # if self.runtime_config.denoising.denoising_mode == "joints_only":
+            #     # import ipdb; ipdb.set_trace()
+            #     denoised_traj = denoised_traj[seq_idx]
+            #     # joints2smpl_fit_seq(Joints2SmplFittingConfig(), self.body_model, denoised_traj.joints.shape[0], denoised_traj.joints.cpu(), output_dir)
+            #     # breakpoint()
+            #     fit_seq_data: "EgoTrainingData" = joints2smpl_fit_seq(
+            #         Joints2SmplFittingConfig(),
+            #         self.body_model,
+            #         gt_traj.joints.shape[0],
+            #         gt_traj.joints.cpu(),
+            #         output_dir,
+            #     )
+            #     # FIXME: this is a temporary fix to visualize the fit_seq_traj, set denoising mode to absolute to use from_ego_data function from `AbsoluteDenoiseTraj`.
+            #     _ = self.runtime_config.denoising.denoising_mode
+            #     self.runtime_config.denoising.denoising_mode = "absolute"
+            #     fit_seq_traj = self.runtime_config.denoising.from_ego_data(
+            #         fit_seq_data, include_hands=True
+            #     )
+            #     self.runtime_config.denoising.denoising_mode = _
 
-                EgoTrainingData.visualize_ego_training_data(
-                    # fit_seq_traj,
-                    gt_traj,
-                    self.body_model,
-                    output_path=str(output_path / "fit_seq_traj.mp4"),
-                )
+            #     fit_seq_traj = fit_seq_traj.map(lambda x: x.to(self.device))
+            #     self.body_model = self.body_model.to(self.device)
 
+            #     output_path = Path("./exp/debug_frame_rate_diff/")
+            #     output_path.mkdir(parents=True, exist_ok=True)
+
+            #     EgoTrainingData.visualize_ego_training_data(
+            #         # fit_seq_traj,
+            #         gt_traj,
+            #         self.body_model,
+            #         output_path=str(output_path / "fit_seq_traj.mp4"),
+            #     )
+
+            # TODO: this is previous implementation of visualization routine, which would cause GPU OOM.
             # Save visualizations if requested
-            if self.inference_config.visualize_traj and self.runtime_config.denoising.denoising_mode != "joints_only":
-                logger.info(f"this take name is: {batch.take_name}")
-                timestamp = time.strftime("%Y%m%d-%H%M%S")
+            # if (
+            #     self.inference_config.visualize_traj
+            #     and self.runtime_config.denoising.denoising_mode != "joints_only"
+            # ):
+            #     logger.info(f"this take name is: {batch.take_name}")
+            #     timestamp = time.strftime("%Y%m%d-%H%M%S")
 
-                gt_path, inferred_path = visualizer.save_visualization(
-                    gt_traj[seq_idx],
-                    denoised_traj[seq_idx],
-                    self.body_model,
-                    output_dir,
-                    output_name
-                    if output_name
-                    else f"sequence_{batch_idx}_{seq_idx}.mp4",
-                    save_gt=save_gt_vis,
-                )
-                logger.info(f"pred_path: {inferred_path}")
-                if save_gt_vis:
-                    logger.info(f"gt_path: {gt_path}")
+            #     # Adaptive sampling if sequence is longer than 1500 frames
+            #     denoised_traj = denoised_traj[seq_idx]
+            #     if len(denoised_traj.t_world_root) > 1500:
+            #         # Calculate stride to get under 1500 frames
+            #         stride = len(denoised_traj.t_world_root) // 1499 + 1
+            #         denoised_traj = denoised_traj[::stride]
+            #     # Run visualization in a separate process
+            #     import multiprocessing
+            #     # TODO: this is a temporary fix to avoid OOM of GPU memory as the OpenGL python bindings context would eat up GPU MeM too fast.
+                
+            #     breakpoint()
+            #     vis_process = multiprocessing.Process(
+            #         target=visualizer.save_visualization,
+            #         args=(
+            #             gt_traj[seq_idx],
+            #             denoised_traj,
+            #             self.body_model,
+            #             output_dir,
+            #             output_name
+            #             if output_name
+            #             else f"sequence_{batch_idx}_{seq_idx}.mp4",
+            #             save_gt_vis,
+            #         ),
+            #     )
+            #     vis_process.start()
+            #     vis_process.join()  # Wait for visualization to complete
+
+            #     # Construct paths that would have been returned
+            #     gt_path = (
+            #         output_dir
+            #         / f"gt_traj_{output_name if output_name else f'sequence_{batch_idx}_{seq_idx}.mp4'}"
+            #     )
+            #     inferred_path = (
+            #         output_dir
+            #         / f"inferred_traj_{output_name if output_name else f'sequence_{batch_idx}_{seq_idx}.mp4'}"
+            #     )
+
+            #     logger.info(f"pred_path: {inferred_path}")
+            #     if save_gt_vis:
+            #         logger.info(f"gt_path: {gt_path}")
 
             # Save sequence data
-            assert (
-                output_name is not None
-                and output_name.endswith(".pt")
-                or output_name is None
-            )
-            filename = (
-                output_name if output_name else f"sequence_{batch_idx}_{seq_idx}.pt"
-            )
-            output_path = output_dir / filename
+            # assert (
+            #     output_name is not None
+            #     and output_name.endswith(".pt")
+            #     or output_name is None
+            # )
+            # filename = (
+            #     output_name if output_name else f"sequence_{batch_idx}_{seq_idx}.pt"
+            # )
+            # output_path = output_dir / filename
             # if self.runtime_config.denoising.denoising_mode != "joints_only":
             #     self._save_sequence_data(gt_traj, denoised_traj, seq_idx, output_path)
+
+        # processor.save_sequence(gt_trajs, output_dir / f"gt_traj_{output_name}.pt")
+        # processor.save_sequence(denoised_trajs, output_dir / f"denoised_traj_{output_name}.pt")
 
         return gt_trajs, denoised_trajs
 
@@ -334,14 +560,14 @@ class TestRunner:
         import tempfile
 
         processor = SequenceProcessor(self.body_model, self.device)
-        visualizer = DataVisualizer()
 
         # Create temporary directory for intermediate files
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_output_dir = Path(temp_dir)
 
-            gt_trajs = None
-            denoised_trajs = None
+            gt_trajs = []
+            denoised_trajs = []
+            identifiers = []
 
             for batch_idx, batch in tqdm(
                 enumerate(self.dataloader),
@@ -349,13 +575,21 @@ class TestRunner:
                 desc="Enumerating test loader",
                 ascii=" >=",
             ):
-                # if batch_idx == 5:
-                #     break
+                if batch_idx == 5:
+                    break
 
                 batch = batch.to(self.device)
                 save_gt_vis = (
-                    False if self.inference_config.dataset_type == "EgoExoDataset" else True
+                    False
+                    if self.inference_config.dataset_type == "EgoExoDataset"
+                    else True
                 )
+                # temp_output_dir = Path(
+                #     # "./exp/experiments_Jan_02_foot_skating_loss_combined_dataset_eval_on_amass"
+                #     "./exp/experiments_Jan_02_foot_skating_loss_combined_dataset_eval_on_egoexo"
+                # )
+                temp_output_dir.mkdir(parents=True, exist_ok=True)
+                visualizer = DataVisualizer()
                 gt_traj, denoised_traj = self._process_batch(
                     batch,
                     batch_idx,
@@ -364,21 +598,113 @@ class TestRunner:
                     temp_output_dir,
                     save_gt_vis=save_gt_vis,
                 )
+                del visualizer
 
                 # TODO: the current implementation assumes that the leading `TensorDataClass` batch size dim() returns `1`.
-                if gt_trajs is None:
-                    gt_trajs = gt_traj
-                else:
-                    gt_trajs = gt_trajs._dict_map(lambda key, value: torch.cat([value, getattr(gt_traj, key)], dim=1) if isinstance(value, torch.Tensor) else value)
+                gt_trajs.append(gt_traj)
+                denoised_trajs.append(denoised_traj)
+                identifiers.append(batch.take_name)
 
-                if denoised_trajs is None:
-                    denoised_trajs = denoised_traj
-                else:
-                    denoised_trajs = denoised_trajs._dict_map(lambda key, value: torch.cat([value, getattr(denoised_traj, key)], dim=1) if isinstance(value, torch.Tensor) else value)
+                torch.cuda.empty_cache()
+            # Prepare arguments for parallel metric computation
+            metric_args = [
+                ({
+                    'gt_traj': gt_traj,
+                    'est_traj': est_traj,
+                    'body_model': self.body_model,
+                    'device': self.device
+                },)
+                for gt_traj, est_traj in zip(gt_trajs, denoised_trajs)
+            ]
 
-            metrics = denoised_trajs._compute_metrics(gt_trajs, body_model=self.body_model, device=self.device)
-            metrics = EgoAlloEvaluationMetrics(**metrics)
-            # breakpoint()
+            # Compute metrics in parallel using DillProcess
+            with multiprocessing.get_context('spawn').Pool(processes=20) as pool:
+                trajectory_metrics = pool.starmap(
+                    compute_single_metrics_helper,
+                    metric_args
+                )
+
+            # Aggregate metrics across all trajectories
+            aggregated_metrics = {}
+            for metric_dict in trajectory_metrics:
+                for metric_name, value in metric_dict.items():
+                    if metric_name not in aggregated_metrics:
+                        aggregated_metrics[metric_name] = []
+                    aggregated_metrics[metric_name].append(value)
+
+            # Calculate mean and std for each metric
+            final_metrics = {}
+            for metric_name, values in aggregated_metrics.items():
+                values_tensor = torch.FloatTensor(values)
+                final_metrics[metric_name] = values_tensor.mean()
+                final_metrics[f"{metric_name}_std"] = values_tensor.std()
+
+            # Create evaluation metrics object with aggregated results
+            metrics = EgoAlloEvaluationMetrics(**final_metrics)
+            # Prepare arguments for parallel saving
+            save_args = []
+            for gt_traj, est_traj, take_name in zip(gt_trajs, denoised_trajs, identifiers):
+                save_args.append(({
+                    "traj": gt_traj[0],
+                    "take_name": take_name,
+                    "is_gt": True,
+                    "processor": processor,
+                    "output_dir": temp_output_dir
+                },))
+                save_args.append(({
+                    "traj": est_traj[0],
+                    "take_name": take_name,
+                    "is_gt": False,
+                    "processor": processor,
+                    "output_dir": temp_output_dir
+                },))
+
+            # Execute saves in parallel
+            with multiprocessing.get_context('spawn').Pool(processes=20) as pool:
+                pool.starmap(save_single_traj_helper, save_args)
+
+
+            # # Prepare visualization arguments for each trajectory pair
+            # vis_args = []
+            # denoise_traj_type: str = self.runtime_config.denoising._repr_denoise_traj_type()
+            # for take_name in identifiers:
+            #     gt_path = temp_output_dir / f"gt_{take_name}.pt"
+            #     est_path = temp_output_dir / f"est_{take_name}.pt" if not self.inference_config.dataset_type == "EgoExoDataset" else ""
+            #     vis_args.append(({
+            #         "gt_path": gt_path,
+            #         "est_path": est_path, 
+            #         "denoise_traj_type": denoise_traj_type,
+            #         "take_name": take_name,
+            #         "runtime_config": self.runtime_config,
+            #         "temp_output_dir": temp_output_dir
+            #     },))
+
+            # # Run visualizations in parallel using multiprocessing
+            # with multiprocessing.get_context('spawn').Pool(processes=1) as pool:
+            #     processes = pool.starmap(run_visualization_helper, vis_args)
+
+            # Run visualizations using subprocess for each trajectory
+            denoise_traj_type: str = self.runtime_config.denoising._repr_denoise_traj_type()
+            for take_name in identifiers:
+                gt_path = temp_output_dir / f"gt_{take_name}.pt" if not self.inference_config.dataset_type == "EgoExoDataset" else ""
+                est_path = temp_output_dir / f"est_{take_name}.pt" 
+                
+                cmd = [
+                    "python",
+                    "src/egoallo/scripts/visualize_inference.py",
+                    "--trajectory-path", str(gt_path), str(est_path),
+                    "--trajectory-type", denoise_traj_type,
+                    "--smplh-model-path", str(self.runtime_config.smplh_npz_path),
+                    "--output-dir", str(temp_output_dir / take_name),
+                    "--combine-videos" if gt_path else "--no-combine-videos"
+                ]
+                
+                # Remove empty arguments
+                cmd = [arg for arg in cmd if arg]
+                logger.info(f"Running command: {' '.join(cmd)}")
+                
+                # Call visualization process
+                subprocess.call(cmd, env=os.environ.copy())
 
         return metrics
 
@@ -398,5 +724,4 @@ if __name__ == "__main__":
     import tyro
 
     ipdb_safety_net()
-
     tyro.cli(main)

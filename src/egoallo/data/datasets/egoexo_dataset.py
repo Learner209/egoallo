@@ -227,6 +227,7 @@ class EgoExoDataset(torch.utils.data.Dataset[EgoTrainingData]):
         masked_joints = joints_world.clone()
         masked_joints[~visible_mask] = 0
         # T_world_root = self._process_camera_poses(slice_data)
+        take_name = f"name_{data['metadata']['take_name']}_uid_{data['metadata']['take_uid']}_t{start_t}_{end_t}"
 
         # Create EgoTrainingData object
         return EgoTrainingData(
@@ -236,6 +237,7 @@ class EgoExoDataset(torch.utils.data.Dataset[EgoTrainingData]):
             T_world_cpf=torch.zeros((seq_len, 7)),
             visible_joints_mask=visible_mask,
             mask=torch.ones(seq_len, dtype=torch.bool),
+            take_name=take_name,
             # Add other required fields with appropriate defaults
             betas=torch.zeros((1, 16)),  # Default betas
             body_quats=torch.zeros((seq_len, 21, 4)),  # Default body quaternions

@@ -448,8 +448,7 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         masked_joints = joints_wrt_world.clone()
         masked_joints[~visible_joints_mask] = 0
         kwargs["joints_wrt_world"] = masked_joints
-
-        kwargs["take_name"] = group
+        kwargs["take_name"] = f"{group}_t{start_t}_{end_t}"
 
         ret = EgoTrainingData(**kwargs)
         ret = ret.align_to_first_frame()
@@ -550,4 +549,3 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         if self.config.random_sample_mask_ratio:
             # Randomly sample between 0~mask_ratio
             return np.random.uniform(self.config.mask_ratio / 4, self.config.mask_ratio)
-        return self.config.mask_ratio
