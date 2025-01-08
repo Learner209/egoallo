@@ -1,4 +1,8 @@
 from __future__ import annotations
+# ! On some systems, EGL does not start properly if OpenGL was already initialized, that's why it's better
+# ! to keep EGLContext import on top
+# NOTE: this is a hack to make the import work, should spend time to investigate why this is happening.
+from third_party.cloudrender.cloudrender.libegl import EGLContext
 
 import logging
 import sys
@@ -13,6 +17,8 @@ from torch import Tensor
 from tqdm import tqdm
 from videoio import VideoWriter
 
+from third_party.cloudrender.cloudrender.render.pointcloud import Pointcloud
+
 from egoallo.fncsmpl import (
     SE3,
     SO3,
@@ -23,17 +29,13 @@ from egoallo.fncsmpl import (
 )
 from egoallo.fncsmpl_extensions import get_T_world_cpf
 
-from typing import TYPE_CHECKING
-
 if TYPE_CHECKING:
     from egoallo.data.dataclass import EgoTrainingData
     from egoallo.fncsmpl import SmplhModel
     from egoallo.network import AbsoluteDenoiseTraj, VelocityDenoiseTraj, JointsOnlyTraj
     from egoallo.types import DenoiseTrajType
 
-# On some systems, EGL does not start properly if OpenGL was already initialized, that's why it's better
-# to keep EGLContext import on top
-from third_party.cloudrender.cloudrender.libegl import EGLContext
+
 
 sys.path.append(str(Path(__file__).parent.parent.parent.parent))
 
@@ -160,7 +162,6 @@ class BaseRenderer:
         gl.glDepthRange(0.0, 1.0)
         if self.use_blending:
             gl.glEnable(gl.GL_BLEND)
-            gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA)
 
 
 
@@ -175,7 +176,7 @@ class SMPLViewer(BaseRenderer):
     def __init__(
         self,
         config: Optional[RendererConfig] = None,
-        scene_path: Optional[Path] = None,
+        scene_obj: Optional[Union[Path, Pointcloud.PointcloudContainer]] = None,
     ):
         """
         Initialize the SMPL viewer.
@@ -186,9 +187,10 @@ class SMPLViewer(BaseRenderer):
         """
         super().__init__(config or RendererConfig())
 
+        # breakpoint()
         # Initialize scene components
         self.scene = Scene()
-        self.scene_path = scene_path or Path(
+        self.scene_obj = scene_obj or Path(
             "./assets/cloudrender/test_assets/MPI_Etage6.zip"
         )
 
@@ -221,17 +223,22 @@ class SMPLViewer(BaseRenderer):
         # Initialize pointcloud renderer
         self.pointcloud = SimplePointcloud(camera=self.camera)
         self.pointcloud.generate_shadows = False
+        # self.pointcloud.draw_shadows = False
         self.pointcloud.init_context()
 
         self.keypoint_renderer = AnimatablePointcloud(camera=self.camera)
         self.keypoint_renderer.generate_shadows = False
+        # self.keypoint_renderer.draw_shadows = False
         self.keypoint_renderer.init_context()
 
         # Load scene mesh if available
-        pointcloud = trimesh_load_from_zip(str(self.scene_path), "*/pointcloud.ply")
+        if isinstance(self.scene_obj, Path):
+            pointcloud = trimesh_load_from_zip(str(self.scene_obj), "*/pointcloud.ply")
+        else:
+            pointcloud = self.scene_obj
         self.pointcloud.set_buffers(pointcloud)
+
         self.scene.add_object(self.pointcloud)
-        # logger.info(f"Loaded scene mesh from {self.scene_path}")
 
     def _setup_lighting(self) -> None:
         """Set up scene lighting with shadows."""
@@ -244,8 +251,8 @@ class SMPLViewer(BaseRenderer):
         # Larger shadow map for better coverage
         self.shadow_map = self.scene.add_dirlight_with_shadow(
             light=self.light,
-            shadowmap_texsize=(2048, 2048),  # Increased resolution
-            shadowmap_worldsize=(6.0, 6.0, 12.0),  # Larger area
+            shadowmap_texsize=(1024, 1024),  # Increased resolution
+            shadowmap_worldsize=(4., 4., 10.),  # Larger area
             shadowmap_center=np.array([0.0, 0.0, 1.0]).tolist(),  # Centered on subject
         )
 
@@ -259,6 +266,8 @@ class SMPLViewer(BaseRenderer):
             device=torch.device("cuda" if torch.cuda.is_available() else "cpu"),
         )
         self.smpl_renderer.draw_shadows = False
+        # self.smpl_renderer.generate_shadows = False
+
         self.smpl_renderer.init_context()
 
     def render_sequence(
@@ -498,6 +507,7 @@ def visualize_ego_training_data(
     denoised_traj: DenoiseTrajType,
     body_model: SmplhModel,
     output_path: str = "output.mp4",
+    **kwargs,
 ) -> None:
     """
     Main visualization function for denoised trajectories.
@@ -508,6 +518,5 @@ def visualize_ego_training_data(
         output_path: Path to save the output video
     """
     # breakpoint()
-    viewer = SMPLViewer()
+    viewer = SMPLViewer(**kwargs)
     viewer.render_sequence(denoised_traj, body_model, output_path)
-    del viewer

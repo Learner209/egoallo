@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple, Union, TYPE_CHECKING
 
-from jax import transfer_guard_device_to_host
 import torch
 import torch.utils.data
 import typeguard
@@ -158,8 +157,8 @@ class SequenceProcessor:
         gt_traj = runtime_config.denoising.from_ego_data(batch, include_hands=True)
 
         # assign joints_wrt_world and visible_joints_mask
-        denoised_traj.joints_wrt_world = gt_traj.joints_wrt_world
-        denoised_traj.visible_joints_mask = gt_traj.visible_joints_mask
+        denoised_traj.joints_wrt_world = gt_traj.joints_wrt_world.clone()
+        denoised_traj.visible_joints_mask = gt_traj.visible_joints_mask.clone()
 
         if batch.frame_keys is not None and len(batch.frame_keys) > 0:
             gt_traj.frame_keys = batch.frame_keys
@@ -285,9 +284,6 @@ class TestRunner:
         batch: EgoTrainingData,
         batch_idx: int,
         processor: SequenceProcessor,
-        output_dir: Path,
-        save_gt_vis: bool = False,
-        output_name: Optional[str] = None,
     ) -> Tuple[DenoiseTrajType, DenoiseTrajType]:
         """Process a batch of sequences."""
 
@@ -469,22 +465,11 @@ class TestRunner:
                     break
 
                 batch = batch.to(self.device)
-                save_gt_vis = (
-                    False
-                    if self.inference_config.dataset_type == "EgoExoDataset"
-                    else True
-                )
-                # temp_output_dir = Path(
-                #     # "./exp/experiments_Jan_02_foot_skating_loss_combined_dataset_eval_on_amass"
-                #     "./exp/experiments_Jan_02_foot_skating_loss_combined_dataset_eval_on_egoexo"
-                # )
                 temp_output_dir.mkdir(parents=True, exist_ok=True)
                 gt_traj, denoised_traj = self._process_batch(
                     batch,
                     batch_idx,
                     processor,
-                    temp_output_dir,
-                    save_gt_vis=save_gt_vis,
                 )
                 # TODO: the current implementation assumes that the leading `TensorDataClass` batch size dim() returns `1`.
                 gt_trajs.append(gt_traj)
@@ -529,57 +514,38 @@ class TestRunner:
             metrics = EgoAlloEvaluationMetrics(**final_metrics)
             # Prepare arguments for parallel saving
             save_args = []
+
             for gt_traj, est_traj, take_name in zip(gt_trajs, denoised_trajs, identifiers):
                 save_args.append(({
                     "traj": gt_traj[0],
                     "take_name": take_name,
                     "is_gt": True,
                     "processor": processor,
-                    "output_dir": temp_output_dir
+                    "output_dir": temp_output_dir / take_name
                 },))
                 save_args.append(({
                     "traj": est_traj[0],
                     "take_name": take_name,
                     "is_gt": False,
                     "processor": processor,
-                    "output_dir": temp_output_dir
+                    "output_dir": temp_output_dir / take_name
                 },))
 
             # Execute saves in parallel
             with multiprocessing.get_context('spawn').Pool(processes=20) as pool:
                 pool.starmap(save_single_traj_helper, save_args)
 
-
-            # # Prepare visualization arguments for each trajectory pair
-            # vis_args = []
-            # denoise_traj_type: str = self.runtime_config.denoising._repr_denoise_traj_type()
-            # for take_name in identifiers:
-            #     gt_path = temp_output_dir / f"gt_{take_name}.pt"
-            #     est_path = temp_output_dir / f"est_{take_name}.pt" if not self.inference_config.dataset_type == "EgoExoDataset" else ""
-            #     vis_args.append(({
-            #         "gt_path": gt_path,
-            #         "est_path": est_path, 
-            #         "denoise_traj_type": denoise_traj_type,
-            #         "take_name": take_name,
-            #         "runtime_config": self.runtime_config,
-            #         "temp_output_dir": temp_output_dir
-            #     },))
-
-            # # Run visualizations in parallel using multiprocessing
-            # with multiprocessing.get_context('spawn').Pool(processes=1) as pool:
-            #     processes = pool.starmap(run_visualization_helper, vis_args)
-
             # Run visualizations using subprocess for each trajectory
             denoise_traj_type: str = self.runtime_config.denoising._repr_denoise_traj_type()
             for take_name in identifiers:
-                gt_path = temp_output_dir / f"gt_{take_name}.pt" if not self.inference_config.dataset_type == "EgoExoDataset" else ""
-                est_path = temp_output_dir / f"est_{take_name}.pt" 
+                gt_path = temp_output_dir / take_name / f"gt_{take_name}.pt"
+                est_path = temp_output_dir / take_name / f"est_{take_name}.pt" 
                 # egoexo_utils: EgoExoUtils = EGOEXO_UTILS_INST
                 # Parse out take_uid from take_name
                 take_uid = take_name.split("uid_")[1].split("_t")[0]
                 this_take_name = take_name.split("name_")[1].split("_uid_")[0]
                 # breakpoint()
-                this_take_path = Path(self.inference_config.egoexo_dataset_path) / Path(this_take_name)
+                this_take_path = Path(self.inference_config.egoexo_dataset_path) / "takes" / Path(this_take_name)
 
                 cmd = [
                     "python",
@@ -589,7 +555,7 @@ class TestRunner:
                     "--smplh-model-path", str(self.runtime_config.smplh_npz_path),
                     "--output-dir", str(temp_output_dir / take_name),
                     "--dataset-type", self.inference_config.dataset_type,
-                    "--traj-root", str(this_take_path)
+                    "--config.egoexo.traj_root", str(this_take_path)
                 ]
                 
                 # Remove empty arguments

@@ -78,6 +78,9 @@ class InferenceConfig:
     class EgoExoConfig:
         """Configuration specific to EgoExo dataset."""
         
+        traj_root: Path = Path("./datasets/egoexo-default/takes/cmu_bike_0")
+        """Path to trajectory root"""
+
         dataset_path: Path = Path("./datasets/egoexo-default")
         """Path to EgoExo dataset"""
         
@@ -96,8 +99,11 @@ class InferenceConfig:
         use_pseudo: bool = False
         """Whether to use pseudo annotations"""
 
-        coord: str = "null" 
+        coord: str = "global" 
         """Coordinate system to use"""
+
+        gt_ground_height_anno_dir: Path = Path("./exp/egoexo-default-exp/egoexo/egoexo-default-gt-output/bodypose/canonical/time_12_22_18_09_59/logs/annotation/manual")
+        """Ground height for ground truth"""
 
         def __getitem__(self, key: str) -> Any:
             """Enable dictionary-style access to attributes."""

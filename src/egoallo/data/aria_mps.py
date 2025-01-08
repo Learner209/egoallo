@@ -5,16 +5,18 @@ import numpy as np
 from projectaria_tools.core import mps
 from projectaria_tools.core.mps.utils import filter_points_from_confidence
 from typing import Optional, Tuple
+import tyro
 from egoallo.utils.setup_logger import setup_logger
+from third_party.cloudrender.cloudrender.render.pointcloud import Pointcloud
 
 logger = setup_logger(output=None, name=__name__)
 
 
 def load_point_cloud_and_find_ground(
     points_path: Path,
-    return_points: Literal["all", "filtered", "less_filtered"] = "less_filtered",
+    return_points: Literal["all", "filtered", "less_filtered"] = "less_filtered", 
     cache_files: bool = True,
-) -> Tuple[np.ndarray, float]:
+) -> Tuple[Pointcloud.PointcloudContainer, np.ndarray, float]:
     """Load an Aria MPS point cloud and find the ground plane.
 
     Args:
@@ -112,10 +114,37 @@ def load_point_cloud_and_find_ground(
 
     # Re-fit plane to inliers.
     floor_z = float(np.median(zs[np.abs(zs - best_z) < 0.01]))
+    
+    # Select points based on return_points parameter
     if return_points == "filtered":
-        return filtered_points_data, floor_z
+        vertices = filtered_points_data
     elif return_points == "less_filtered":
-        return less_filtered_points_data, floor_z
+        vertices = less_filtered_points_data
     else:
         assert points_data is not None
-        return np.array([x.position_world for x in points_data]), floor_z
+        vertices = np.array([x.position_world for x in points_data])
+    # Create colors based on z-values using percentiles to be robust to outliers
+    z_values = vertices[:, 2]
+    z_5th = np.percentile(z_values, 5)
+    z_95th = np.percentile(z_values, 95)
+    z_normalized = np.clip((z_values - z_5th) / (z_95th - z_5th), 0, 1)
+    
+    # Create a colormap that maps z-values to RGB colors
+    colors = np.zeros((len(vertices), 4), dtype=np.uint8)
+    
+    # Red channel - increases with height
+    colors[:, 0] = (255 * z_normalized).astype(np.uint8)
+    # Green channel - inverse of height  
+    colors[:, 1] = (255 * (1 - z_normalized)).astype(np.uint8)
+    # Blue channel - varies sinusoidally with height
+    colors[:, 2] = (128 + 127 * np.sin(z_normalized * 4 * np.pi)).astype(np.uint8)
+    # Alpha channel - full opacity
+    colors[:, 3] = 255
+    
+    # Create PointcloudContainer
+    pc_container = Pointcloud.PointcloudContainer(vertices=vertices, colors=colors)
+    
+    return pc_container, vertices, floor_z
+
+if __name__ == "__main__":
+    tyro.cli(load_point_cloud_and_find_ground)

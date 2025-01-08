@@ -24,7 +24,6 @@ def visualize_saved_trajectory(
     smplh_model_path: Path = Path("./data/smplh/neutral/model.npz"),
     output_dir: Path = Path("./visualization_output"),
     device: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu"),
-    traj_root: Path = Path(""),
 ) -> None:
     """Visualize saved trajectory data.
     
@@ -38,9 +37,8 @@ def visualize_saved_trajectory(
     """
     # Create output directory
     output_dir.mkdir(exist_ok=True, parents=True)
+    traj_root = config.egoexo.traj_root
 
-    assert len(trajectory_path) == 2 and dataset_type != "EgoExoDataset" or len(trajectory_path) == 1 and dataset_type == "EgoExoDataset", "trajectory_path must be a tuple of length 2"
-    
     # Load SMPL-H body model
     body_model = fncsmpl.SmplhModel.load(smplh_model_path).to(device)
     
@@ -49,12 +47,15 @@ def visualize_saved_trajectory(
     pred_path = output_dir / "pred_trajectory.mp4" 
     combined_path = output_dir / "combined_trajectory.mp4"
 
+    assert len(trajectory_path) == 2, "trajectory_path must be a tuple of length 2"
+
     if dataset_type == "AdaptiveAmassHdf5Dataset" or dataset_type == "VanillaEgoAmassHdf5Dataset":
         # Load both ground truth and predicted trajectories
-        gt_traj = torch.load(trajectory_path[0], map_location=device)
-        pred_traj = torch.load(trajectory_path[1], map_location=device)
+        gt_traj: DenoiseTrajType = torch.load(trajectory_path[0], map_location=device)
+        pred_traj: DenoiseTrajType = torch.load(trajectory_path[1], map_location=device)
         
         # Visualize ground truth
+        # breakpoint()
         EgoTrainingData.visualize_ego_training_data(
             gt_traj,
             body_model,
@@ -64,21 +65,28 @@ def visualize_saved_trajectory(
         # Visualize prediction
         EgoTrainingData.visualize_ego_training_data(
             pred_traj,
+            # gt_traj,
             body_model, 
             str(pred_path)
         )
     elif dataset_type == "AriaDataset" or dataset_type == "AriaInferenceDataset" or dataset_type == "EgoExoDataset":
         # Just load and visualize prediction
-        pred_traj = torch.load(trajectory_path[0], map_location=device)
-        EgoTrainingData.visualize_ego_training_data(
-            pred_traj,
-            body_model,
-            str(pred_path)
-        )
+        pred_traj: DenoiseTrajType = torch.load(trajectory_path[1], map_location=device)
+   
 
         frame_keys = pred_traj.frame_keys if pred_traj.frame_keys and len(pred_traj.frame_keys) > 0 else None
         aria_inference_toolkit = AriaInference(config, traj_root, output_path=output_dir, glasses_x_angle_offset=0.0)
         rgb_frames = aria_inference_toolkit.extract_rgb_frames(list(frame_keys))
+        pc_container, points_data, floor_z = aria_inference_toolkit.load_pc_and_find_ground()
+        # breakpoint()
+
+        EgoTrainingData.visualize_ego_training_data(
+            pred_traj,
+            body_model,
+            str(pred_path),
+            scene_obj=pc_container
+            # scene_obj=""
+        )
         # Save frames as video
         # breakpoint()
         # Save frames as video
@@ -95,6 +103,14 @@ def visualize_saved_trajectory(
             out.release()
     else:
         raise ValueError(f"Invalid dataset type: {dataset_type}")
+    
+    # Get masked joints from visibility mask
+    masked_joints = []
+    assert pred_traj.visible_joints_mask is not None, "visible_joints_mask is not present in the trajectory" # gt_traj can be unbound
+    # Get indices of joints that are masked in at least one frame
+    masked_indices = torch.where(~pred_traj.visible_joints_mask.any(dim=0))[0]
+    # Map indices to joint names using SMPLH joint names
+    masked_joints = [SMPLH_BODY_JOINTS[idx] for idx in masked_indices]
 
     gt_video = cv2.VideoCapture(str(gt_path))
     pred_video = cv2.VideoCapture(str(pred_path))
@@ -113,7 +129,6 @@ def visualize_saved_trajectory(
     # Create video writer for combined video
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
     out = cv2.VideoWriter(str(combined_path), fourcc, fps, (max_width, total_height))
-
     while True:
         ret1, frame1 = gt_video.read()
         ret2, frame2 = pred_video.read()
@@ -135,6 +150,15 @@ def visualize_saved_trajectory(
         cv2.putText(frame2, 'Prediction', (10, 30),
                     cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255), 2)
 
+        # Add masked joints text
+        y_offset = 60
+        cv2.putText(frame1, 'Masked Joints:', (10, y_offset),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,255,255), 1)
+        for i, joint in enumerate(masked_joints):
+            y_pos = y_offset + (i+1)*20
+            cv2.putText(frame1, joint, (20, y_pos),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,255,255), 1)
+
         # Combine frames vertically
         combined_frame = np.vstack((frame1, frame2))
         out.write(combined_frame)
@@ -152,7 +176,6 @@ def main(
     smplh_model_path: Path = Path("./data/smplh/neutral/model.npz"),
     output_dir: Path = Path("./visualization_output"),
     device: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu"),
-    traj_root: Path = Path(""),
 ) -> None:
     """Main entry point for trajectory visualization.
     
@@ -172,7 +195,6 @@ def main(
         smplh_model_path=smplh_model_path,
         output_dir=output_dir,
         device=device,
-        traj_root=traj_root
     )
 
 if __name__ == "__main__":

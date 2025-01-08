@@ -280,7 +280,7 @@ class body_pose_anno_loader(hand_pose_anno_loader):
 
             try:
                 # Load point cloud and find ground
-                _, ground_height = load_point_cloud_and_find_ground(
+                _, _, ground_height = load_point_cloud_and_find_ground(
                     Path(point_cloud_path), return_points="filtered", cache_files=False
                 )
                 self.ground_heights[take_uid] = float(ground_height)

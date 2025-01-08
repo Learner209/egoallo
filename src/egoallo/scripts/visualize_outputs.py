@@ -179,7 +179,7 @@ def load_and_visualize(
         print("No scene splat found.")
 
     # Get point cloud + floor.
-    points_data, floor_z = load_point_cloud_and_find_ground(
+    points_data, _, floor_z = load_point_cloud_and_find_ground(
         points_path=paths.points_path, return_points= "filtered", cached_pts_path=traj_dir
     )
 

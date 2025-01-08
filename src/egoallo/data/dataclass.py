@@ -171,11 +171,13 @@ class EgoTrainingData(TensorDataclass):
         data: "DenoiseTrajType",
         body_model: fncsmpl.SmplhModel,
         output_path: str = "output.mp4",
+        **kwargs,
     ):
         viz_ego_data(
             data,
             body_model=body_model,
             output_path=output_path,
+            **kwargs,
         )
 
     @jaxtyped(typechecker=typeguard.typechecked)

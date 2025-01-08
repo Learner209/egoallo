@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
+from typing import TYPE_CHECKING
 import time
 from pathlib import Path
 
@@ -33,6 +34,9 @@ from egoallo.transforms import SE3, SO3
 from egoallo.vis_helpers import visualize_traj_and_hand_detections
 from egoallo.training_utils import ipdb_safety_net
 from egoallo.config.inference.inference_defaults import InferenceConfig
+
+if TYPE_CHECKING:
+    from third_party.cloudrender.cloudrender.render.pointcloud import Pointcloud
 
 from projectaria_tools.core import data_provider
 
@@ -99,13 +103,13 @@ class AriaInference:
             print("No Aria hand detections found.")
             self.aria_detections = None
 
-    def load_pc_and_find_ground(self) -> tuple[np.ndarray, float]:
+    def load_pc_and_find_ground(self) -> tuple[Pointcloud.PointcloudContainer, np.ndarray, float]:
         """Load point cloud and find ground plane."""
-        points_data, floor_z = load_point_cloud_and_find_ground(
+        pc_container, points_data, floor_z = load_point_cloud_and_find_ground(
             points_path=self.traj_paths.points_path,
-            cache_files=False
+            cache_files=False,
         )
-        return points_data, floor_z
+        return pc_container, points_data, floor_z
 
     def extract_rgb_frames(self, times: list[float] | list[int] | None = None) -> list[np.ndarray]:
         """Extract RGB frames from VRS file and save as video.

@@ -25,6 +25,7 @@ import typeguard
 from torch import Tensor
 from egoallo.mapping import EGOEXO4D_BODYPOSE_TO_SMPLH_INDICES
 from egoallo.utils.setup_logger import setup_logger
+from pathlib import Path
 
 logger = setup_logger(output=None, name=__name__)
 import joblib
@@ -42,6 +43,8 @@ class Dataset_EgoExo(Dataset):
         self.root_poses = os.path.join(self.root, "annotations", "ego_pose",self.split, "body")
         self.use_pseudo = config['use_pseudo']
         self.coord = config["coord"]
+        gt_ground_height_anno_dir = config["gt_ground_height_anno_dir"]
+        self.gt_ground_height = json.load(open(Path(gt_ground_height_anno_dir) / f"ego_pose_gt_anno_{self.split}_public_height.json"))
         # self.slice_window =  config["window_size"]
         self.slice_window = 128
         
@@ -72,10 +75,11 @@ class Dataset_EgoExo(Dataset):
             no_cam_list = []
 
             cnt = 0
+            # breakpoint()
             for take_uid in tqdm(self.takes_metadata, total=len(self.takes_metadata), desc="takes_metadata", ascii=' >='):
         
-                if cnt > 50:
-                    break
+                # if cnt > 50:
+                #     break
                 cnt += 1
                 if take_uid+".json" in self.cameras:
                     camera_json = json.load(open(os.path.join(self.root_poses.replace("body", "camera_pose"),take_uid+".json")))
@@ -127,6 +131,10 @@ class Dataset_EgoExo(Dataset):
         # logger.info('No camera list: {}'.format(no_cam_list))
 
     def translate_poses(self, anno, cams, coord):
+        """
+        Translate poses from EgoExo4D to global coordinates.
+        NOTE: the raw ['camera_extrinsics'] are in global coordinates, which transforms world coordinates to camera coordinates.
+        """
         trajectory = {}
         to_remove = []
         for key in cams.keys():
@@ -248,7 +256,7 @@ class Dataset_EgoExo(Dataset):
 
         camera_json = json.load(open(os.path.join(self.root_poses.replace("body", "camera_pose"),take_uid+".json")))
         take_name = camera_json['metadata']['take_name']
-    
+        gt_ground_height = self.gt_ground_height[take_uid]
         if self.use_pseudo and take_uid in self.pseudo_annotated_takes:
             pose_json = json.load(open(os.path.join(self.root_poses,"automatic",take_uid+".json")))
             if (len(pose_json) > (self.slice_window +2)) and self.split == "train":
@@ -305,11 +313,13 @@ class Dataset_EgoExo(Dataset):
         joints_world, visible_mask = self._process_joints(
             skeletons_window, # T, 17, 3
             flags_window.float(), # T, 17
-            ground_height=0,
+            ground_height=0.0,
+            # ground_height=float(gt_ground_height),
             return_smplh_joints=True,
             num_joints=22,
             debug_vis=False,
         )
+        # breakpoint()
         masked_joints = joints_world.clone()
         masked_joints[~visible_mask] = 0
         # T_world_root = self._process_camera_poses(slice_data)
