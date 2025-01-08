@@ -241,14 +241,8 @@ class Dataset_EgoExo(Dataset):
                     # Valid mapping - copy data
                     smplh_world[:, smplh_idx] = data[:, ego_idx]
                     smplh_visible[:, smplh_idx] = vis[:, ego_idx]
-
-            # Subtract ground height from world positions
-            smplh_world[..., 2] -= ground_height  # Subtract from z-coordinate
-
             return smplh_world, smplh_visible
         else:
-            # Subtract ground height from world positions for non-SMPLH case
-            data[..., 2] -= ground_height  # Subtract from z-coordinate
             return data, vis.bool()
 
     def __getitem__(self, index):
@@ -256,7 +250,7 @@ class Dataset_EgoExo(Dataset):
 
         camera_json = json.load(open(os.path.join(self.root_poses.replace("body", "camera_pose"),take_uid+".json")))
         take_name = camera_json['metadata']['take_name']
-        gt_ground_height = self.gt_ground_height[take_uid]
+        gt_ground_height = self.gt_ground_height[take_uid] if take_uid in self.gt_ground_height else 0.0
         if self.use_pseudo and take_uid in self.pseudo_annotated_takes:
             pose_json = json.load(open(os.path.join(self.root_poses,"automatic",take_uid+".json")))
             if (len(pose_json) > (self.slice_window +2)) and self.split == "train":
@@ -340,10 +334,13 @@ class Dataset_EgoExo(Dataset):
             hand_quats=torch.zeros((len(frames_window), 30, 4)),  # T x 30 x 4 for hand joint rotations
             contacts=torch.zeros((len(frames_window), 22)),  # T x 22 for contact states
             height_from_floor=torch.full((len(frames_window), 1), gt_ground_height),  # T x 1
-            take_name=take_name,
-            frame_keys=tuple(int(f) for f in frames_window),  # Convert to tuple of ints
+            metadata=EgoTrainingData.MetaData( # raw data.
+                take_name=take_name,
+                frame_keys=tuple(int(f) for f in frames_window),  # Convert to tuple of ints
+                stage="raw",
+            ),
         )
-        ret = ret.align_to_first_frame()
+        ret = ret.preprocess()
         # breakpoint()
         return ret
        

@@ -66,7 +66,7 @@ def main(
             denoising_config = network.DenoisingConfig(
                 denoising_mode="absolute", include_hands=True
             )
-            train_traj = denoising_config.from_ego_data(train_data)
+            # train_traj = denoising_config.from_ego_data(train_data)
 
             # Adaptive sampling if sequence is longer than 1500 frames
             # if len(train_traj.t_world_root) > 1500:

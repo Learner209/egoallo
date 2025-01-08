@@ -237,16 +237,19 @@ class EgoExoDataset(torch.utils.data.Dataset[EgoTrainingData]):
             T_world_cpf=torch.zeros((seq_len, 7)),
             visible_joints_mask=visible_mask,
             mask=torch.ones(seq_len, dtype=torch.bool),
-            take_name=take_name,
             # Add other required fields with appropriate defaults
             betas=torch.zeros((1, 16)),  # Default betas
             body_quats=torch.zeros((seq_len, 21, 4)),  # Default body quaternions
             hand_quats=torch.zeros((seq_len, 30, 4)),  # No hand data
             contacts=torch.zeros((seq_len, 22)),  # Default contacts
             height_from_floor=torch.zeros((seq_len, 1)),  # Default height
-            frame_keys=frame_keys, # type: ignore
+            metadata=EgoTrainingData.MetaData( # raw data.
+                take_name=take_name,
+                frame_keys=frame_keys, # type: ignore
+                stage="raw",
+            ),
         )
-        ret = ret.align_to_first_frame()
+        ret = ret.preprocess()
         return ret
 
     def _process_joints(

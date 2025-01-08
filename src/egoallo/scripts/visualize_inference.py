@@ -71,10 +71,13 @@ def visualize_saved_trajectory(
         )
     elif dataset_type == "AriaDataset" or dataset_type == "AriaInferenceDataset" or dataset_type == "EgoExoDataset":
         # Just load and visualize prediction
+        from egoallo.network import AbsoluteDenoiseTraj
         pred_traj: DenoiseTrajType = torch.load(trajectory_path[1], map_location=device)
-   
+        
+        assert isinstance(pred_traj, AbsoluteDenoiseTraj), "Prediction trajectory should be AbsoluteDenoiseTraj for visualization."
+        assert pred_traj.metadata.stage == "postprocessed", "Prediction trajectory should be postprocessed before visualization."
 
-        frame_keys = pred_traj.frame_keys if pred_traj.frame_keys and len(pred_traj.frame_keys) > 0 else None
+        frame_keys = pred_traj.metadata.frame_keys if pred_traj.metadata.frame_keys and len(pred_traj.metadata.frame_keys) > 0 else None
         aria_inference_toolkit = AriaInference(config, traj_root, output_path=output_dir, glasses_x_angle_offset=0.0)
         rgb_frames = aria_inference_toolkit.extract_rgb_frames(list(frame_keys))
         pc_container, points_data, floor_z = aria_inference_toolkit.load_pc_and_find_ground()

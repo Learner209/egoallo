@@ -108,6 +108,7 @@ class AriaInference:
         pc_container, points_data, floor_z = load_point_cloud_and_find_ground(
             points_path=self.traj_paths.points_path,
             cache_files=False,
+            return_points="filtered",
         )
         return pc_container, points_data, floor_z
 

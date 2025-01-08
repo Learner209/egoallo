@@ -79,6 +79,9 @@ class VanillaEgoAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         random_variable_len_proportion: float = 0.3,
         random_variable_len_min: int = 16,
     ) -> None:
+        import warnings
+        warnings.warn("VanillaEgoAmassHdf5Dataset is deprecated. Use AdaptiveAmassHdf5Dataset instead.", DeprecationWarning, stacklevel=2)
+
         min_subseq_len = None
 
         self.config = config
@@ -421,6 +424,9 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         # assert num_joints == 22, f"Expected 22 joints, got {num_joints}"
         device = kwargs["joints_wrt_world"].device
 
+        # NOTE: the height from floor shoud be set to zeros as the preprocessing process alredy subtracted the floor height. 
+        kwargs['height_from_floor'] = torch.zeros((seq_len, 1), dtype=torch.float32)
+
         mask_ratio = self._get_mask_ratio()
         num_masked = int(num_joints * mask_ratio)
         visible_joints_mask = torch.ones(
@@ -448,11 +454,18 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         masked_joints = joints_wrt_world.clone()
         masked_joints[~visible_joints_mask] = 0
         kwargs["joints_wrt_world"] = masked_joints
-        # uid servers as a null value just for compatibility with EgoExoDataset
-        kwargs["take_name"] = f"name_{group}_uid_{group}_t{start_t}_{end_t}"
 
-        ret = EgoTrainingData(**kwargs)
-        ret = ret.align_to_first_frame()
+        # Create metadata object first
+        metadata = EgoTrainingData.MetaData()
+        metadata.stage = "raw"  # Set initial stage
+        # uid servers as a null value just for compatibility with EgoExoDataset
+        metadata.take_name = f"name_{group}_uid_{group}_t{start_t}_{end_t}"
+        
+        # Add metadata to kwargs before creating EgoTrainingData
+        kwargs["metadata"] = metadata
+        
+        ret = EgoTrainingData(**kwargs)  # Create with metadata
+        ret = ret.preprocess()  # Preprocess data (will update metadata.stage)
 
         return ret
 

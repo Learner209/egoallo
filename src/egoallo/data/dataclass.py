@@ -1,9 +1,11 @@
 from pathlib import Path
+from tarfile import AbsoluteLinkError
 from typing import Union, assert_never, TYPE_CHECKING
 import dataclasses
 import numpy as np
 import torch
 import torch.utils.data
+from torch.utils.data.dataloader import _InfiniteConstantSampler
 import typeguard
 from jaxtyping import Bool, Float, jaxtyped, Array
 from egoallo.transforms import SO3, SE3
@@ -16,10 +18,11 @@ if TYPE_CHECKING:
 from .. import fncsmpl, fncsmpl_extensions
 from .. import transforms as tf
 from ..tensor_dataclass import TensorDataclass
-from typing import Optional, TYPE_CHECKING
-
+from typing import Optional, TYPE_CHECKING, Literal
 if TYPE_CHECKING:
     from ..network import EgoDenoiserConfig
+    from ..network import AbsoluteDenoiseTraj
+    from egoallo.types import DenoiseTrajType
 from ..viz.smpl_viewer import visualize_ego_training_data as viz_ego_data
 
 from jaxtyping import Float, jaxtyped
@@ -42,12 +45,8 @@ class EgoTrainingData(TensorDataclass):
     betas: Float[Tensor, "*batch 1 16"]
     """Body shape parameters."""
 
-    # Excluded because not needed.
     joints_wrt_world: Float[Tensor, "*batch timesteps 22 3"]
     """Joint positions relative to the world frame."""
-    # @property
-    # def joints_wrt_world(self) -> Tensor:
-    #     return tf.SE3(self.T_world_cpf[..., None, :]) @ self.joints_wrt_cpf
 
     body_quats: Float[Tensor, "*batch timesteps 21 4"]
     """Local orientations for each body joint."""
@@ -70,17 +69,23 @@ class EgoTrainingData(TensorDataclass):
     visible_joints_mask: Bool[Tensor, "*batch timesteps 22"] | None
     """Boolean mask indicating which joints are visible (not masked)"""
 
-    # visible_joints: Float[Tensor, "*batch timesteps 21 3"] | None
-    # """Joint positions relative to the central pupil frame for visible joints."""
+    @dataclass
+    class MetaData:
+        """Metadata about the trajectory."""
+        take_name: str = ""
+        """Name of the take."""
 
-    take_name: str = ""
-    """Name of the take."""
+        frame_keys: tuple[int, ...] = ()
+        """Keys of the frames in the npz file."""
 
-    frame_keys: tuple[int, ...] = ()
-    """Keys of the frames in the npz file."""
+        initial_xy: Float[Tensor, "*batch 2"] = torch.FloatTensor([0.0, 0.0])
+        """Initial x,y position offset from visible joints in first frame"""
 
-    initial_xy: Float[Tensor, "*batch 2"] = torch.FloatTensor([0.0, 0.0])
-    """Initial x,y position offset from visible joints in first frame"""
+        stage: Literal["raw", "preprocessed", "postprocessed"] = "raw"
+        """Processing stage of the data: 'raw' (before preprocessing), 'preprocessed' (between pre/post), or 'postprocessed' (after postprocessing)."""
+
+    metadata: MetaData = dataclasses.field(default_factory=MetaData)
+    """Metadata about the trajectory."""
 
     @staticmethod
     def load_from_npz(
@@ -131,18 +136,7 @@ class EgoTrainingData(TensorDataclass):
             T_world_root=T_world_root.to(device), body_quats=body_quats.to(device)
         )
 
-        # Get initial x,y position offset (ignoring z)
-        initial_xy = T_world_root[0, 4:6]  # First frame x,y position
-
-        # Align positions by subtracting x,y offset only
-        T_world_root_aligned = T_world_root.clone()
-        T_world_root_aligned[..., 4:6] = T_world_root[..., 4:6] - initial_xy
-
-        # Align joints_wrt_world (x,y only)
-        joints_wrt_world_aligned = raw_fields["joints"].clone()
-        joints_wrt_world_aligned[..., :2] = (
-            raw_fields["joints"][..., :2].to(device) - initial_xy
-        )
+        joints_wrt_world = raw_fields["joints"]
 
         # Align T_world_cpf (only x,y translation component)
         T_world_cpf = (
@@ -150,26 +144,29 @@ class EgoTrainingData(TensorDataclass):
             @ tf.SE3(fncsmpl_extensions.get_T_head_cpf(shaped))
         ).parameters()
 
-        T_world_cpf_aligned = T_world_cpf.clone()
-        T_world_cpf_aligned[..., 4:6] = T_world_cpf[..., 4:6] - initial_xy
-
+		# METADATA can be omittted and set as default param.
         return EgoTrainingData(
-            T_world_root=T_world_root_aligned.cpu(),
+            T_world_root=T_world_root.cpu(),
             contacts=raw_fields["contacts"][:, :22].cpu(),  # root is included.
             betas=raw_fields["betas"].unsqueeze(0).cpu(),
-            joints_wrt_world=joints_wrt_world_aligned.cpu(),  # root is included.
+            joints_wrt_world=joints_wrt_world.cpu(),  # root is included.
             body_quats=body_quats.cpu(),
             # CPF frame stuff.
-            T_world_cpf=T_world_cpf_aligned.cpu(),
-            height_from_floor=T_world_cpf_aligned[:, 6:7].cpu(),
+            T_world_cpf=T_world_cpf.cpu(),
+            height_from_floor=T_world_cpf[:, 6:7].cpu(),
             joints_wrt_cpf=(
                 # unsqueeze so both shapes are (timesteps, joints, dim)
-                tf.SE3(T_world_cpf_aligned[:, None, :]).inverse()
-                @ joints_wrt_world_aligned.to(T_world_cpf_aligned.device)
+                tf.SE3(T_world_cpf[:, None, :]).inverse()
+                @ joints_wrt_world.to(T_world_cpf.device)
             ).cpu(),
             mask=torch.ones((timesteps,), dtype=torch.bool),
             hand_quats=hand_quats.cpu() if include_hands else None,
             visible_joints_mask=None,
+            metadata=EgoTrainingData.MetaData( # default metadata.
+                take_name=path.name,
+                frame_keys=tuple(),  # Convert to tuple of ints
+                stage="raw",
+            ),
         )
 
     @staticmethod
@@ -187,13 +184,16 @@ class EgoTrainingData(TensorDataclass):
         )
 
     @jaxtyped(typechecker=typeguard.typechecked)
-    def align_to_first_frame(self) -> "EgoTrainingData":
+    def preprocess(self) -> "EgoTrainingData":
         """
-        Modifies the current EgoTrainingData instance by aligning x,y coordinates to the first frame.
+        Modifies the current EgoTrainingData instance by:
+        1. Aligning x,y coordinates to the first frame
+        2. Subtracting floor height from z coordinates
         Modifies positions in-place to save memory.
         Returns self for method chaining.
         """
-        # Get initial x,y position offset from visible joints in first frame
+        assert self.metadata.stage == "raw"
+        # Get initial preprocessed x,y position offset from visible joints in first frame
         if self.visible_joints_mask is not None:
             # Use mean of visible joints as reference point
             # Get first frame joints and mask
@@ -208,8 +208,8 @@ class EgoTrainingData(TensorDataclass):
             initial_xy = self.joints_wrt_world[..., 0, :, :2].mean(dim=-2)  # [*batch, 2]
         
         # Store initial offset 
-        self.initial_xy = initial_xy
-        assert isinstance(self.initial_xy, torch.Tensor) and self.initial_xy.shape[-1] == 2
+        self.metadata.initial_xy = initial_xy
+        assert isinstance(self.metadata.initial_xy, torch.Tensor) and self.metadata.initial_xy.shape[-1] == 2
 
         # Modify positions in-place by subtracting x,y offset
         # Expand initial_xy to match broadcast dimensions
@@ -219,4 +219,56 @@ class EgoTrainingData(TensorDataclass):
         self.joints_wrt_world[..., :2].sub_(expanded_xy) # [*batch, timesteps, 22, 2]
         self.T_world_cpf[..., 4:6].sub_(initial_xy) # [*batch, timesteps, 2]
 
+        # Subtract floor height using existing height_from_floor attribute
+        self.joints_wrt_world[..., :, :, 2:3].sub_(self.height_from_floor.unsqueeze(-2)) # [*batch, timesteps, 22, 1]
+        self.T_world_root[..., 6:7].sub_(self.height_from_floor) # [*batch, timesteps, 1]
+        self.T_world_cpf[..., 6:7].sub_(self.height_from_floor) # [*batch, timesteps, 1]
+
+        self.metadata.stage = "preprocessed"
+
         return self
+
+    @jaxtyped(typechecker=typeguard.typechecked)
+    def postprocess(self) -> "EgoTrainingData":
+        """
+        Modifies the current EgoTrainingData instance by:
+        1. Adding floor height to z coordinates
+        """
+        assert self.metadata.stage == "preprocessed"
+        self.joints_wrt_world[..., :, :, 2:3].add_(self.height_from_floor.unsqueeze(-2)) # [*batch, timesteps, 22, 1]
+        self.T_world_root[..., :, 6:7].add_(self.height_from_floor) # [*batch, timesteps, 1]
+        self.T_world_cpf[..., :, 6:7].add_(self.height_from_floor) # [*batch, timesteps, 1]
+        # Add initial x,y position offset
+        # Expand initial_xy to match broadcast dimensions like in preprocess()
+        expanded_xy = self.metadata.initial_xy.view(*self.metadata.initial_xy.shape[:-1], 1, 1, 2)  # Add dims for broadcasting
+        
+        device = self.T_world_root.device
+        self.T_world_root[..., 4:6].add_(self.metadata.initial_xy.unsqueeze(-2).to(device)) # [*batch, timesteps, 2]
+        self.joints_wrt_world[..., :2].add_(expanded_xy.to(device)) # [*batch, timesteps, 22, 2]
+        self.T_world_cpf[..., 4:6].add_(self.metadata.initial_xy.unsqueeze(-2).to(device)) # [*batch, timesteps, 2]
+
+        self.metadata.stage = "postprocessed"
+
+        return self
+
+    def _post_process(self, traj: "DenoiseTrajType") -> "DenoiseTrajType":
+        from egoallo.network import AbsoluteDenoiseTraj
+        assert self.metadata.stage == "postprocessed"
+        assert traj.metadata.stage == "raw", "Only raw data is supported for postprocessing."
+        assert isinstance(traj, AbsoluteDenoiseTraj), "Only AbsoluteDenoiseTraj is supported for postprocessing."
+        # postprocess the DenoiseTrajType
+
+        # 1. t_world_root, t_world_cpf
+        device = traj.t_world_root.device
+        traj.t_world_root[..., :, 2:3].add_(self.height_from_floor.to(device)) # [*batch, timesteps, 3]
+        traj.t_world_root[..., :, :2].add_(self.metadata.initial_xy.unsqueeze(-2).to(device)) # [*batch, timesteps, 3]
+
+		# 2. assign joints_wrt_world and visible_joints_mask
+        assert traj.joints_wrt_world is None and traj.visible_joints_mask is None, f"joints_wrt_world and visible_joints_mask should be None for postprocessing."
+        traj.joints_wrt_world = self.joints_wrt_world.clone()
+        traj.visible_joints_mask = self.visible_joints_mask.clone()
+
+        # 3. assign metadata
+        traj.metadata = self.metadata
+        return traj
+        

@@ -44,6 +44,8 @@ dependencies = [
     "git+https://github.com/brentyi/jaxls.git",
     "smplx",
     "joblib",
+    "dill",
+    "pytest",
 ]
 
 [tool.setuptools.package-data]
@@ -76,5 +78,5 @@ ignore = [
     "PLW2901",  # For loop variable overwritten.
 ]
 
-[tool.pytest.ini_options]
-addopts = "--jaxtyping-packages=egoallo,typeguard.typechecked"
+# [tool.pytest.ini_options]
+# addopts = "--jaxtyping-packages=egoallo,typeguard.typechecked"

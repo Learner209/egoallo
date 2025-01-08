@@ -50,8 +50,8 @@ def load_point_cloud_and_find_ground(
         assert points_path.exists()
         filtered_points_data = filter_points_from_confidence(
             points_data,
-            threshold_invdep=0.0001,
-            threshold_dep=0.005,
+            threshold_invdep=0.0002,
+            threshold_dep=0.01,
         )
         less_filtered_points_data = filter_points_from_confidence(
             points_data,

@@ -104,11 +104,6 @@ def compute_single_metrics_helper(kwargs: Dict[str, Union[DenoiseTrajType, fncsm
 def save_single_traj_helper(kwargs: Dict[str, Union[DenoiseTrajType, str, bool, SequenceProcessor, Path]]) -> None:
     return save_single_traj(**kwargs)
 
-
-class DataVisualizer:
-    """Handles visualization of trajectory data."""
-
-
 class SequenceProcessor:
     """Handles processing of individual sequences."""
 
@@ -156,22 +151,9 @@ class SequenceProcessor:
         )
         gt_traj = runtime_config.denoising.from_ego_data(batch, include_hands=True)
 
-		# Make sure that everything related to absolute coords in `denoised_traj` are restored.
-        # 1. joints_wrt_world, and visible_joints_mask
-        denoised_traj.joints_wrt_world = batch.joints_wrt_world.clone()
-        denoised_traj.visible_joints_mask = batch.visible_joints_mask.clone()
-
-        # 2. restore floor_heights.
-        denoised_traj.joints_wrt_world[..., :, :, 2:3].add_(batch.height_from_floor.unsqueeze(-1)) # [*batch, timesteps, 22, 1]
-        denoised_traj.t_world_root[..., :, 2:3].add_(batch.height_from_floor) # [*batch, timesteps, 1]
-
-        # 3. restore initial_xy.
-        denoised_traj.joints_wrt_world[..., :, :, :2].add_(batch.initial_xy[None, None, :]) # [*batch, timesteps, 22, 2]
-        denoised_traj.t_world_root[..., :, :2].add_(batch.initial_xy[None, :]) # [*batch, timesteps, 2]
-
-        if batch.frame_keys is not None and len(batch.frame_keys) > 0:
-            gt_traj.frame_keys = batch.frame_keys
-            denoised_traj.frame_keys = batch.frame_keys
+        post_batch = batch.postprocess()
+        denoised_traj = post_batch._post_process(denoised_traj)
+        gt_traj = post_batch._post_process(gt_traj)
 
         return gt_traj, denoised_traj
 
@@ -309,6 +291,8 @@ class TestRunner:
                 self.inference_config,
                 self.device,
             )
+            # gt_traj = gt_traj.to(torch.device("cpu"))
+            # denoised_traj = denoised_traj.to(torch.device("cpu"))
             # processor.save_sequence(gt_traj, output_dir / f"gt_traj_{seq_idx}.pt")
             # processor.save_sequence(denoised_traj, output_dir / f"denoised_traj_{seq_idx}.pt")
 
@@ -474,16 +458,19 @@ class TestRunner:
                     break
 
                 batch = batch.to(self.device)
+                assert batch.metadata.stage == "preprocessed", f"Expected preprocessed data, got {batch.metadata.stage}"
+
                 temp_output_dir.mkdir(parents=True, exist_ok=True)
                 gt_traj, denoised_traj = self._process_batch(
                     batch,
                     batch_idx,
                     processor,
                 )
+
                 # TODO: the current implementation assumes that the leading `TensorDataClass` batch size dim() returns `1`.
                 gt_trajs.append(gt_traj)
                 denoised_trajs.append(denoised_traj)
-                identifiers.append(batch.take_name)
+                identifiers.append(batch.metadata.take_name)
 
                 torch.cuda.empty_cache()
             # Prepare arguments for parallel metric computation
