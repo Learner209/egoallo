@@ -1,5 +1,6 @@
 from pathlib import Path
 from typing import Union, assert_never, TYPE_CHECKING
+import dataclasses
 import numpy as np
 import torch
 import torch.utils.data
@@ -29,6 +30,8 @@ from dataclasses import dataclass
 @jaxtyped(typechecker=typeguard.typechecked)
 class EgoTrainingData(TensorDataclass):
     """Dictionary of tensors we use for EgoAllo training."""
+    # NOTE: if the attr is tensor/np.ndarray type, then it must has a leading batch dimension, whether it can be broadcasted or not.
+    # NOTE: since the `tensor_dataclass` will convert the tensor to a single element tensor, we need to make sure the leading dimension is always there.
 
     T_world_root: Float[Tensor, "*batch timesteps 7"]
     """Transformation from the world frame to the root frame at each timestep."""
@@ -75,6 +78,9 @@ class EgoTrainingData(TensorDataclass):
 
     frame_keys: tuple[int, ...] = ()
     """Keys of the frames in the npz file."""
+
+    initial_xy: Float[Tensor, "*batch 2"] = torch.FloatTensor([0.0, 0.0])
+    """Initial x,y position offset from visible joints in first frame"""
 
     @staticmethod
     def load_from_npz(
@@ -183,42 +189,34 @@ class EgoTrainingData(TensorDataclass):
     @jaxtyped(typechecker=typeguard.typechecked)
     def align_to_first_frame(self) -> "EgoTrainingData":
         """
-        Creates a new EgoTrainingData instance with x,y coordinates aligned to the first frame.
-        Returns a new instance with modified positions.
+        Modifies the current EgoTrainingData instance by aligning x,y coordinates to the first frame.
+        Modifies positions in-place to save memory.
+        Returns self for method chaining.
         """
         # Get initial x,y position offset from visible joints in first frame
         if self.visible_joints_mask is not None:
             # Use mean of visible joints as reference point
-            visible_joints = self.joints_wrt_world[0][self.visible_joints_mask[0]]  # [num_visible, 3] 
+            # Get first frame joints and mask
+            first_frame_joints = self.joints_wrt_world[..., 0, :, :]  # [*batch, 22, 3] 
+            first_frame_mask = self.visible_joints_mask[..., 0, :]  # [*batch, 22]
+            
+            # Select only visible joints
+            visible_joints = first_frame_joints[first_frame_mask]  # [num_visible, 3]
             initial_xy = visible_joints[..., :2].mean(dim=0)  # [2]
         else:
-            # If no visibility mask, use mean of all joints
-            initial_xy = self.joints_wrt_world[0, :, :2].mean(dim=0)  # [2]
+            # If no visibility mask, use mean of all joints in first frame
+            initial_xy = self.joints_wrt_world[..., 0, :, :2].mean(dim=-2)  # [*batch, 2]
+        
+        # Store initial offset 
+        self.initial_xy = initial_xy
+        assert isinstance(self.initial_xy, torch.Tensor) and self.initial_xy.shape[-1] == 2
 
-        # Align positions by subtracting x,y offset
-        T_world_root_aligned = self.T_world_root.clone()
-        T_world_root_aligned[..., 4:6] = self.T_world_root[..., 4:6] - initial_xy
+        # Modify positions in-place by subtracting x,y offset
+        # Expand initial_xy to match broadcast dimensions
+        expanded_xy = initial_xy.view(*initial_xy.shape[:-1], 1, 1, 2)  # Add dims for broadcasting
+        
+        self.T_world_root[..., 4:6].sub_(initial_xy) # [*batch, timesteps, 2]
+        self.joints_wrt_world[..., :2].sub_(expanded_xy) # [*batch, timesteps, 22, 2]
+        self.T_world_cpf[..., 4:6].sub_(initial_xy) # [*batch, timesteps, 2]
 
-        # Align joints_wrt_world (x,y only)
-        joints_wrt_world_aligned = self.joints_wrt_world.clone()
-        joints_wrt_world_aligned[..., :2] = self.joints_wrt_world[..., :2] - initial_xy
-
-        # Align T_world_cpf (only x,y translation component)
-        T_world_cpf_aligned = self.T_world_cpf.clone()
-        T_world_cpf_aligned[..., 4:6] = self.T_world_cpf[..., 4:6] - initial_xy
-
-        return EgoTrainingData(
-            T_world_root=T_world_root_aligned,
-            contacts=self.contacts,
-            betas=self.betas,
-            joints_wrt_world=joints_wrt_world_aligned,
-            body_quats=self.body_quats,
-            T_world_cpf=T_world_cpf_aligned,
-            height_from_floor=self.height_from_floor,
-            joints_wrt_cpf=self.joints_wrt_cpf,  # No need to modify as it's relative to CPF
-            mask=self.mask,
-            hand_quats=self.hand_quats,
-            visible_joints_mask=self.visible_joints_mask,
-            take_name=self.take_name,
-            frame_keys=self.frame_keys,
-        )
+        return self

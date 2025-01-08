@@ -313,8 +313,8 @@ class Dataset_EgoExo(Dataset):
         joints_world, visible_mask = self._process_joints(
             skeletons_window, # T, 17, 3
             flags_window.float(), # T, 17
-            ground_height=0.0,
-            # ground_height=float(gt_ground_height),
+            # ground_height=0.0,
+            ground_height=float(gt_ground_height),
             return_smplh_joints=True,
             num_joints=22,
             debug_vis=False,
@@ -326,6 +326,8 @@ class Dataset_EgoExo(Dataset):
         take_name = f"name_{take_name}_uid_{take_uid}_t{frames_window[0]}_{frames_window[-1]}"
 
         from egoallo.data.dataclass import EgoTrainingData
+        # breakpoint()
+        
         ret = EgoTrainingData(
             joints_wrt_world=masked_joints,  # Already computed above
             joints_wrt_cpf=torch.zeros_like(masked_joints),  # Same shape as joints_world

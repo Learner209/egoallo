@@ -156,9 +156,12 @@ class SequenceProcessor:
         )
         gt_traj = runtime_config.denoising.from_ego_data(batch, include_hands=True)
 
-        # assign joints_wrt_world and visible_joints_mask
+        # assign joints_wrt_world and visible_joints_mask, and restore to original frame(by adding initial_xy)
         denoised_traj.joints_wrt_world = gt_traj.joints_wrt_world.clone()
         denoised_traj.visible_joints_mask = gt_traj.visible_joints_mask.clone()
+
+		# ! restore initial_xy to joints_wrt_world.
+        denoised_traj.joints_wrt_world[..., :2] = gt_traj.joints_wrt_world[..., :2] + batch.initial_xy
 
         if batch.frame_keys is not None and len(batch.frame_keys) > 0:
             gt_traj.frame_keys = batch.frame_keys
