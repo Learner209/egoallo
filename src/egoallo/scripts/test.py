@@ -156,12 +156,18 @@ class SequenceProcessor:
         )
         gt_traj = runtime_config.denoising.from_ego_data(batch, include_hands=True)
 
-        # assign joints_wrt_world and visible_joints_mask, and restore to original frame(by adding initial_xy)
-        denoised_traj.joints_wrt_world = gt_traj.joints_wrt_world.clone()
-        denoised_traj.visible_joints_mask = gt_traj.visible_joints_mask.clone()
+		# Make sure that everything related to absolute coords in `denoised_traj` are restored.
+        # 1. joints_wrt_world, and visible_joints_mask
+        denoised_traj.joints_wrt_world = batch.joints_wrt_world.clone()
+        denoised_traj.visible_joints_mask = batch.visible_joints_mask.clone()
 
-		# ! restore initial_xy to joints_wrt_world.
-        denoised_traj.joints_wrt_world[..., :2] = gt_traj.joints_wrt_world[..., :2] + batch.initial_xy
+        # 2. restore floor_heights.
+        denoised_traj.joints_wrt_world[..., :, :, 2:3].add_(batch.height_from_floor.unsqueeze(-1)) # [*batch, timesteps, 22, 1]
+        denoised_traj.t_world_root[..., :, 2:3].add_(batch.height_from_floor) # [*batch, timesteps, 1]
+
+        # 3. restore initial_xy.
+        denoised_traj.joints_wrt_world[..., :, :, :2].add_(batch.initial_xy[None, None, :]) # [*batch, timesteps, 22, 2]
+        denoised_traj.t_world_root[..., :, :2].add_(batch.initial_xy[None, :]) # [*batch, timesteps, 2]
 
         if batch.frame_keys is not None and len(batch.frame_keys) > 0:
             gt_traj.frame_keys = batch.frame_keys

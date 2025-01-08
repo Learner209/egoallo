@@ -339,7 +339,7 @@ class Dataset_EgoExo(Dataset):
             body_quats=torch.zeros((len(frames_window), 21, 4)),  # T x 21 x 4 for body joint rotations
             hand_quats=torch.zeros((len(frames_window), 30, 4)),  # T x 30 x 4 for hand joint rotations
             contacts=torch.zeros((len(frames_window), 22)),  # T x 22 for contact states
-            height_from_floor=torch.zeros((len(frames_window), 1)),  # T x 1
+            height_from_floor=torch.full((len(frames_window), 1), gt_ground_height),  # T x 1
             take_name=take_name,
             frame_keys=tuple(int(f) for f in frames_window),  # Convert to tuple of ints
         )

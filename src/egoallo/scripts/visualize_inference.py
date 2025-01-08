@@ -79,9 +79,6 @@ def visualize_saved_trajectory(
         rgb_frames = aria_inference_toolkit.extract_rgb_frames(list(frame_keys))
         pc_container, points_data, floor_z = aria_inference_toolkit.load_pc_and_find_ground()
 
-        points_data[:, 2] = points_data[:, 2] - floor_z
-        pc_container.vertices[:, 2] = pc_container.vertices[:, 2] - floor_z
-        
         EgoTrainingData.visualize_ego_training_data(
             pred_traj,
             body_model,
