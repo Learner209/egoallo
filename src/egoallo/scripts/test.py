@@ -54,6 +54,8 @@ from egoallo.utils.setup_logger import setup_logger
 from egoallo.training_utils import ipdb_safety_net
 # from egoallo.egoexo import EGOEXO_UTILS_INST
 
+torch.multiprocessing.set_sharing_strategy('file_system')
+
 local_config_file = CONFIG_FILE
 CFG = make_cfg(config_name="defaults", config_file=local_config_file, cli_args=[])
 
@@ -291,10 +293,9 @@ class TestRunner:
                 self.inference_config,
                 self.device,
             )
-            # gt_traj = gt_traj.to(torch.device("cpu"))
-            # denoised_traj = denoised_traj.to(torch.device("cpu"))
-            # processor.save_sequence(gt_traj, output_dir / f"gt_traj_{seq_idx}.pt")
-            # processor.save_sequence(denoised_traj, output_dir / f"denoised_traj_{seq_idx}.pt")
+            # convert to cpu to avoid GPU OOM.
+            gt_traj = gt_traj.to(torch.device("cpu"))
+            denoised_traj = denoised_traj.to(torch.device("cpu"))
 
             if gt_trajs is None:
                 gt_trajs = gt_traj
@@ -441,137 +442,142 @@ class TestRunner:
         processor = SequenceProcessor(self.body_model, self.device)
 
         # Create temporary directory for intermediate files
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_output_dir = Path(temp_dir)
+        # with tempfile.TemporaryDirectory() as temp_dir:
+        #     temp_output_dir = Path(temp_dir)
+        temp_output_dir = Path("./exp/test-debug-too-many-open-files")
 
-            gt_trajs = []
-            denoised_trajs = []
-            identifiers = []
+        gt_trajs = []
+        denoised_trajs = []
+        identifiers = []
 
-            for batch_idx, batch in tqdm(
-                enumerate(self.dataloader),
-                total=len(self.dataloader),
-                desc="Enumerating test loader",
-                ascii=" >=",
-            ):
-                if batch_idx == 5:
-                    break
+        for batch_idx, batch in tqdm(
+            enumerate(self.dataloader),
+            total=len(self.dataloader),
+            desc="Enumerating test loader",
+            ascii=" >=",
+        ):
+            if batch_idx == 5:
+                break
 
-                batch = batch.to(self.device)
-                assert batch.metadata.stage == "preprocessed", f"Expected preprocessed data, got {batch.metadata.stage}"
+            batch = batch.to(self.device)
+            assert batch.metadata.stage == "preprocessed", f"Expected preprocessed data, got {batch.metadata.stage}"
 
-                temp_output_dir.mkdir(parents=True, exist_ok=True)
-                gt_traj, denoised_traj = self._process_batch(
-                    batch,
-                    batch_idx,
-                    processor,
-                )
+            temp_output_dir.mkdir(parents=True, exist_ok=True)
+            gt_traj, denoised_traj = self._process_batch(
+                batch,
+                batch_idx,
+                processor,
+            )
 
-                # TODO: the current implementation assumes that the leading `TensorDataClass` batch size dim() returns `1`.
-                gt_trajs.append(gt_traj)
-                denoised_trajs.append(denoised_traj)
-                identifiers.append(batch.metadata.take_name)
+            # TODO: the current implementation assumes that the leading `TensorDataClass` batch size dim() returns `1`.
+            gt_trajs.append(gt_traj)
+            denoised_trajs.append(denoised_traj)
+            identifiers.append(batch.metadata.take_name)
 
-                torch.cuda.empty_cache()
-            # Prepare arguments for parallel metric computation
-            metric_args = [
-                ({
-                    'gt_traj': gt_traj,
-                    'est_traj': est_traj,
-                    'body_model': self.body_model,
-                    'device': self.device
-                },)
-                for gt_traj, est_traj in zip(gt_trajs, denoised_trajs)
+            torch.cuda.empty_cache()
+        # Prepare arguments for parallel metric computation
+        metric_args = [
+            ({
+                'gt_traj': gt_traj,
+                'est_traj': est_traj,
+                'body_model': self.body_model.to(torch.device("cpu")),
+                'device': torch.device("cpu")
+            },)
+            for gt_traj, est_traj in zip(gt_trajs, denoised_trajs)
+        ]
+
+        # Compute metrics in parallel using DillProcess
+        with torch.multiprocessing.get_context('spawn').Pool(processes=1) as pool:
+            trajectory_metrics = pool.starmap(
+                compute_single_metrics_helper,
+                metric_args
+            )
+        
+        # parallel compute metrics for debugging.
+        # for gt_traj, est_traj in zip(gt_trajs, denoised_trajs):
+        #     metrics = gt_traj._compute_metrics(est_traj, body_model=self.body_model, device=torch.device("cpu"))
+
+        # Aggregate metrics across all trajectories
+        aggregated_metrics = {}
+        for metric_dict in trajectory_metrics:
+            for metric_name, value in metric_dict.items():
+                if metric_name not in aggregated_metrics:
+                    aggregated_metrics[metric_name] = []
+                aggregated_metrics[metric_name].append(value)
+
+        # Calculate mean and std for each metric
+        final_metrics = {}
+        for metric_name, values in aggregated_metrics.items():
+            values_tensor = torch.FloatTensor(values)
+            final_metrics[metric_name] = values_tensor.mean()
+            final_metrics[f"{metric_name}_std"] = values_tensor.std()
+
+        # Create evaluation metrics object with aggregated results
+        metrics = EgoAlloEvaluationMetrics(**final_metrics)
+        # Prepare arguments for parallel saving
+        save_args = []
+
+        for gt_traj, est_traj, take_name in zip(gt_trajs, denoised_trajs, identifiers):
+            save_args.append(({
+                "traj": gt_traj[0],
+                "take_name": take_name,
+                "is_gt": True,
+                "processor": processor,
+                "output_dir": temp_output_dir / take_name
+            },))
+            save_args.append(({
+                "traj": est_traj[0],
+                "take_name": take_name,
+                "is_gt": False,
+                "processor": processor,
+                "output_dir": temp_output_dir / take_name
+            },))
+
+        # Execute saves in parallel
+        with multiprocessing.get_context('spawn').Pool(processes=20) as pool:
+            pool.starmap(save_single_traj_helper, save_args)
+
+        # Run visualizations using subprocess for each trajectory
+        denoise_traj_type: str = self.runtime_config.denoising._repr_denoise_traj_type()
+        for take_name in identifiers:
+            gt_path = temp_output_dir / take_name / f"gt_{take_name}.pt"
+            est_path = temp_output_dir / take_name / f"est_{take_name}.pt" 
+            # egoexo_utils: EgoExoUtils = EGOEXO_UTILS_INST
+            # Parse out take_uid from take_name
+            take_uid = take_name.split("uid_")[1].split("_t")[0]
+            this_take_name = take_name.split("name_")[1].split("_uid_")[0]
+            # breakpoint()
+            this_take_path = Path(self.inference_config.egoexo_dataset_path) / "takes" / Path(this_take_name)
+
+            cmd = [
+                "python",
+                "src/egoallo/scripts/visualize_inference.py",
+                "--trajectory-path", str(gt_path), str(est_path),
+                "--trajectory-type", denoise_traj_type,
+                "--smplh-model-path", str(self.runtime_config.smplh_npz_path),
+                "--output-dir", str(temp_output_dir / take_name),
+                "--dataset-type", self.inference_config.dataset_type,
+                "--config.egoexo.traj_root", str(this_take_path)
             ]
-
-            # Compute metrics in parallel using DillProcess
-            with multiprocessing.get_context('spawn').Pool(processes=20) as pool:
-                trajectory_metrics = pool.starmap(
-                    compute_single_metrics_helper,
-                    metric_args
-                )
-
-            # Aggregate metrics across all trajectories
-            aggregated_metrics = {}
-            for metric_dict in trajectory_metrics:
-                for metric_name, value in metric_dict.items():
-                    if metric_name not in aggregated_metrics:
-                        aggregated_metrics[metric_name] = []
-                    aggregated_metrics[metric_name].append(value)
-
-            # Calculate mean and std for each metric
-            final_metrics = {}
-            for metric_name, values in aggregated_metrics.items():
-                values_tensor = torch.FloatTensor(values)
-                final_metrics[metric_name] = values_tensor.mean()
-                final_metrics[f"{metric_name}_std"] = values_tensor.std()
-
-            # Create evaluation metrics object with aggregated results
-            metrics = EgoAlloEvaluationMetrics(**final_metrics)
-            # Prepare arguments for parallel saving
-            save_args = []
-
-            for gt_traj, est_traj, take_name in zip(gt_trajs, denoised_trajs, identifiers):
-                save_args.append(({
-                    "traj": gt_traj[0],
-                    "take_name": take_name,
-                    "is_gt": True,
-                    "processor": processor,
-                    "output_dir": temp_output_dir / take_name
-                },))
-                save_args.append(({
-                    "traj": est_traj[0],
-                    "take_name": take_name,
-                    "is_gt": False,
-                    "processor": processor,
-                    "output_dir": temp_output_dir / take_name
-                },))
-
-            # Execute saves in parallel
-            with multiprocessing.get_context('spawn').Pool(processes=20) as pool:
-                pool.starmap(save_single_traj_helper, save_args)
-
-            # Run visualizations using subprocess for each trajectory
-            denoise_traj_type: str = self.runtime_config.denoising._repr_denoise_traj_type()
-            for take_name in identifiers:
-                gt_path = temp_output_dir / take_name / f"gt_{take_name}.pt"
-                est_path = temp_output_dir / take_name / f"est_{take_name}.pt" 
-                # egoexo_utils: EgoExoUtils = EGOEXO_UTILS_INST
-                # Parse out take_uid from take_name
-                take_uid = take_name.split("uid_")[1].split("_t")[0]
-                this_take_name = take_name.split("name_")[1].split("_uid_")[0]
-                # breakpoint()
-                this_take_path = Path(self.inference_config.egoexo_dataset_path) / "takes" / Path(this_take_name)
-
-                cmd = [
-                    "python",
-                    "src/egoallo/scripts/visualize_inference.py",
-                    "--trajectory-path", str(gt_path), str(est_path),
-                    "--trajectory-type", denoise_traj_type,
-                    "--smplh-model-path", str(self.runtime_config.smplh_npz_path),
-                    "--output-dir", str(temp_output_dir / take_name),
-                    "--dataset-type", self.inference_config.dataset_type,
-                    "--config.egoexo.traj_root", str(this_take_path)
-                ]
-                
-                # Remove empty arguments
-                cmd = [arg for arg in cmd if arg]
-                logger.info(f"Running command: {' '.join(cmd)}")
-                breakpoint()
-                
-                # Call visualization process
-                subprocess.call(cmd, env=os.environ.copy())
-
-            # After all operations complete successfully, copy temp dir contents to persistent location
-            persistent_output_dir = Path(self.inference_config.output_dir)
-            persistent_output_dir.mkdir(parents=True, exist_ok=True)
             
-            # Move contents from temp dir to persistent dir
-            for item in temp_output_dir.glob("*"):
-                if item.is_file():
-                    shutil.move(item, persistent_output_dir)
-                else:
-                    shutil.move(item, persistent_output_dir / item.name)
+            # Remove empty arguments
+            cmd = [arg for arg in cmd if arg]
+            logger.info(f"Running command: {' '.join(cmd)}")
+            # breakpoint()
+            
+            # Call visualization process
+            subprocess.call(cmd, env=os.environ.copy())
+
+        # After all operations complete successfully, copy temp dir contents to persistent location
+        persistent_output_dir = Path(self.inference_config.output_dir)
+        persistent_output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Move contents from temp dir to persistent dir
+        for item in temp_output_dir.glob("*"):
+            if item.is_file():
+                shutil.move(item, persistent_output_dir)
+            else:
+                shutil.move(item, persistent_output_dir / item.name)
 
         return metrics
 

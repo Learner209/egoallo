@@ -264,8 +264,10 @@ def run_sampling_with_masked_data(
     num_samples: int,
     device: torch.device,
 ) -> network.AbsoluteDenoiseTraj:
+
     assert masked_data.metadata.stage == "preprocessed", "EgoTrainingData should be preprocessed before being used to create trajectories. \
             , The logic is traj should be sent to network so that the ego_data should be between pre and post."
+    assert not torch.any(torch.isnan(masked_data.joints_wrt_world[masked_data.visible_joints_mask.bool()])), "Found nan in joints_wrt_world"
 
     # FIXME: currently the batch-size dimension of `masked_data` is not supported, as the num_samples `param` would conflict with batch_size dim of `masked_data`.
     noise_constants = CosineNoiseScheduleConstants.compute(timesteps=1000).to(
@@ -337,6 +339,7 @@ def run_sampling_with_masked_data(
                     )
                     * overlap_weights_slice
                 )
+                assert not torch.any(torch.isnan(x_0_packed_pred[:, start_t:end_t, :])), "Found nan in x_0_packed_pred"
 
             x_0_packed_pred /= overlap_weights
 

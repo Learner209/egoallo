@@ -195,15 +195,20 @@ class EgoTrainingData(TensorDataclass):
         assert self.metadata.stage == "raw"
         # Get initial preprocessed x,y position offset from visible joints in first frame
         if self.visible_joints_mask is not None:
-            # Use mean of visible joints as reference point
-            # Get first frame joints and mask
-            first_frame_joints = self.joints_wrt_world[..., 0, :, :]  # [*batch, 22, 3] 
-            first_frame_mask = self.visible_joints_mask[..., 0, :]  # [*batch, 22]
-            
-            # Select only visible joints
-            visible_joints = first_frame_joints[first_frame_mask]  # [num_visible, 3]
-            initial_xy = visible_joints[..., :2].mean(dim=0)  # [2]
+            # Find first frame with at least one visible joint
+            *B, T, J, _ = self.joints_wrt_world.shape  # Get temporal dimension
+            for t in range(T):
+                frame_joints = self.joints_wrt_world[..., t, :, :]  # [*batch, 22, 3]
+                frame_mask = self.visible_joints_mask[..., t, :]  # [*batch, 22]
+                visible_joints = frame_joints[frame_mask]  # [num_visible, 3]
+                
+                if len(visible_joints) > 0:  # At least one joint is visible
+                    initial_xy = visible_joints[..., :2].mean(dim=0)  # [2]
+                    break
+            else:
+                raise RuntimeError("No frames found with visible joints")
         else:
+            raise RuntimeWarning("No visibility mask found, using mean of all joints in first frame")
             # If no visibility mask, use mean of all joints in first frame
             initial_xy = self.joints_wrt_world[..., 0, :, :2].mean(dim=-2)  # [*batch, 2]
         

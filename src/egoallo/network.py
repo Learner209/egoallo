@@ -1,6 +1,7 @@
 """Network definitions."""
 
 import dataclasses
+import warnings
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
 from functools import cached_property, cache
@@ -803,10 +804,25 @@ class AbsoluteDenoiseTraj(BaseDenoiseTraj):
         """Compute metrics between this trajectory and another.
         Computes all relevant metrics since this class has complete pose data.
         """
+
+        other = other.to(device)
+        self = self.to(device)
+        body_model = body_model.to(device)
+
+        self_has_nan = self.reduce(lambda x, y: x.isnan().sum().item() if isinstance(x, torch.Tensor) else x + y.isnan().sum().item() if isinstance(y, torch.Tensor) else y) > 0
+        other_has_nan = other.reduce(lambda x, y: x.isnan().sum().item() if isinstance(x, torch.Tensor) else x + y.isnan().sum().item() if isinstance(y, torch.Tensor) else y) > 0
+        if self_has_nan or other_has_nan:
+            logger.warning(f"NaN values found in trajectory: {self_has_nan}, {other_has_nan}, skipping metrics computation")
+            # with warnings.catch_warnings():
+                # warnings.filterwarnings("ignore", message=".*NaN values found in trajectory.*", category=RuntimeWarning)
+                # raise RuntimeWarning(f"NaN values found in trajectory: {self_has_nan}, {other_has_nan}, skipping metrics computation")
+            return {}
+
+        breakpoint()
         # TEMPORARY_FIX: import BodyEvaluator lazily to avoid circular imports
         from egoallo.evaluation.body_evaluator import BodyEvaluator
 
-        assert self.check_shapes(other), f"{self.check_shapes(other)}"
+        assert self.check_shapes(other), f"self's shpae: {self.check_shapes(other)}, other's shape: {other.check_shapes(self)}"
 
         metrics = {}
 
@@ -987,6 +1003,8 @@ class AbsoluteDenoiseTraj(BaseDenoiseTraj):
         #         torch.linalg.norm(gt_coco_joints - sampled_coco_joints, dim=-1) * 1000.0
         #     )
         #     metrics["coco_mpjpe"] = float(coco_errors.mean().item())
+        del other
+        del body_model
 
         return metrics
 
