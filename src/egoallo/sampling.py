@@ -354,8 +354,8 @@ def run_sampling_with_masked_data(
                 T_world_root=SE3.from_rotation_and_translation(
                     SO3.from_matrix(x_0_pred.R_world_root), x_0_pred.t_world_root
                 )
-                .parameters()
-                .squeeze(0),
+                .parameters(),
+                # .squeeze(0),
                 traj=x_0_pred,
                 body_model=body_model,
                 guidance_mode=guidance_mode,
@@ -400,8 +400,8 @@ def run_sampling_with_masked_data(
                 SO3.from_matrix(constrained_traj.R_world_root),
                 constrained_traj.t_world_root,
             )
-            .parameters()
-            .squeeze(0),
+            .parameters(),
+            # .squeeze(0),
             traj=constrained_traj,
             body_model=body_model,
             guidance_mode=guidance_mode,

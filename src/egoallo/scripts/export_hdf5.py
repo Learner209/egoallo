@@ -3,7 +3,6 @@
 from dataclasses import dataclass
 import dataclasses
 import queue
-from tarfile import AbsoluteLinkError
 import threading
 import time
 from pathlib import Path
@@ -57,32 +56,37 @@ def main(
                 break
 
             print(f"Processing {npz_path} on device {device_idx}...")
-            train_data = EgoTrainingData.load_from_npz(
+            test_data = EgoTrainingData.load_from_npz(
                 device_body_model, npz_path, include_hands=include_hands
             )
-
+            assert test_data.metadata.scope == "test", "The data should be test data."
             output_name = npz_path.stem + ".mp4"
             # FIXME: the from_ego_data function is an instance moethod of network.DenoisingConfig
             denoising_config = network.DenoisingConfig(
                 denoising_mode="absolute", include_hands=True
             )
-            # train_traj = denoising_config.from_ego_data(train_data)
+
+            test_data = test_data.preprocess()
+            train_traj = denoising_config.from_ego_data(test_data)
+            test_data = test_data.postprocess()
+            train_traj = test_data._post_process(train_traj)
+
 
             # Adaptive sampling if sequence is longer than 1500 frames
-            # if len(train_traj.t_world_root) > 1500:
-            #     # Calculate stride to get under 1500 frames
-            #     stride = len(train_traj.t_world_root) // 1499 + 1
-            #     train_traj = train_traj[::stride]
+            if len(train_traj.t_world_root) > 1500:
+                # Calculate stride to get under 1500 frames
+                stride = len(train_traj.t_world_root) // 1499 + 1
+                train_traj = train_traj[::stride]
 
-            # output_path = Path("./exp/debug_frame_rate_diff/")
-            # output_path.mkdir(parents=True, exist_ok=True)
+            output_path = Path("./exp/debug_frame_rate_diff/")
+            output_path.mkdir(parents=True, exist_ok=True)
 
-            # if not (output_path / output_name).exists():
-            #     EgoTrainingData.visualize_ego_training_data(
-            #         train_traj,
-            #         body_model,
-            #         output_path=str(output_path / output_name),
-            #     )
+            if not (output_path / output_name).exists():
+                EgoTrainingData.visualize_ego_training_data(
+                    train_traj,
+                    body_model,
+                    output_path=str(output_path / output_name),
+                )
 
             for data_npz_dir in data_npz_dirs:
                 if str(data_npz_dir) in str(npz_path):
@@ -97,7 +101,7 @@ def main(
             group = output_hdf5.create_group(group_name)
             file_list.append(group_name)
 
-            for k, v in vars(train_data).items():
+            for k, v in vars(test_data).items():
                 # No need to write the mask, which will always be ones when we
                 # load from the npz file!
                 if v is None or not isinstance(v, torch.Tensor):
@@ -107,7 +111,7 @@ def main(
                 if k != "contacts" and k != "mask":
                     assert v.dtype == torch.float32, f"{k} {v.dtype}"
 
-                if v.shape[0] == train_data.T_world_cpf.shape[0]:
+                if v.shape[0] == test_data.T_world_cpf.shape[0]:
                     chunks = (min(32, v.shape[0]),) + v.shape[1:]
                 else:
                     assert v.shape[0] == 1

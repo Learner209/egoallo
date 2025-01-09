@@ -84,6 +84,9 @@ class EgoTrainingData(TensorDataclass):
         stage: Literal["raw", "preprocessed", "postprocessed"] = "raw"
         """Processing stage of the data: 'raw' (before preprocessing), 'preprocessed' (between pre/post), or 'postprocessed' (after postprocessing)."""
 
+        scope: Literal["train", "test"] = "train"
+        """Scope of the data: 'train' or 'test'."""
+
     metadata: MetaData = dataclasses.field(default_factory=MetaData)
     """Metadata about the trajectory."""
 
@@ -166,6 +169,7 @@ class EgoTrainingData(TensorDataclass):
                 take_name=path.name,
                 frame_keys=tuple(),  # Convert to tuple of ints
                 stage="raw",
+                scope="test",
             ),
         )
 
@@ -208,7 +212,7 @@ class EgoTrainingData(TensorDataclass):
             else:
                 raise RuntimeError("No frames found with visible joints")
         else:
-            raise RuntimeWarning("No visibility mask found, using mean of all joints in first frame")
+            # raise RuntimeWarning("No visibility mask found, using mean of all joints in first frame")
             # If no visibility mask, use mean of all joints in first frame
             initial_xy = self.joints_wrt_world[..., 0, :, :2].mean(dim=-2)  # [*batch, 2]
         
@@ -271,7 +275,12 @@ class EgoTrainingData(TensorDataclass):
 		# 2. assign joints_wrt_world and visible_joints_mask
         assert traj.joints_wrt_world is None and traj.visible_joints_mask is None, f"joints_wrt_world and visible_joints_mask should be None for postprocessing."
         traj.joints_wrt_world = self.joints_wrt_world.clone()
-        traj.visible_joints_mask = self.visible_joints_mask.clone()
+        if self.visible_joints_mask is not None:
+            assert self.metadata.scope == "train", "visible_joints_mask should only be set for train data."
+            traj.visible_joints_mask = self.visible_joints_mask.clone()
+        else:
+            assert self.metadata.scope == "test", "visible_joints_mask shouldn't be set for test data."
+            traj.visible_joints_mask = torch.ones_like(traj.joints_wrt_world, dtype=torch.float)
 
         # 3. assign metadata
         traj.metadata = self.metadata

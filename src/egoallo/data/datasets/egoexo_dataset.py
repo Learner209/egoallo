@@ -247,6 +247,7 @@ class EgoExoDataset(torch.utils.data.Dataset[EgoTrainingData]):
                 take_name=take_name,
                 frame_keys=frame_keys, # type: ignore
                 stage="raw",
+                scope="test",
             ),
         )
         ret = ret.preprocess()

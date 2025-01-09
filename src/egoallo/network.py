@@ -357,6 +357,7 @@ class DenoisingConfig:
                 metadata=EgoTrainingData.MetaData(
                     take_name=ego_data.metadata.take_name,
                     frame_keys=ego_data.metadata.frame_keys,
+                    scope=ego_data.metadata.scope,
                     stage="raw",
                 ),
             )
@@ -818,7 +819,7 @@ class AbsoluteDenoiseTraj(BaseDenoiseTraj):
                 # raise RuntimeWarning(f"NaN values found in trajectory: {self_has_nan}, {other_has_nan}, skipping metrics computation")
             return {}
 
-        breakpoint()
+        # breakpoint()
         # TEMPORARY_FIX: import BodyEvaluator lazily to avoid circular imports
         from egoallo.evaluation.body_evaluator import BodyEvaluator
 
@@ -1003,6 +1004,7 @@ class AbsoluteDenoiseTraj(BaseDenoiseTraj):
         #         torch.linalg.norm(gt_coco_joints - sampled_coco_joints, dim=-1) * 1000.0
         #     )
         #     metrics["coco_mpjpe"] = float(coco_errors.mean().item())
+        # https://pytorch.org/docs/stable/multiprocessing.html: section :sharing tensors.
         del other
         del body_model
 

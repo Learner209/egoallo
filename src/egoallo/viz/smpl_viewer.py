@@ -263,7 +263,8 @@ class SMPLViewer(BaseRenderer):
             gender="male",  # Can be parameterized if needed
             smpl_root="./assets/smpl_based_model",  # Update path as needed
             model_type="smplh",
-            device=torch.device("cuda" if torch.cuda.is_available() else "cpu"),
+            # device=torch.device("cuda" if torch.cuda.is_available() else "cpu"),
+            device=torch.device("cpu"),
         )
         self.smpl_renderer.draw_shadows = False
         # self.smpl_renderer.generate_shadows = False
@@ -280,7 +281,12 @@ class SMPLViewer(BaseRenderer):
         assert (
             traj.R_world_root.dim() == 3
         ), "The batch size should be zero when visualizing."
-        device = body_model.weights.device
+        assert traj.metadata.stage == "postprocessed", "The trajectory should be postprocessed before visualization."
+        # device = body_model.weights.device
+        device = torch.device("cpu")
+
+        traj = traj.to(device)
+        body_model = body_model.to(device)
 
         # Prepare SMPL sequence
         # denoised_traj = denoised_traj
@@ -330,7 +336,7 @@ class SMPLViewer(BaseRenderer):
             visible_mask = traj.visible_joints_mask[i]  # [J]
             if visible_mask is not None:
                 # Get only visible joint positions
-                visible_joints = traj.joints_wrt_world[i][visible_mask].cpu().numpy()  # [num_visible, 3]
+                visible_joints = traj.joints_wrt_world[i][visible_mask.bool()].cpu().numpy()  # [num_visible, 3]
                 # Create colors array for visible joints
                 colors = np.tile(
                     np.array([255, 0, 0, 255], dtype=np.uint8),

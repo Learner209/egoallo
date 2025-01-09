@@ -338,6 +338,7 @@ class Dataset_EgoExo(Dataset):
                 take_name=take_name,
                 frame_keys=tuple(int(f) for f in frames_window),  # Convert to tuple of ints
                 stage="raw",
+                scope="test",
             ),
         )
         ret = ret.preprocess()
