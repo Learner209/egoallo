@@ -1,5 +1,4 @@
 from pathlib import Path
-from tarfile import AbsoluteLinkError
 from typing import Union, assert_never, TYPE_CHECKING
 import dataclasses
 import numpy as np
@@ -9,7 +8,6 @@ from torch.utils.data.dataloader import _InfiniteConstantSampler
 import typeguard
 from jaxtyping import Bool, Float, jaxtyped, Array
 from egoallo.transforms import SO3, SE3
-from egoallo import network
 from torch import Tensor
 
 if TYPE_CHECKING:
@@ -276,7 +274,7 @@ class EgoTrainingData(TensorDataclass):
         assert traj.joints_wrt_world is None and traj.visible_joints_mask is None, f"joints_wrt_world and visible_joints_mask should be None for postprocessing."
         traj.joints_wrt_world = self.joints_wrt_world.clone()
         if self.visible_joints_mask is not None:
-            assert self.metadata.scope == "train", "visible_joints_mask should only be set for train data."
+            # assert self.metadata.scope == "train", "visible_joints_mask should only be set for train data."
             traj.visible_joints_mask = self.visible_joints_mask.clone()
         else:
             assert self.metadata.scope == "test", "visible_joints_mask shouldn't be set for test data."

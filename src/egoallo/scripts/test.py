@@ -539,35 +539,36 @@ class TestRunner:
 				pool.starmap(save_single_traj_helper, save_args)
 
 			# Run visualizations using subprocess for each trajectory
-			denoise_traj_type: str = self.runtime_config.denoising._repr_denoise_traj_type()
-			for take_name in identifiers:
-				gt_path = temp_output_dir / take_name / f"gt_{take_name}.pt"
-				est_path = temp_output_dir / take_name / f"est_{take_name}.pt" 
-				# egoexo_utils: EgoExoUtils = EGOEXO_UTILS_INST
-				# Parse out take_uid from take_name
-				take_uid = take_name.split("uid_")[1].split("_t")[0]
-				this_take_name = take_name.split("name_")[1].split("_uid_")[0]
-				# breakpoint()
-				this_take_path = Path(self.inference_config.egoexo_dataset_path) / "takes" / Path(this_take_name)
+			if self.inference_config.visualize_traj:
+				denoise_traj_type: str = self.runtime_config.denoising._repr_denoise_traj_type()
+				for take_name in identifiers:
+					gt_path = temp_output_dir / take_name / f"gt_{take_name}.pt"
+					est_path = temp_output_dir / take_name / f"est_{take_name}.pt" 
+					# egoexo_utils: EgoExoUtils = EGOEXO_UTILS_INST
+					# Parse out take_uid from take_name
+					take_uid = take_name.split("uid_")[1].split("_t")[0]
+					this_take_name = take_name.split("name_")[1].split("_uid_")[0]
+					# breakpoint()
+					this_take_path = Path(self.inference_config.egoexo_dataset_path) / "takes" / Path(this_take_name)
 
-				cmd = [
-					"python",
-					"src/egoallo/scripts/visualize_inference.py",
-					"--trajectory-path", str(gt_path), str(est_path),
-					"--trajectory-type", denoise_traj_type,
-					"--smplh-model-path", str(self.runtime_config.smplh_npz_path),
-					"--output-dir", str(temp_output_dir / take_name),
-					"--dataset-type", self.inference_config.dataset_type,
-					"--config.egoexo.traj_root", str(this_take_path)
-				]
-				
-				# Remove empty arguments
-				cmd = [arg for arg in cmd if arg]
-				logger.info(f"Running command: {' '.join(cmd)}")
-				# breakpoint()
-				
-				# Call visualization process
-				subprocess.call(cmd, env=os.environ.copy())
+					cmd = [
+						"python",
+						"src/egoallo/scripts/visualize_inference.py",
+						"--trajectory-path", str(gt_path), str(est_path),
+						"--trajectory-type", denoise_traj_type,
+						"--smplh-model-path", str(self.runtime_config.smplh_npz_path),
+						"--output-dir", str(temp_output_dir / take_name),
+						"--dataset-type", self.inference_config.dataset_type,
+						"--config.egoexo.traj_root", str(this_take_path)
+					]
+					
+					# Remove empty arguments
+					cmd = [arg for arg in cmd if arg]
+					logger.info(f"Running command: {' '.join(cmd)}")
+					# breakpoint()
+					
+					# Call visualization process
+					subprocess.call(cmd, env=os.environ.copy())
 
 			# After all operations complete successfully, copy temp dir contents to persistent location
 			persistent_output_dir = Path(self.inference_config.output_dir)

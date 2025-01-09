@@ -324,7 +324,8 @@ def run_training(
 
             # Evaluation
             steps_to_eval = 1e4
-            if step % steps_to_eval == 0 and step != 0:
+            if step % steps_to_eval == 0:
+            # if step % steps_to_eval == 0 and step != 0:
                 # Create temporary directory for evaluation outputs
                 with tempfile.TemporaryDirectory() as temp_dir:
                     # Create inference config for evaluation
@@ -338,7 +339,7 @@ def run_training(
                         use_mean_body_shape=False,  # use_mean_body_shape would fail assertion
                     )
 
-                    # Run evaluation
+                    # Run evaluatin
                     try:
                         test_runner = TestRunner(inference_config)
                         # TODO: just for debugging.

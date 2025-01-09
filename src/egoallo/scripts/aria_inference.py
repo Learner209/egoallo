@@ -39,6 +39,9 @@ if TYPE_CHECKING:
     from third_party.cloudrender.cloudrender.render.pointcloud import Pointcloud
 
 from projectaria_tools.core import data_provider
+from projectaria_tools.core.sensor_data import TimeDomain, TimeQueryOptions
+from projectaria_tools.core.stream_id import RecordableTypeId, StreamId
+
 
 class AriaInference:
     def __init__(self, config: InferenceConfig, traj_root: Path, output_path: Path, glasses_x_angle_offset: float = 0.0):
@@ -145,31 +148,85 @@ class AriaInference:
                 rgb_record = vrs_data_provider.get_image_data_by_index(rgb_stream_id, frame_idx)
                 if rgb_record is not None and rgb_record[0].pixel_frame is not None:
                     rgb_frames.append(rgb_record[0].to_numpy_array())
-        # print(f"Extracted {len(rgb_frames)} RGB frames")
+
+        print(f"Extracted {len(rgb_frames)} RGB frames")
         
         # Save frames as video
-        # if len(rgb_frames) > 0:
-        #     first_frame = rgb_frames[0]
-        #     height, width = first_frame.shape[:2]
+        if len(rgb_frames) > 0:
+            first_frame = rgb_frames[0]
+            height, width = first_frame.shape[:2]
             
-        #     output_path = Path(self.config.output_dir) / "rgb_frames.mp4"
-        #     output_path.parent.mkdir(exist_ok=True, parents=True)
+            output_path = Path(self.config.output_dir) / "rgb_frames.mp4"
+            output_path.parent.mkdir(exist_ok=True, parents=True)
             
-        #     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        #     out = cv2.VideoWriter(str(output_path), fourcc, 30.0, (width, height))
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            out = cv2.VideoWriter(str(output_path), fourcc, 30.0, (width, height))
             
-        #     for frame in rgb_frames:
-        #         out.write(cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
+            for frame in rgb_frames:
+                out.write(cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
                 
-        #     out.release()
-        #     print(f"Saved RGB video to {output_path}")
+            out.release()
+            print(f"Saved RGB video to {output_path}")
+            
+        return rgb_frames
+
+    def _extract_rgb_frames(self, times: list[float] | list[int] | None = None) -> list[np.ndarray]:
+        """Extract RGB frames from VRS file and save as video.
+        
+        Args:
+            times: Optional list of timestamps or frame indices to extract frames at. 
+                  If float values are provided, they are treated as timestamps in seconds.
+                  If int values are provided, they are treated as frame indices.
+                  If None, uses sequential frame indices.
+        """
+        vrs_data_provider = data_provider.create_vrs_data_provider(str(self.traj_paths.vrs_file))
+        rgb_stream_id = vrs_data_provider.get_stream_id_from_label("camera-rgb")
+        time_domain = TimeDomain.DEVICE_TIME
+        option = TimeQueryOptions.CLOSEST
+        
+        rgb_frames = []
+        seq = vrs_data_provider.deliver_queued_sensor_data()
+        obj = next(seq)
+        while True:
+            ns = obj.get_time_ns(TimeDomain.DEVICE_TIME)
+            pixel = vrs_data_provider.get_image_data_by_time_ns(rgb_stream_id, ns, time_domain, option)
+            assert pixel is not None
+            rgb_frames.append(pixel[0].to_numpy_array())
+
+            try:
+                obj = next(seq)
+
+            except StopIteration:
+                break
+
+        print(f"Extracted {len(rgb_frames)} RGB frames")
+        
+        # Save frames as video
+        if len(rgb_frames) > 0:
+            first_frame = rgb_frames[0]
+            height, width = first_frame.shape[:2]
+            
+            output_path = Path(self.config.output_dir) / "rgb_frames.mp4"
+            output_path.parent.mkdir(exist_ok=True, parents=True)
+            
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            out = cv2.VideoWriter(str(output_path), fourcc, 30.0, (width, height))
+            
+            for frame in rgb_frames:
+                out.write(cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
+                
+            out.release()
+            print(f"Saved RGB video to {output_path}")
             
         return rgb_frames
 
 
+
+
 def main(config: InferenceConfig, traj_root: Path, output_path: Path, glasses_x_angle_offset: float = 0.0) -> None:
     inference = AriaInference(config, traj_root, output_path, glasses_x_angle_offset)
-    inference.extract_rgb_frames()
+    # inference.extract_rgb_frames()
+    inference._extract_rgb_frames()
 
 if __name__ == "__main__":
     import tyro
