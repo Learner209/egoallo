@@ -324,8 +324,8 @@ def run_training(
 
             # Evaluation
             steps_to_eval = 1e4
-            if step % steps_to_eval == 0:
-            # if step % steps_to_eval == 0 and step != 0:
+            # if step % steps_to_eval == 0:
+            if step % steps_to_eval == 0 and step != 0:
                 # Create temporary directory for evaluation outputs
                 with tempfile.TemporaryDirectory() as temp_dir:
                     # Create inference config for evaluation

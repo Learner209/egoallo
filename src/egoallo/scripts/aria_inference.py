@@ -186,6 +186,7 @@ class AriaInference:
         
         rgb_frames = []
         seq = vrs_data_provider.deliver_queued_sensor_data()
+        breakpoint()
         obj = next(seq)
         while True:
             ns = obj.get_time_ns(TimeDomain.DEVICE_TIME)
