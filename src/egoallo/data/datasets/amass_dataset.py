@@ -563,4 +563,4 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         """Get mask ratio - either fixed or randomly sampled"""
         if self.config.random_sample_mask_ratio:
             # Randomly sample between 0~mask_ratio
-            return np.random.uniform(self.config.mask_ratio / 4, self.config.mask_ratio)
+            return np.random.uniform(self.config.mask_ratio / 3, self.config.mask_ratio)

@@ -17,7 +17,6 @@ from torch import Tensor
 from tqdm import tqdm
 from videoio import VideoWriter
 
-from third_party.cloudrender.cloudrender.render.pointcloud import Pointcloud
 
 from egoallo.fncsmpl import (
     SE3,
@@ -47,6 +46,7 @@ from egoallo.fncsmpl import SmplhShapedAndPosed, SmplMesh
 VIZ_UTILS_IMPORT = True
 try:
     from third_party.cloudrender.cloudrender.camera import PerspectiveCameraModel
+    from third_party.cloudrender.cloudrender.render.pointcloud import Pointcloud
     from third_party.cloudrender.cloudrender.capturing import AsyncPBOCapture
     from third_party.cloudrender.cloudrender.render import (
         DirectionalLight,
