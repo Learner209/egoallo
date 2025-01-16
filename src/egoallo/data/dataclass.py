@@ -279,7 +279,8 @@ class EgoTrainingData(TensorDataclass):
 
         if self.visible_joints_mask is not None:
             # Set where joints are invalid to all zeros
-            self.joints_wrt_world = torch.where(self.visible_joints_mask.unsqueeze(-1), self.joints_wrt_world, torch.zeros_like(self.joints_wrt_world))
+            # self.joints_wrt_world = torch.where(self.visible_joints_mask.unsqueeze(-1), self.joints_wrt_world, torch.zeros_like(self.joints_wrt_world))
+            self.joints_wrt_world = torch.where(self.visible_joints_mask.unsqueeze(-1), self.joints_wrt_world, torch.full_like(self.joints_wrt_world, -1))
 
         self.metadata.stage = "preprocessed"
 
