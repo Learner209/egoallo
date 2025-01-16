@@ -216,20 +216,51 @@ class EgoTrainingData(TensorDataclass):
         
         # Store initial offset 
         self.metadata.initial_xy = initial_xy
-        assert isinstance(self.metadata.initial_xy, torch.Tensor) and self.metadata.initial_xy.shape[-1] == 2
+        assert isinstance(self.metadata.initial_xy, torch.Tensor) and self.metadata.initial_xy.shape[-1] == 2 and not torch.isnan(self.metadata.initial_xy).any()
 
         # Modify positions in-place by subtracting x,y offset
         # Expand initial_xy to match broadcast dimensions
-        expanded_xy = initial_xy.view(*initial_xy.shape[:-1], 1, 1, 2)  # Add dims for broadcasting
+        expanded_xy = initial_xy.view(*initial_xy.shape[:-1], 1, 1, 2).clone()  # Add dims for broadcasting
         
-        self.T_world_root[..., 4:6].sub_(initial_xy) # [*batch, timesteps, 2]
-        self.joints_wrt_world[..., :2].sub_(expanded_xy) # [*batch, timesteps, 22, 2]
-        self.T_world_cpf[..., 4:6].sub_(initial_xy) # [*batch, timesteps, 2]
+        # self.T_world_root[..., 4:6].sub_(initial_xy) # [*batch, timesteps, 2]
+        # self.joints_wrt_world[..., :2].sub_(expanded_xy) # [*batch, timesteps, 22, 2] 
+        # self.T_world_cpf[..., 4:6].sub_(initial_xy) # [*batch, timesteps, 2]
+
+        self.T_world_root = torch.cat([
+            self.T_world_root[..., :4],
+            self.T_world_root[..., 4:6] - initial_xy,
+            self.T_world_root[..., 6:]
+        ], dim=-1)
+        self.joints_wrt_world = torch.cat([
+            self.joints_wrt_world[..., :2] - expanded_xy,
+            self.joints_wrt_world[..., 2:]
+        ], dim=-1)
+        self.T_world_cpf = torch.cat([
+            self.T_world_cpf[..., :4],
+            self.T_world_cpf[..., 4:6] - initial_xy,
+            self.T_world_cpf[..., 6:]
+        ], dim=-1)
 
         # Subtract floor height using existing height_from_floor attribute
-        self.joints_wrt_world[..., :, :, 2:3].sub_(self.height_from_floor.unsqueeze(-2)) # [*batch, timesteps, 22, 1]
-        self.T_world_root[..., 6:7].sub_(self.height_from_floor) # [*batch, timesteps, 1]
-        self.T_world_cpf[..., 6:7].sub_(self.height_from_floor) # [*batch, timesteps, 1]
+        # self.joints_wrt_world[..., :, :, 2:3].sub_(self.height_from_floor.unsqueeze(-2)) # [*batch, timesteps, 22, 1]
+        # self.T_world_root[..., 6:7].sub_(self.height_from_floor) # [*batch, timesteps, 1]
+        # self.T_world_cpf[..., 6:7].sub_(self.height_from_floor) # [*batch, timesteps, 1]
+
+        self.joints_wrt_world = torch.cat([
+            self.joints_wrt_world[..., :2],
+            self.joints_wrt_world[..., 2:3] - self.height_from_floor.unsqueeze(-2),
+            self.joints_wrt_world[..., 3:]
+        ], dim=0)
+        self.T_world_root = torch.cat([
+            self.T_world_root[..., :6],
+            self.T_world_root[..., 6:7] - self.height_from_floor,
+            self.T_world_root[..., 7:]
+        ], dim=-1)
+        self.T_world_cpf = torch.cat([
+            self.T_world_cpf[..., :6],
+            self.T_world_cpf[..., 6:7] - self.height_from_floor,
+            self.T_world_cpf[..., 7:]
+        ], dim=-1)
 
         self.metadata.stage = "preprocessed"
 
@@ -242,17 +273,53 @@ class EgoTrainingData(TensorDataclass):
         1. Adding floor height to z coordinates
         """
         assert self.metadata.stage == "preprocessed"
-        self.joints_wrt_world[..., :, :, 2:3].add_(self.height_from_floor.unsqueeze(-2)) # [*batch, timesteps, 22, 1]
-        self.T_world_root[..., :, 6:7].add_(self.height_from_floor) # [*batch, timesteps, 1]
-        self.T_world_cpf[..., :, 6:7].add_(self.height_from_floor) # [*batch, timesteps, 1]
+
+        # self.joints_wrt_world[..., :, :, 2:3].add_(self.height_from_floor.unsqueeze(-2)) # [*batch, timesteps, 22, 1]
+        # self.T_world_root[..., :, 6:7].add_(self.height_from_floor) # [*batch, timesteps, 1]
+        # self.T_world_cpf[..., :, 6:7].add_(self.height_from_floor) # [*batch, timesteps, 1]
+
+        self.joints_wrt_world = torch.cat([
+            self.joints_wrt_world[..., :2],
+            self.joints_wrt_world[..., 2:3] + self.height_from_floor.unsqueeze(-2),
+            self.joints_wrt_world[..., 3:]
+        ], dim=-1)
+        self.T_world_root = torch.cat([
+            self.T_world_root[..., :6],
+            self.T_world_root[..., 6:7] + self.height_from_floor,
+            self.T_world_root[..., 7:]
+        ], dim=-1)
+        self.T_world_cpf = torch.cat([
+            self.T_world_cpf[..., :6], 
+            self.T_world_cpf[..., 6:7] + self.height_from_floor,
+            self.T_world_cpf[..., 7:]
+        ], dim=-1)
+
         # Add initial x,y position offset
         # Expand initial_xy to match broadcast dimensions like in preprocess()
         expanded_xy = self.metadata.initial_xy.view(*self.metadata.initial_xy.shape[:-1], 1, 1, 2)  # Add dims for broadcasting
         
         device = self.T_world_root.device
-        self.T_world_root[..., 4:6].add_(self.metadata.initial_xy.unsqueeze(-2).to(device)) # [*batch, timesteps, 2]
-        self.joints_wrt_world[..., :2].add_(expanded_xy.to(device)) # [*batch, timesteps, 22, 2]
-        self.T_world_cpf[..., 4:6].add_(self.metadata.initial_xy.unsqueeze(-2).to(device)) # [*batch, timesteps, 2]
+
+        # self.T_world_root[..., 4:6].add_(self.metadata.initial_xy.unsqueeze(-2).to(device)) # [*batch, timesteps, 2]
+        # self.joints_wrt_world[..., :2].add_(expanded_xy.to(device)) # [*batch, timesteps, 22, 2]
+        # self.T_world_cpf[..., 4:6].add_(self.metadata.initial_xy.unsqueeze(-2).to(device)) # [*batch, timesteps, 2]
+
+        self.T_world_root = torch.cat([
+            self.T_world_root[..., :4],
+            self.T_world_root[..., 4:6] + self.metadata.initial_xy.unsqueeze(-2).to(device),
+            self.T_world_root[..., 6:]
+        ], dim=-1)
+
+        self.joints_wrt_world = torch.cat([
+            self.joints_wrt_world[..., :2] + expanded_xy.to(device),
+            self.joints_wrt_world[..., 2:]
+        ], dim=-1)
+
+        self.T_world_cpf = torch.cat([
+            self.T_world_cpf[..., :4],
+            self.T_world_cpf[..., 4:6] + self.metadata.initial_xy.unsqueeze(-2).to(device),
+            self.T_world_cpf[..., 6:]
+        ], dim=-1)
 
         self.metadata.stage = "postprocessed"
 
@@ -283,4 +350,16 @@ class EgoTrainingData(TensorDataclass):
         # 3. assign metadata
         traj.metadata = self.metadata
         return traj
+        
+    def __post_init__(self):
+        """Validate that no tensor attributes contain NaN values."""
+        for field in dataclasses.fields(self):
+            # Skip non-tensor fields
+            if field.name == "metadata":
+                continue
+            
+            value = getattr(self, field.name)
+            if value is not None:  # Handle optional fields
+                if torch.isnan(value).any():
+                    raise ValueError(f"NaN values detected in {field.name}")
         

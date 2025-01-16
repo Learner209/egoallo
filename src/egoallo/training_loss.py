@@ -251,7 +251,7 @@ class TrainingLossComputer:
                 ),
                 "foot_skating": foot_skating_loss,
                 "velocity": x_0_pred._weight_and_mask_loss(
-                    (joint_velocities - gt_velocities).reshape(batch, time - 1, -1),
+                    ((joint_velocities - gt_velocities) ** 2).reshape(batch, time - 1, -1),
                     train_batch.mask[:, 1:],
                     weight_t,
                     torch.sum(train_batch.mask[:, 1:]),
