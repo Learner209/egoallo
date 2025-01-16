@@ -187,7 +187,7 @@ class SMPLViewer(BaseRenderer):
         """
         super().__init__(config or RendererConfig())
 
-        # breakpoint()
+        
         # Initialize scene components
         self.scene = Scene()
         self.scene_obj = scene_obj or Path(
@@ -204,7 +204,7 @@ class SMPLViewer(BaseRenderer):
         # Setup rendering components
         self._setup_camera()
         self._setup_scene()
-        # breakpoint()
+        
         self._setup_lighting()
         self._setup_smpl_renderer()
 
@@ -330,7 +330,7 @@ class SMPLViewer(BaseRenderer):
             )
 
         keypoint_sequence = []
-        # breakpoint()
+        
         for i in range(traj.joints_wrt_world.shape[0]):
             # Get visible joints for this frame
             visible_mask = traj.visible_joints_mask[i]  # [J]
@@ -523,6 +523,6 @@ def visualize_ego_training_data(
         body_model: SMPL body model for mesh generation
         output_path: Path to save the output video
     """
-    # breakpoint()
+    
     viewer = SMPLViewer(**kwargs)
     viewer.render_sequence(denoised_traj, body_model, output_path)

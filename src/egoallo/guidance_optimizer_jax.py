@@ -43,7 +43,7 @@ def do_guidance_optimization(
     aria_detections: None | CorrespondedAriaHandWristPoseDetections,
 ) -> tuple[network.AbsoluteDenoiseTraj, dict]:
     """Run an optimizer to apply foot contact constraints."""
-    # breakpoint()
+    
     (*B, T, _) = T_world_root.shape
 
     # assert traj.hand_rotmats is not None
@@ -839,25 +839,27 @@ def _optimize(
         )
 
     # Add new angle prior cost after the reg_cost
-    @cost_with_args(
-        _SmplhBodyPosesVar(jnp.arange(timesteps)),
-    )
-    def angle_prior_cost(
-        vals: jaxls.VarValues,
-        pose: _SmplhBodyPosesVar,
-    ) -> jax.Array:
-        # Get the relevant joint angles (knees and elbows)
-        # Note: Adjusted indices for SMPL-H model joint ordering
-        local_quats_aa = jaxlie.SO3(vals[pose]).log().flatten()
-        assert local_quats_aa.ndim == 1 and local_quats_aa.shape[-1] == 63
-        # assert isinstance(local_quats_aa, Float[Tensor, "63"])
+    # FIXME: the angle prior cost fails to generate realistic poses now. maybe the sign is inverted?
+    
+    # @cost_with_args(
+    #     _SmplhBodyPosesVar(jnp.arange(timesteps)),
+    # )
+    # def angle_prior_cost(
+    #     vals: jaxls.VarValues,
+    #     pose: _SmplhBodyPosesVar,
+    # ) -> jax.Array:
+    #     # Get the relevant joint angles (knees and elbows)
+    #     # Note: Adjusted indices for SMPL-H model joint ordering
+    #     local_quats_aa = jaxlie.SO3(vals[pose]).log().flatten()
+    #     assert local_quats_aa.ndim == 1 and local_quats_aa.shape[-1] == 63
+    #     # assert isinstance(local_quats_aa, Float[Tensor, "63"])
 
-        joint_angles = jnp.take(local_quats_aa, jnp.array([12, 15, 55, 58]))
+    #     joint_angles = jnp.take(local_quats_aa, jnp.array([12, 15, 55, 58]))
         
-        # Apply direction-specific penalties using same pattern as customloss.py
-        signs = jnp.array([1., -1., -1., -1.])
-        # breakpoint()
-        return guidance_params.angle_prior_weight * (jnp.exp(joint_angles * signs) ** 2).flatten()
+    #     # Apply direction-specific penalties using same pattern as customloss.py
+    #     signs = jnp.array([1., -1., -1., -1.])
+    #     
+    #     return guidance_params.angle_prior_weight * (jnp.exp(joint_angles * signs) ** 2).flatten()
 
     vars_body_pose = _SmplhBodyPosesVar(jnp.arange(timesteps))
     vars_hand_pose = _SmplhSingleHandPosesVar(jnp.arange(timesteps * 2))

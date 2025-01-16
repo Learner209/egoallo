@@ -193,6 +193,7 @@ class EgoTrainingData(TensorDataclass):
         2. Subtracting floor height from z coordinates
         Modifies positions in-place to save memory.
         Returns self for method chaining.
+        3. Set where joints is invalid to all zeros, indicated by visible_joints_mask.
         """
         assert self.metadata.stage == "raw"
         # Get initial preprocessed x,y position offset from visible joints in first frame
@@ -213,7 +214,7 @@ class EgoTrainingData(TensorDataclass):
                 # Check if any joints are visible in each batch element
                 has_visible = frame_mask.any(dim=-1)  # [*batch]
                 
-                # breakpoint()
+                
                 if has_visible.all():  # all batch elements have visible joints
                     # Calculate mean only over visible joints, preserving batch dims
                     sums = visible_joints.sum(dim=-2)  # [*batch, 3]
@@ -275,6 +276,10 @@ class EgoTrainingData(TensorDataclass):
             self.T_world_cpf[..., 6:7] - self.height_from_floor,
             self.T_world_cpf[..., 7:]
         ], dim=-1)
+
+        if self.visible_joints_mask is not None:
+            # Set where joints are invalid to all zeros
+            self.joints_wrt_world = torch.where(self.visible_joints_mask.unsqueeze(-1), self.joints_wrt_world, torch.zeros_like(self.joints_wrt_world))
 
         self.metadata.stage = "preprocessed"
 
@@ -369,15 +374,15 @@ class EgoTrainingData(TensorDataclass):
         traj.metadata = self.metadata
         return traj
         
-    def __post_init__(self):
-        """Validate that no tensor attributes contain NaN values."""
-        for field in dataclasses.fields(self):
-            # Skip non-tensor fields
-            if field.name == "metadata":
-                continue
+    # def __post_init__(self):
+    #     """Validate that no tensor attributes contain NaN values."""
+    #     for field in dataclasses.fields(self):
+    #         # Skip non-tensor fields
+    #         if field.name == "metadata":
+    #             continue
             
-            value = getattr(self, field.name)
-            if value is not None:  # Handle optional fields
-                if torch.isnan(value).any():
-                    raise ValueError(f"NaN values detected in {field.name}")
+    #         value = getattr(self, field.name)
+    #         if value is not None:  # Handle optional fields
+    #             if torch.isnan(value).any():
+    #                 raise ValueError(f"NaN values detected in {field.name}")
         

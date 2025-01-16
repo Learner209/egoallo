@@ -55,7 +55,7 @@ def visualize_saved_trajectory(
         pred_traj: DenoiseTrajType = torch.load(trajectory_path[1], map_location=device)
         
         # Visualize ground truth
-        # breakpoint()
+        
         EgoTrainingData.visualize_ego_training_data(
             gt_traj,
             body_model,
@@ -90,7 +90,7 @@ def visualize_saved_trajectory(
             # scene_obj=""
         )
         # Save frames as video
-        # breakpoint()
+        
         # Save frames as video
         if len(rgb_frames) > 0:
             first_frame = rgb_frames[0]

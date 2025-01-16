@@ -451,8 +451,7 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         kwargs["visible_joints_mask"] = visible_joints_mask
 
         # Zero out invisible joints while keeping original joints for loss computation
-        masked_joints = joints_wrt_world.clone()
-        masked_joints[~visible_joints_mask] = 0
+        masked_joints = joints_wrt_world
         kwargs["joints_wrt_world"] = masked_joints
 
         # Create metadata object first
