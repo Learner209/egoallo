@@ -202,10 +202,23 @@ class EgoTrainingData(TensorDataclass):
             for t in range(T):
                 frame_joints = self.joints_wrt_world[..., t, :, :]  # [*batch, 22, 3]
                 frame_mask = self.visible_joints_mask[..., t, :]  # [*batch, 22]
-                visible_joints = frame_joints[frame_mask]  # [num_visible, 3]
                 
-                if len(visible_joints) > 0:  # At least one joint is visible
-                    initial_xy = visible_joints[..., :2].mean(dim=0)  # [2]
+                # Expand frame_mask to match batch dimensions
+                frame_mask = frame_mask.view(*B, -1)  # [*batch, 22]
+                
+                # Get visible joints while preserving batch dimensions
+                visible_joints_mask = frame_mask.unsqueeze(-1).expand(*B, -1, 3)  # [*batch, 22, 3]
+                visible_joints = torch.where(visible_joints_mask, frame_joints, torch.zeros_like(frame_joints))
+                
+                # Check if any joints are visible in each batch element
+                has_visible = frame_mask.any(dim=-1)  # [*batch]
+                
+                # breakpoint()
+                if has_visible.all():  # all batch elements have visible joints
+                    # Calculate mean only over visible joints, preserving batch dims
+                    sums = visible_joints.sum(dim=-2)  # [*batch, 3]
+                    counts = frame_mask.sum(dim=-1, keepdim=True)  # [*batch, 1]
+                    initial_xy = (sums[..., :2] / counts).clone()  # [*batch, 2]
                     break
             else:
                 raise RuntimeError("No frames found with visible joints")
@@ -222,6 +235,8 @@ class EgoTrainingData(TensorDataclass):
         # Expand initial_xy to match broadcast dimensions
         expanded_xy = initial_xy.view(*initial_xy.shape[:-1], 1, 1, 2).clone()  # Add dims for broadcasting
         
+        # FIXME: the in-place operations just won't work, indictaed by the increasing loss and finally nan values.
+        # FIXME: and the problem only occurs at the in-place operations with self.T_world_root, not others?
         # self.T_world_root[..., 4:6].sub_(initial_xy) # [*batch, timesteps, 2]
         # self.joints_wrt_world[..., :2].sub_(expanded_xy) # [*batch, timesteps, 22, 2] 
         # self.T_world_cpf[..., 4:6].sub_(initial_xy) # [*batch, timesteps, 2]
@@ -308,12 +323,10 @@ class EgoTrainingData(TensorDataclass):
             self.T_world_root[..., 4:6] + self.metadata.initial_xy.unsqueeze(-2).to(device),
             self.T_world_root[..., 6:]
         ], dim=-1)
-
         self.joints_wrt_world = torch.cat([
             self.joints_wrt_world[..., :2] + expanded_xy.to(device),
             self.joints_wrt_world[..., 2:]
         ], dim=-1)
-
         self.T_world_cpf = torch.cat([
             self.T_world_cpf[..., :4],
             self.T_world_cpf[..., 4:6] + self.metadata.initial_xy.unsqueeze(-2).to(device),

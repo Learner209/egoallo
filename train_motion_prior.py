@@ -219,7 +219,7 @@ def run_training(
             if not accelerator.is_main_process:
                 continue
 
-            if step % 400 == 0:
+            if step % 200 == 0:
                 log_msg = (
                     f"step: {step} ({loop_metrics.iterations_per_sec:.2f} it/sec)"
                     f" epoch: {epoch} (time: {epoch_time:.1f}s)"
