@@ -158,6 +158,13 @@ class TrainingLossComputer:
             project_rotmats=False,
         )
         # Compute loss using x_0_pred and x_0
+        # breakpoint()
+
+		# postprocessing
+        train_batch = train_batch.postprocess()
+        x_0_pred = train_batch._post_process(x_0_pred)
+        x_0 = train_batch._post_process(x_0)
+
         loss_terms: dict[str, Tensor | float] = x_0_pred.compute_loss(other=x_0, mask=train_batch.mask, weight_t=weight_t)
 
         if train_config.denoising.denoising_mode == "joints_only":
