@@ -76,7 +76,7 @@ class Dataset_EgoExo(Dataset):
             no_cam_list = []
 
             cnt = 0
-            # breakpoint()
+            
             for take_uid in tqdm(self.takes_metadata, total=len(self.takes_metadata), desc="takes_metadata", ascii=' >='):
         
                 # if cnt > 50:
@@ -201,7 +201,7 @@ class Dataset_EgoExo(Dataset):
                 poses.append([skeleton[keyp]['x'], skeleton[keyp]['y'], skeleton[keyp]['z']]) #visible
             else:
                 flags.append(0) #not visible
-                poses.append([-1,-1,-1]) #not visible
+                poses.append([float('nan')] * 3) #not visible
         return poses, flags
 
     @jaxtyped(typechecker=typeguard.typechecked)
@@ -306,35 +306,48 @@ class Dataset_EgoExo(Dataset):
             num_joints=22,
             debug_vis=False,
         )
-        # breakpoint()
+        
 
         # Import scipy interpolation
-        from scipy.interpolate import interp1d
+        from scipy.interpolate import make_interp_spline
 
         # Create interpolation functions for each joint dimension
         num_joints = joints_world_orig.shape[1]
 
         # Interpolate world coordinates
-        joints_world = torch.zeros((seq_len, num_joints, 3))
+        joints_world = torch.full((seq_len, num_joints, 3), float('nan'))
+
         for j in range(num_joints):
             for d in range(3):
-                interp_fn = interp1d(frame_keys_list, joints_world_orig[:, j, d].numpy(force=True),
-                                   kind='linear', fill_value='extrapolate')
-                joints_world[:, j, d] = torch.from_numpy(interp_fn(continuous_frames))
+                # Get joint data and corresponding frames
+                joint_data = joints_world_orig[:, j, d].numpy(force=True)
+                valid_mask = ~np.isnan(joint_data)
+                valid_frames = np.array(frame_keys_list)[valid_mask]
+                valid_data = joint_data[valid_mask]
+                if len(valid_frames) == 0:
+                    # If no valid frames, fill with NaN
+                    continue # do nothing as the initial value is NaN.
+                elif len(valid_frames) >= 4:  # Need at least 4 points for cubic spline
+                    # Create B-spline interpolation
+                    bspl = make_interp_spline(valid_frames, valid_data, k=3)
+                    # Evaluate spline at all frames
+                    interpolated = bspl(continuous_frames)
+                else:
+                    # Fall back to linear interpolation for too few points
+                    interpolated = np.interp(continuous_frames, valid_frames, valid_data)
 
+                joints_world[:, j, d] = torch.from_numpy(interpolated)
+
+        
         # Create visibility mask based on non-nan values in world coordinates
         visible_mask = ~torch.isnan(joints_world).any(dim=-1)  # shape: (seq_len, num_joints)
-
-        masked_joints = joints_world.clone()
-        masked_joints[~visible_mask] = 0
-
         take_name = f"name_{take_name}_uid_{take_uid}_t{continuous_frames[0]}_{continuous_frames[-1]}"
 
         from egoallo.data.dataclass import EgoTrainingData
         
         ret = EgoTrainingData(
-            joints_wrt_world=masked_joints,  # Already computed above
-            joints_wrt_cpf=torch.zeros_like(masked_joints),  # Same shape as joints_world
+            joints_wrt_world=joints_world,  # Already computed above
+            joints_wrt_cpf=torch.zeros_like(joints_world),  # Same shape as joints_world
             T_world_root=torch.zeros((seq_len, 7)), # T x 7 for translation + quaternion
             T_world_cpf=torch.zeros((seq_len, 7)),  # T x 7 for translation + quaternion
             visible_joints_mask=visible_mask,  # Already computed above
@@ -352,7 +365,7 @@ class Dataset_EgoExo(Dataset):
             ),
         )
         ret = ret.preprocess()
-        # breakpoint()
+        
         return ret
        
 

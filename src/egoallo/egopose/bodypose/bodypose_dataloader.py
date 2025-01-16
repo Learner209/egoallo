@@ -436,14 +436,14 @@ class body_pose_anno_loader(hand_pose_anno_loader):
                     aria_cam_name,
                 )
                 curr_take_db[frame_idx] = curr_frame_anno
-                # breakpoint()
+                
 
         # Mark take as valid if it has enough valid frames
         take_valid = len(curr_take_db) > self.discard_seq_than
         self.stats_collector.mark_take_processed(take_uid, valid=take_valid)
 
         if take_valid:
-            # breakpoint()
+            
             # ground_height = self._get_ground_height(take_uid)
 
             curr_take_db["metadata"] = {

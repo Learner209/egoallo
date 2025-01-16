@@ -152,6 +152,7 @@ class SequenceProcessor:
 			device=self.device,
 		)
 		gt_traj = runtime_config.denoising.from_ego_data(batch, include_hands=True)
+		
 
 		post_batch = batch.postprocess()
 		denoised_traj = post_batch._post_process(denoised_traj)
@@ -317,7 +318,7 @@ class TestRunner:
 			#     # import ipdb; ipdb.set_trace()
 			#     denoised_traj = denoised_traj[seq_idx]
 			#     # joints2smpl_fit_seq(Joints2SmplFittingConfig(), self.body_model, denoised_traj.joints.shape[0], denoised_traj.joints.cpu(), output_dir)
-			#     # breakpoint()
+			#     
 			#     fit_seq_data: "EgoTrainingData" = joints2smpl_fit_seq(
 			#         Joints2SmplFittingConfig(),
 			#         self.body_model,
@@ -456,8 +457,9 @@ class TestRunner:
 				desc="Enumerating test loader",
 				ascii=" >=",
 			):
-				# if batch_idx == 2:
+				# if batch_idx == 10:
 				#     break
+
 				batch.metadata.scope = "test"
 
 				batch = batch.to(self.device)
@@ -548,7 +550,7 @@ class TestRunner:
 					# Parse out take_uid from take_name
 					take_uid = take_name.split("uid_")[1].split("_t")[0]
 					this_take_name = take_name.split("name_")[1].split("_uid_")[0]
-					# breakpoint()
+					
 					this_take_path = Path(self.inference_config.egoexo_dataset_path) / "takes" / Path(this_take_name)
 
 					cmd = [
@@ -565,7 +567,7 @@ class TestRunner:
 					# Remove empty arguments
 					cmd = [arg for arg in cmd if arg]
 					logger.info(f"Running command: {' '.join(cmd)}")
-					# breakpoint()
+					
 					
 					# Call visualization process
 					subprocess.call(cmd, env=os.environ.copy())

@@ -819,7 +819,7 @@ class AbsoluteDenoiseTraj(BaseDenoiseTraj):
                 # raise RuntimeWarning(f"NaN values found in trajectory: {self_has_nan}, {other_has_nan}, skipping metrics computation")
             return {}
 
-        # breakpoint()
+        
         # TEMPORARY_FIX: import BodyEvaluator lazily to avoid circular imports
         from egoallo.evaluation.body_evaluator import BodyEvaluator
 
@@ -1639,7 +1639,6 @@ class EgoDenoiserConfig:
 
         # !joints must be masked to prevent further motion information from being used
         masked_joints = joints.clone()
-        masked_joints[~visible_joints_mask] = 0
 
         # Create joint embeddings if enabled
         if self.use_joint_embeddings:

@@ -212,7 +212,7 @@ class HPSProcessor:
         #     joints,
         #     list(self.joint_indices.values())
         # )
-        # breakpoint()
+        
         floor_height, contacts = self.motion_processor.process_floor_and_contacts(
             joints, self.joint_indices
         )
