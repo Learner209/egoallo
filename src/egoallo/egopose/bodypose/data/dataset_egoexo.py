@@ -25,6 +25,7 @@ import typeguard
 from torch import Tensor
 from egoallo.mapping import EGOEXO4D_BODYPOSE_TO_SMPLH_INDICES
 from egoallo.utils.setup_logger import setup_logger
+from egoallo.utilities import find_numerical_key_in_dict
 from pathlib import Path
 
 logger = setup_logger(output=None, name=__name__)
@@ -270,73 +271,82 @@ class Dataset_EgoExo(Dataset):
         pose = ann
         aria_trajectory =  traj
 
-        capture_frames =  list(pose.keys())
+        capture_frames = find_numerical_key_in_dict(pose)
+        # capture_frames =  list(pose.keys())
+        # Create continuous frame sequence from min to max frame keys
+        min_frame = min(capture_frames)
+        max_frame = max(capture_frames)
+        continuous_frames = list(range(min_frame, max_frame + 1))
 
-        if self.split == "train":
-            # frames_idx = random.randint(self.slice_window, len(capture_frames)-1)
-            # frames_window = capture_frames[frames_idx-self.slice_window: frames_idx]
-            frames_window = capture_frames
-        else:
-            frames_window = capture_frames
+        seq_len = len(continuous_frames)
 
+        # Prepare data for interpolation
+        frame_keys_list = list(capture_frames)
         skeletons_window = []
         flags_window = []
-        t_window = []
         aria_window = []
 
-        for frame in frames_window:
-            t_window.append(int(frame))
-            skeleton = pose[frame][0]["annotation3D"]
+        for frame in frame_keys_list:
+            skeleton = pose[str(frame)][0]["annotation3D"]
             skeleton, flags = self.parse_skeleton(skeleton)
             skeletons_window.append(skeleton)
             flags_window.append(flags)
-            aria_window.append(aria_trajectory[frame])
+            aria_window.append(aria_trajectory[str(frame)])
 
-    
-        skeletons_window =  torch.Tensor(np.array(skeletons_window)) # T, 17, 3
-        flags_window =  torch.Tensor(np.array(flags_window)) # T, 17
-        aria_window =  torch.Tensor(np.array(aria_window)) # T, 3
-        head_offset = aria_window.unsqueeze(1).repeat(1,17,1)
-        # condition =  aria_window
-        task = torch.tensor(self.takes_metadata[take_uid]['task_id'])
-        take_name = self.takes_metadata[take_uid]['root_dir']
-        take_name = take_name.split("takes/")[1]
-        # set invisible joints to nan
-        skeletons_window[~flags_window.bool()] = float("nan")
+        skeletons_window = torch.Tensor(np.array(skeletons_window)) # T, 17, 3
+        flags_window = torch.Tensor(np.array(flags_window)) # T, 17
+        aria_window = torch.Tensor(np.array(aria_window)) # T, 3
 
-        joints_world, visible_mask = self._process_joints(
-            skeletons_window, # T, 17, 3
-            flags_window.float(), # T, 17
-            # ground_height=0.0,
+        # Process original keyframes
+        joints_world_orig, visible_mask_orig = self._process_joints(
+            skeletons_window,
+            flags_window.float(),
             ground_height=float(gt_ground_height),
             return_smplh_joints=True,
             num_joints=22,
             debug_vis=False,
         )
         # breakpoint()
+
+        # Import scipy interpolation
+        from scipy.interpolate import interp1d
+
+        # Create interpolation functions for each joint dimension
+        num_joints = joints_world_orig.shape[1]
+
+        # Interpolate world coordinates
+        joints_world = torch.zeros((seq_len, num_joints, 3))
+        for j in range(num_joints):
+            for d in range(3):
+                interp_fn = interp1d(frame_keys_list, joints_world_orig[:, j, d].numpy(force=True),
+                                   kind='linear', fill_value='extrapolate')
+                joints_world[:, j, d] = torch.from_numpy(interp_fn(continuous_frames))
+
+        # Create visibility mask based on non-nan values in world coordinates
+        visible_mask = ~torch.isnan(joints_world).any(dim=-1)  # shape: (seq_len, num_joints)
+
         masked_joints = joints_world.clone()
         masked_joints[~visible_mask] = 0
-        # T_world_root = self._process_camera_poses(slice_data)
-        take_name = f"name_{take_name}_uid_{take_uid}_t{frames_window[0]}_{frames_window[-1]}"
+
+        take_name = f"name_{take_name}_uid_{take_uid}_t{continuous_frames[0]}_{continuous_frames[-1]}"
 
         from egoallo.data.dataclass import EgoTrainingData
-        # breakpoint()
         
         ret = EgoTrainingData(
             joints_wrt_world=masked_joints,  # Already computed above
             joints_wrt_cpf=torch.zeros_like(masked_joints),  # Same shape as joints_world
-            T_world_root=torch.zeros((len(frames_window), 7)), # T x 7 for translation + quaternion
-            T_world_cpf=torch.zeros((len(frames_window), 7)),  # T x 7 for translation + quaternion
+            T_world_root=torch.zeros((seq_len, 7)), # T x 7 for translation + quaternion
+            T_world_cpf=torch.zeros((seq_len, 7)),  # T x 7 for translation + quaternion
             visible_joints_mask=visible_mask,  # Already computed above
-            mask=torch.ones(len(frames_window), dtype=torch.bool),  # T
+            mask=torch.ones(seq_len, dtype=torch.bool),  # T
             betas=torch.zeros((1, 16)),  # 1 x 16 for SMPL betas
-            body_quats=torch.zeros((len(frames_window), 21, 4)),  # T x 21 x 4 for body joint rotations
-            hand_quats=torch.zeros((len(frames_window), 30, 4)),  # T x 30 x 4 for hand joint rotations
-            contacts=torch.zeros((len(frames_window), 22)),  # T x 22 for contact states
-            height_from_floor=torch.full((len(frames_window), 1), gt_ground_height),  # T x 1
+            body_quats=torch.zeros((seq_len, 21, 4)),  # T x 21 x 4 for body joint rotations
+            hand_quats=torch.zeros((seq_len, 30, 4)),  # T x 30 x 4 for hand joint rotations
+            contacts=torch.zeros((seq_len, 22)),  # T x 22 for contact states
+            height_from_floor=torch.full((seq_len, 1), gt_ground_height),  # T x 1
             metadata=EgoTrainingData.MetaData( # raw data.
                 take_name=take_name,
-                frame_keys=tuple(int(f) for f in frames_window),  # Convert to tuple of ints
+                frame_keys=tuple(continuous_frames),  # Convert to tuple of ints
                 stage="raw",
                 scope="test",
             ),

@@ -86,6 +86,7 @@ class InferenceTrajectoryPaths:
     hamer_outputs: Path | None
     wrist_and_palm_poses_csv: Path | None
     splat_path: Path | None
+    ego_preview_path: Path | None
 
     @staticmethod
     def find(traj_root: Path) -> InferenceTrajectoryPaths:
@@ -118,6 +119,9 @@ class InferenceTrajectoryPaths:
             splat_path = None
         else:
             logger.info(f"Found splat at {splat_path}")
+        
+        ego_preview_path = traj_root / "ego_preview.mp4"
+        assert ego_preview_path.exists(), f" Should found ego preview at {ego_preview_path}"
 
         return InferenceTrajectoryPaths(
             vrs_file=vrs_files[0],
@@ -128,6 +132,7 @@ class InferenceTrajectoryPaths:
             if wrist_and_palm_poses_csv
             else None,
             splat_path=splat_path,
+            ego_preview_path=ego_preview_path,
         )
 
 
