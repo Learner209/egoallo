@@ -1,55 +1,56 @@
-# egoallo
-
-**[Project page](https://egoallo.github.io/) &bull;
-[arXiv](https://arxiv.org/abs/2410.03665)**
-
-Code release for our preprint:
-
-<table><tr><td>
-    Brent Yi<sup>1</sup>, Vickie Ye<sup>1</sup>, Maya Zheng<sup>1</sup>, Lea M&uuml;ller<sup>1</sup>, Georgios Pavlakos<sup>2</sup>, Yi Ma<sup>1</sup>, Jitendra Malik<sup>1</sup>, and Angjoo Kanazawa<sup>1</sup>.
-    <strong>Estimating Body and Hand Motion in an Ego-sensed World.</strong>
-    arXiV, 2024.
-</td></tr>
-</table>
-<sup>1</sup><em>UC Berkeley</em>, <sup>2</sup><em>UT Austin</em>
-
----
-
-## Updates
-
-- **Oct 7, 2024:** Initial release. (training code, core implementation details)
-- **Oct 14, 2024:** Added model checkpoint, dataset preprocessing, inference, and visualization scripts.
+# egoallo new
 
 ## Overview
 
 **TLDR;** We use egocentric SLAM poses and images to estimate 3D human body pose, height, and hands.
 
-https://github.com/user-attachments/assets/7d28e07f-ab83-4749-ac6b-abe692d9ba20
-
-This repository is structured as follows:
+This repository is structured as follows (partially illustrated below):
 
 ```
 .
 ├── download_checkpoint_and_data.sh
-│                            - Download model checkpoint and sample data.
-├── 0_preprocess_training_data.py
-│                            - Preprocessing script for training datasets.
+│                            			- Download model checkpoint and sample data.
 ├── 1_train_motion_prior.py
-│                            - Training script for motion diffusion model.
-├── 2_run_hamer_on_vrs.py
-│                            - Run HaMeR on inference data (expects Aria VRS).
-├── 3_aria_inference.py
-│                            - Run full pipeline on inference data.
-├── 4_visualize_outputs.py
-│                            - Visualize outputs from inference.
-│
+│                            			- Training script for motion diffusion model.
 ├── src/egoallo/
-│   ├── data/                - Dataset utilities.
-│   ├── transforms/          - SO(3) / SE(3) transformation helpers.
-│   └── *.py                 - All core implementation.
+│   ├── data/                			- Dataset utilities.
+| 	|	|── amass/           			- OOM module in charge of preprocessing of AMASS dataset.
+| 	|	|── hps/             			- OOM module in charge of preprocessing of HPS dataset.
+| 	|	|── rich/            			- OOM module in charge of preprocessing of RICH dataset.
+| 	|	|── collators/       			- the batch collator family functions of the dataloader.
+| 	|	|── datasets/        			- Dataloader.
+| 	| 	|	|── egoexo_dataset.py       - dataloading of EgoExoDataset (large **DEPRECATED** in favor of [](./src/egoallo/egopose/bodypose/data/dataset_egoexo.py)).
+| 	| 	|	|── amass_dataset.py        - dataloading of AMASS dataset.
+| 	|	|── rich/            			- the preprocessing of RICH dataset.
+| 	├── egoexo/              			- The manipulation utilities of EgoEXoDataset dataset, mostly the EgoExoUtils module.
+| 	├── egopose/             			- Egopose (EgoExoDataset) related utilities of EgoExoDataset. large borrowed from [egopose repo](https://github.com/EGO4D/ego-exo4d-egopose)
+| 	|	|── bodypose/       			- Bodypose dataloading of EgoExoDataset.
+| 	|	|── handpose/       			- Handpose dataloading of EgoExoDataset.
+| 	| 	|	|── main_ego_pose.py        - The main script to extract valid egopose annotations from EgoExoDataset. Large Deprecated since this is used for [egoexo_dataset.py](./src/egoallo/data/datasets/egoexo_dataset.py), which is large deprecated as stated above.
+| 	├── evaluation/          			- OOP implementation of evaluation metric utilities.
+| 	├── joints2smpl/         			- Package used to convert sequences of joints positions to parameterized SMPL pose parameters. (large borrowed from [joints2smpl repo](https://github.com/wangsen1312/joints2smpl)). This package is no longer used, it is previously used in the joints' conversion to smpl parameterized poses.
+| 	├── registry/            			- package to register a module, serve as a hook to load the module.
+| 	├── scripts/             			- scripts of all related operations (e.g., training, inference, visualization, export dataset to hdf5 format etc.)
+| 	|	|── aria_inference.py          - AriaInference class to some functionalities of the EgoExoDataset dataset.
+| 	|	|── export_hdf5.py            - Load the preprocessed npz files of specified datasets paths and exprot them into a hdf5 format file.
+| 	|	|── hamer_on_vrs.py           - run HaMeR hand detection on VRS data.
+| 	|	|── run_hamer_on_vrs.py       - run HaMeR hand detection on VRS data.
+| 	|	|── preprocess_amass.py       - the preprocessing **main script** of AMASS dataset.
+| 	|	|── preprocess_hps.py         - the preprocessing **main script** of HPS dataset.
+| 	|	|── preprocess_rich.py        - the preprocessing **main script** of RICH dataset.
+| 	|	|── test.py                   - the inference **main script** of the model.
+| 	|	|── visualize_inference.py    - the main script of visualization of the model outputs, serve as callee for test.py, called as a separate process, to avoid GPU OOM. 
+| 	|	|── visualize_outputs.py      - not used.
+│   ├── transforms/                  - SO(3) / SE(3) transformation helpers.
+│   ├── utils/                      - utility package.
+│   ├── viz/                        - some of the rendering pipeline of the opengl rendering.
+│   └── *.py                        - other implementations.
 │
-└── pyproject.toml          - Python dependencies/package metadata.
-```
+├── third_party/
+│   ├── cloudrender                 - opengl rendering pipelines.
+│   ├── hamer                       - HaMeR hand detection.
+└── pyproject.toml                  - Python dependencies/package metadata.
+└── train_motion_prior.py           - the **main script** of training the motion diffusion model.
 
 ## Getting started
 
@@ -57,7 +58,7 @@ EgoAllo requires Python 3.12 or newer.
 
 1. **Clone the repository.**
    ```bash
-   git clone https://github.com/brentyi/egoallo.git
+   git clone https://github.com/Learner209/egoallo.git
    ```
 2. **Install general dependencies.**
    ```bash
@@ -77,13 +78,33 @@ EgoAllo requires Python 3.12 or newer.
    You can find the "Extended SMPL+H model" from the [MANO project webpage](https://mano.is.tue.mpg.de/).
    Our scripts assumes an npz file located at `./data/smplh/neutral/model.npz`, but this can be overridden at the command-line (`--smplh-npz-path {your path}`).
 
-5. **Visualize model outputs.**
 
-   The example trajectories directory includes example outputs from our model. You can visualize them with:
+## Running training
+
+1. **Training the motion diffusion model.**
+
+   To train the motion diffusion model, you can run:
 
    ```bash
-   python 4_visualize_outputs.py --search-root-dir ./egoallo_example_trajectories
+   python train_motion_prior.py
    ```
+
+   You can run `python train_motion_prior.py --help` to see the full list of options.
+
+   The amass-rich-hps combined training data is uploaded to nas at '/public/tmp/egoallo/amass_rich_hps/processed_amass_rich_hps_correct.hdf5' and '/public/tmp/egoallo/amass_rich_hps/processed_amass_rich_hps_correct.txt' 
+   The amass-only training data is uploaded to nas at '/public/tmp/egoallo/amass/processed_amass_correct.hdf5' and '/public/tmp/egoallo/amass/processed_amass_correct.txt'
+
+   There are a lot of options for training, a full working example of running this script would be:
+
+   ```bash
+   python train_motion_prior.py --config.batch-size 64 --config.experiment-name <your-experiment-name> --config.learning-rate 1e-4 --config.dataset-hdf5-path <your-hdf5-path> --config.dataset-files-path <your-txt-path> --config.mask_ratio 0.9 --config.splits train val --config.joint_cond_mode "absrel" --config.use_fourier_in_masked_joints --config.random_sample_mask_ratio --config.data_collate_fn "TensorOnlyDataclassBatchCollator" --config.subseq_len 128
+   ```
+
+   Or, if you choose to use accelerate module, 
+   ```bash
+   accelerate launch train_motion_prior.py --config.batch-size 64 --config.experiment-name <your-experiment-name> --config.learning-rate 1e-4 --config.dataset-hdf5-path <your-hdf5-path> --config.dataset-files-path <your-txt-path> --config.mask_ratio 0.9 --config.splits train val --config.joint_cond_mode "absrel" --config.use_fourier_in_masked_joints --config.random_sample_mask_ratio --config.data_collate_fn "TensorOnlyDataclassBatchCollator" --config.subseq_len 128
+   ```
+
 
 ## Running inference
 
@@ -104,15 +125,27 @@ EgoAllo requires Python 3.12 or newer.
 
 2. **Running inference on example data.**
 
-   Here's an example command for running EgoAllo on the "coffeemachine" sequence:
+	The inference main script for **Amass** is located at './src/egoallo/scripts/test.py'. A full working example of using it would be:
+	```bash
+	 python ./src/egoallo/scripts/test.py --inference-config.dataset-slice-strategy full_sequence --inference-config.splits test --inference-config.checkpoint-dir <your-ckpt-path> --inference-config.dataset-type AdaptiveAmassHdf5Dataset --inference-config.visualize-traj
+	```
+
+	The inference main script for **EgoExo** is located at './src/egoallo/scripts/test.py'. A full working example of using it would be:
+	```bash
+	python ./src/egoallo/scripts/test.py --inference-config.dataset-slice-strategy full_sequence --inference-config.splits test --inference-config.checkpoint-dir <your-ckpt-path> --inference-config.dataset-type EgoExoDataset --inference-config.visualize-traj --inference-config.output-dir ./exp/test-egoexo-train
+	```
+
+3. **Running inference with post-processing.**
+
+   To run inference with post-processing, you can use the `--inference-config.post-process` flag:
 
    ```bash
-   python 3_aria_inference.py --traj-root ./egoallo_example_trajectories/coffeemachine
+   python ./src/egoallo/scripts/test.py --inference-config.dataset-slice-strategy full_sequence --inference-config.splits test --inference-config.checkpoint-dir <your-ckpt-path> --inference-config.dataset-type AdaptiveAmassHdf5Dataset --inference-config.visualize-traj --inference-config.guidance-inner --inference-config.guidance-outer
    ```
 
-   You can run `python 3_aria_inference.py --help` to see the full list of options.
+   This will run inference and then post-process the results (with guidance optimization).
 
-3. **Running inference on your own data.**
+<!-- 3. **Running inference on your own data.**
 
    To run inference on your own data, you can copy the structure of the example trajectories. The key files are:
 
@@ -129,10 +162,10 @@ EgoAllo requires Python 3.12 or newer.
 
    ```bash
    python 2_run_hamer_on_vrs.py --traj-root ./egoallo_example_trajectories/coffeemachine
-   ```
+   ``` -->
 
-## Status
-
+<!-- ## Status -->
+<!-- 
 This repository currently contains:
 
 - `egoallo` package, which contains reference training and sampling implementation details.
@@ -145,4 +178,4 @@ This repository currently contains:
 
 While we've put effort into cleaning up our code for release, this is research
 code and there's room for improvement. If you have questions or comments,
-please reach out!
+please reach out! -->
