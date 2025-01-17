@@ -4,6 +4,8 @@ import os
 
 from torch._dynamo import eval_frame
 
+from egoallo.inference_utils import load_runtime_config
+
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
@@ -76,9 +78,17 @@ def run_training(
     # Set up experiment directory + HF accelerate.
     # We're getting to manage logging, checkpoint directories, etc manually,
     # and just use `accelerate` for distibuted training.
-    experiment_dir = get_experiment_dir(config.experiment_name)
-    assert not experiment_dir.exists()
+    if restore_checkpoint_dir:
+        config: EgoAlloTrainConfig = load_runtime_config(restore_checkpoint_dir)
+        config.batch_size = 64 # FIXME: this is a temporary fix to distill a large model trained on thecluster to local machine.
+        # experiment_dir =  restore_checkpoint_dir.parent
+        experiment_dir = get_experiment_dir(config.experiment_name)
+    else:
+        experiment_dir = get_experiment_dir(config.experiment_name)
+        assert not experiment_dir.exists()
+
     config.experiment_dir = experiment_dir
+
     accelerator = Accelerator(
         project_config=ProjectConfiguration(project_dir=str(experiment_dir)),
         dataloader_config=DataLoaderConfiguration(split_batches=True),
@@ -96,12 +106,16 @@ def run_training(
 
         # Save experiment files
         experiment_dir.mkdir(exist_ok=True, parents=True)
-        (experiment_dir / "git_commit.txt").write_text(
-            training_utils.get_git_commit_hash()
-        )
-        (experiment_dir / "git_diff.txt").write_text(training_utils.get_git_diff())
-        (experiment_dir / "run_config.yaml").write_text(yaml.dump(config))
-        (experiment_dir / "model_config.yaml").write_text(yaml.dump(config.model))
+        if not (experiment_dir / "git_commit.txt").exists():
+            (experiment_dir / "git_commit.txt").write_text(
+                training_utils.get_git_commit_hash()
+            )
+        if not (experiment_dir / "git_diff.txt").exists():
+            (experiment_dir / "git_diff.txt").write_text(training_utils.get_git_diff())
+        if not (experiment_dir / "run_config.yaml").exists():
+            (experiment_dir / "run_config.yaml").write_text(yaml.dump(config))
+        if not (experiment_dir / "model_config.yaml").exists():
+            (experiment_dir / "model_config.yaml").write_text(yaml.dump(config.model))
 
     device = accelerator.device
 
@@ -110,12 +124,17 @@ def run_training(
 
         # Save various things that might be useful.
         experiment_dir.mkdir(exist_ok=True, parents=True)
-        (experiment_dir / "git_commit.txt").write_text(
-            training_utils.get_git_commit_hash()
-        )
-        (experiment_dir / "git_diff.txt").write_text(training_utils.get_git_diff())
-        (experiment_dir / "run_config.yaml").write_text(yaml.dump(config))
-        (experiment_dir / "model_config.yaml").write_text(yaml.dump(config.model))
+        
+        if not (experiment_dir / "git_commit.txt").exists():
+            (experiment_dir / "git_commit.txt").write_text(
+                training_utils.get_git_commit_hash()
+            )
+        if not (experiment_dir / "git_diff.txt").exists():
+            (experiment_dir / "git_diff.txt").write_text(training_utils.get_git_diff())
+        if not (experiment_dir / "run_config.yaml").exists():
+            (experiment_dir / "run_config.yaml").write_text(yaml.dump(config))
+        if not (experiment_dir / "model_config.yaml").exists():
+            (experiment_dir / "model_config.yaml").write_text(yaml.dump(config.model))
 
         source_code_log_dir = experiment_dir / "logs"
 
@@ -319,7 +338,7 @@ def run_training(
                 if prev_checkpoint_path is not None:
                     shutil.rmtree(prev_checkpoint_path)
                 prev_checkpoint_path = (
-                    None if step % steps_to_save == 0 else checkpoint_path
+                    None if step == 0 else checkpoint_path
                 )
 
             # Evaluation
