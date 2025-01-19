@@ -189,7 +189,7 @@ class TestRunner:
 		else:
 			runtime_config.data_collate_fn = "TensorOnlyDataclassBatchCollator"
 			ds_init_config = runtime_config
-			ds_init_config.splits = ("train", "val")
+			# ds_init_config.splits = ("train", "val")
 			# breakpoint()
 	 
 		self.dataloader = torch.utils.data.DataLoader(

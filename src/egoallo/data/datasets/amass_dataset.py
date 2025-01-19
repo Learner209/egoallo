@@ -291,7 +291,7 @@ class VanillaEgoAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         metadata = EgoTrainingData.MetaData()
         metadata.stage = "raw"  # Set initial stage
         # uid servers as a null value just for compatibility with EgoExoDataset
-        metadata.take_name = f"name_{group}_uid_{group}_t{start_t}_{end_t}"
+        metadata.take_name = (f"name_{group}_uid_{group}_t{start_t}_{end_t}",)
         metadata.scope = "train"
         metadata.dataset_type = "VanillaAmassHdf5Dataset"
         
@@ -470,7 +470,7 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         metadata = EgoTrainingData.MetaData()
         metadata.stage = "raw"  # Set initial stage
         # uid servers as a null value just for compatibility with EgoExoDataset
-        metadata.take_name = f"name_{group}_uid_{group}_t{start_t}_{end_t}"
+        metadata.take_name = (f"name_{group}_uid_{group}_t{start_t}_{end_t}",)
         metadata.scope = "train"
         metadata.dataset_type = "AdaptiveAmassHdf5Dataset"
         

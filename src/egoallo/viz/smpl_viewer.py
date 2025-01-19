@@ -277,7 +277,7 @@ class SMPLViewer(BaseRenderer):
         """Initialize SMPL renderer."""
         self.smpl_renderer = AnimatableSMPLModel(
             camera=self.camera,
-            gender="male",  # Can be parameterized if needed
+            gender="neutral",  # Can be parameterized if needed
             smpl_root="./assets/smpl_based_model",  # Update path as needed
             model_type="smplh",
             # device=torch.device("cuda" if torch.cuda.is_available() else "cpu"),

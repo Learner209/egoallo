@@ -42,7 +42,7 @@ _C.backup_src = True
 
 _C.smplh = CN()
 _C.smplh.smplh_root_path = osp.join(_C.project_root, "assets/smpl_based_model/smplh")
-_C.smplh.smplh_model = "male" # male, female, neutral
+_C.smplh.smplh_model = "neutral" # male, female, neutral
 _C.smplh.num_expressions = 16
 _C.smplh.num_betas = 16
 _C.smplh.num_joints = 22

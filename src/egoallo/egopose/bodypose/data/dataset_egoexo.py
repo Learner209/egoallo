@@ -388,7 +388,7 @@ class Dataset_EgoExo(Dataset):
             contacts=torch.zeros((seq_len, 22)),  # T x 22 for contact states
             height_from_floor=torch.full((seq_len, 1), gt_ground_height),  # T x 1
             metadata=EgoTrainingData.MetaData( # raw data.
-                take_name=take_name,
+                take_name=(take_name,),
                 frame_keys=tuple(continuous_frames),  # Convert to tuple of ints
                 stage="raw",
                 scope="test",

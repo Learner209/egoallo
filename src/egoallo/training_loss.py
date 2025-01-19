@@ -161,6 +161,7 @@ class TrainingLossComputer:
         # breakpoint()
 
 		# postprocessing
+        # breakpoint()
         train_batch = train_batch.postprocess()
         x_0_pred = train_batch._post_process(x_0_pred)
         x_0_pred = train_batch._set_traj(x_0_pred)

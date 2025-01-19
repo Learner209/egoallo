@@ -73,7 +73,7 @@ class EgoTrainingData(TensorDataclass):
     @dataclass
     class MetaData:
         """Metadata about the trajectory."""
-        take_name: str = ""
+        take_name: tuple[str, ...] = ()
         """Name of the take."""
 
         frame_keys: tuple[int, ...] = ()
@@ -160,7 +160,7 @@ class EgoTrainingData(TensorDataclass):
             @ tf.SE3(fncsmpl_extensions.get_T_head_cpf(shaped))
         ).parameters()
 
-		# METADATA can be omittted and set as default param.
+        # METADATA can be omittted and set as default param.
         return EgoTrainingData(
             T_world_root=T_world_root.cpu(),
             contacts=raw_fields["contacts"][:, :22].cpu(),  # root is included.
@@ -179,7 +179,7 @@ class EgoTrainingData(TensorDataclass):
             hand_quats=hand_quats.cpu() if include_hands else None,
             visible_joints_mask=None,
             metadata=EgoTrainingData.MetaData( # default metadata.
-                take_name=path.name,
+                take_name=(path.name,),
                 frame_keys=tuple(),  # Convert to tuple of ints
                 stage="raw",
                 scope="test",
@@ -314,9 +314,18 @@ class EgoTrainingData(TensorDataclass):
     def postprocess(self) -> "EgoTrainingData":
         """
         Modifies the current EgoTrainingData instance by:
-        1. Adding floor height to z coordinates
         """
         assert self.metadata.stage == "preprocessed"
+
+        device = self.T_world_root.device
+        # Restore original values of invalid joints if they exist.
+        if self.metadata.original_invalid_joints is not None and self.visible_joints_mask is not None:
+            self.joints_wrt_world = torch.where(
+                self.visible_joints_mask.unsqueeze(-1),
+                self.joints_wrt_world,
+                self.metadata.original_invalid_joints.to(device)
+            )
+            self.metadata.original_invalid_joints = None  # Clear stored values
 
         # self.joints_wrt_world[..., :, :, 2:3].add_(self.height_from_floor.unsqueeze(-2)) # [*batch, timesteps, 22, 1]
         # self.T_world_root[..., :, 6:7].add_(self.height_from_floor) # [*batch, timesteps, 1]
@@ -342,8 +351,6 @@ class EgoTrainingData(TensorDataclass):
         # Expand initial_xy to match broadcast dimensions like in preprocess()
         expanded_xy = self.metadata.initial_xy.view(*self.metadata.initial_xy.shape[:-1], 1, 1, 2)  # Add dims for broadcasting
         
-        device = self.T_world_root.device
-
         # self.T_world_root[..., 4:6].add_(self.metadata.initial_xy.unsqueeze(-2).to(device)) # [*batch, timesteps, 2]
         # self.joints_wrt_world[..., :2].add_(expanded_xy.to(device)) # [*batch, timesteps, 22, 2]
         # self.T_world_cpf[..., 4:6].add_(self.metadata.initial_xy.unsqueeze(-2).to(device)) # [*batch, timesteps, 2]
@@ -353,6 +360,7 @@ class EgoTrainingData(TensorDataclass):
             self.T_world_root[..., 4:6] + self.metadata.initial_xy.unsqueeze(-2).to(device),
             self.T_world_root[..., 6:]
         ], dim=-1)
+        # breakpoint()
         self.joints_wrt_world = torch.cat([
             self.joints_wrt_world[..., :2] + expanded_xy.to(device),
             self.joints_wrt_world[..., 2:]
@@ -363,14 +371,6 @@ class EgoTrainingData(TensorDataclass):
             self.T_world_cpf[..., 6:]
         ], dim=-1)
 
-        # Restore original values of invalid joints if they exist
-        if self.metadata.original_invalid_joints is not None and self.visible_joints_mask is not None:
-            self.joints_wrt_world = torch.where(
-                self.visible_joints_mask.unsqueeze(-1),
-                self.joints_wrt_world,
-                self.metadata.original_invalid_joints.to(device)
-            )
-            self.metadata.original_invalid_joints = None  # Clear stored values
 
         self.metadata.stage = "postprocessed"
 
@@ -393,7 +393,7 @@ class EgoTrainingData(TensorDataclass):
 
 
     def _set_traj(self, traj: "DenoiseTrajType") -> "DenoiseTrajType":
-		# 2. assign joints_wrt_world and visible_joints_mask
+        # 2. assign joints_wrt_world and visible_joints_mask
         assert traj.joints_wrt_world is None and traj.visible_joints_mask is None, f"joints_wrt_world and visible_joints_mask should be None for postprocessing."
         traj.joints_wrt_world = self.joints_wrt_world.clone()
         if self.visible_joints_mask is not None:
@@ -481,5 +481,5 @@ class EgoTrainingData(TensorDataclass):
             else:
                 return val
 
-		# ! Only slicing the highest level of attributes in the dataclass.
+        # ! Only slicing the highest level of attributes in the dataclass.
         return _getitem_impl(self, index, 2)

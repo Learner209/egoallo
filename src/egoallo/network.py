@@ -122,15 +122,15 @@ class DenoisingConfig:
         if self.loss_weights is None:
             # Default loss weights for absolute mode
             absolute_weights = {
-                "betas": 0.05,
-                "body_rotmats": 1.5,
+                "betas": 0.2,
+                "body_rotmats": 2.5,
                 "contacts": 0.1,
                 "hand_rotmats": 0.00,
                 "R_world_root": 2.0,
-                "t_world_root": 10.0,
+                "t_world_root": 2.0,
                 "joints": 0.0,
-                "foot_skating": 0.25,
-                "velocity": 0.01,
+                "foot_skating": 0.3,
+                "velocity": 0.1,
             }
 
             # Additional weights for velocity mode

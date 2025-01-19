@@ -242,7 +242,7 @@ class EgoExoDataset(torch.utils.data.Dataset[EgoTrainingData]):
             contacts=torch.zeros((seq_len, 22)),  # Default contacts
             height_from_floor=torch.zeros((seq_len, 1)),  # Default height
             metadata=EgoTrainingData.MetaData( # raw data.
-                take_name=take_name,
+                take_name=(take_name,),
                 frame_keys=frame_keys, # type: ignore
                 stage="raw",
                 scope="test",
