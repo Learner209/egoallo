@@ -306,6 +306,14 @@ class Dataset_EgoExo(Dataset):
             num_joints=22,
             debug_vis=False,
         )
+        joints_world_orig_coco, _ = self._process_joints(
+            skeletons_window,
+            flags_window.float(),
+            ground_height=float(gt_ground_height),
+            return_smplh_joints=False,
+            num_joints=17,
+            debug_vis=False,
+        )
         
 
         # Import scipy interpolation
@@ -316,6 +324,7 @@ class Dataset_EgoExo(Dataset):
 
         # Interpolate world coordinates
         joints_world = torch.full((seq_len, num_joints, 3), float('nan'))
+        joints_world_coco = torch.full((seq_len, 17, 3), float('nan'))
 
         for j in range(num_joints):
             for d in range(3):
@@ -338,9 +347,30 @@ class Dataset_EgoExo(Dataset):
 
                 joints_world[:, j, d] = torch.from_numpy(interpolated)
 
+        for j in range(17):
+            for d in range(3):
+                # Get joint data and corresponding frames
+                joint_data = joints_world_orig_coco[:, j, d].numpy(force=True)
+                valid_mask = ~np.isnan(joint_data)
+                valid_frames = np.array(frame_keys_list)[valid_mask]
+                valid_data = joint_data[valid_mask]
+                if len(valid_frames) == 0:
+                    # If no valid frames, fill with NaN
+                    continue
+                elif len(valid_frames) >= 4:  # Need at least 4 points for cubic spline
+                    # Create B-spline interpolation
+                    bspl = make_interp_spline(valid_frames, valid_data, k=3)
+                    # Evaluate spline at all frames
+                    interpolated = bspl(continuous_frames)
+                else:
+                    # Fall back to linear interpolation for too few points
+                    interpolated = np.interp(continuous_frames, valid_frames, valid_data)
+
+                joints_world_coco[:, j, d] = torch.from_numpy(interpolated)
         
         # Create visibility mask based on non-nan values in world coordinates
         visible_mask = ~torch.isnan(joints_world).any(dim=-1)  # shape: (seq_len, num_joints)
+        visible_mask_orig_coco = ~torch.isnan(joints_world_coco).any(dim=-1)  # shape: (seq_len, num_joints)
         take_name = f"name_{take_name}_uid_{take_uid}_t{continuous_frames[0]}_{continuous_frames[-1]}"
 
         from egoallo.data.dataclass import EgoTrainingData
@@ -362,6 +392,9 @@ class Dataset_EgoExo(Dataset):
                 frame_keys=tuple(continuous_frames),  # Convert to tuple of ints
                 stage="raw",
                 scope="test",
+                dataset_type="AriaDataset",
+                aux_joints_wrt_world_placeholder=joints_world_coco,  # Placeholder for COCO joints
+                aux_visible_joints_mask_placeholder=visible_mask_orig_coco,  # Placeholder for COCO visibility
             ),
         )
         ret = ret.preprocess()

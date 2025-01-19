@@ -246,6 +246,7 @@ class EgoExoDataset(torch.utils.data.Dataset[EgoTrainingData]):
                 frame_keys=frame_keys, # type: ignore
                 stage="raw",
                 scope="test",
+                dataset_type="AriaDataset",
             ),
         )
         ret = ret.preprocess()

@@ -27,6 +27,7 @@ from egoallo.fncsmpl import (
     SmplMesh,
 )
 from egoallo.fncsmpl_extensions import get_T_world_cpf
+from egoallo.viz.utils import create_skeleton_point_cloud
 
 if TYPE_CHECKING:
     from egoallo.data.dataclass import EgoTrainingData
@@ -198,6 +199,10 @@ class SMPLViewer(BaseRenderer):
         self.camera: Optional[PerspectiveCameraModel] = None
         self.pointcloud: Optional[SimplePointcloud] = None
         self.keypoint_renderer: Optional[AnimatablePointcloud] = None
+
+        self.vis_kpts_render: Optional[AnimatablePointcloud] = None
+        self.invis_kpts_render: Optional[AnimatablePointcloud] = None
+
         self.smpl_renderer: Optional[AnimatableSMPLModel] = None
         self.shadow_map = None
 
@@ -226,10 +231,22 @@ class SMPLViewer(BaseRenderer):
         # self.pointcloud.draw_shadows = False
         self.pointcloud.init_context()
 
-        self.keypoint_renderer = AnimatablePointcloud(camera=self.camera)
-        self.keypoint_renderer.generate_shadows = False
-        # self.keypoint_renderer.draw_shadows = False
-        self.keypoint_renderer.init_context()
+        # self.keypoint_renderer = AnimatablePointcloud(camera=self.camera)
+        # self.keypoint_renderer.generate_shadows = False
+        # # self.keypoint_renderer.draw_shadows = False
+        # self.keypoint_renderer.init_context()
+
+        self.vis_kpts_render = AnimatablePointcloud(camera=self.camera)
+        self.vis_kpts_render.generate_shadows = False
+        # self.vis_kpts_render.draw_shadows = False
+        self.vis_kpts_render.init_context()
+        self.vis_kpts_render.set_overlay_color(np.array([0, 255, 0, 255], dtype=np.uint8))
+
+        self.invis_kpts_render = AnimatablePointcloud(camera=self.camera)
+        self.invis_kpts_render.generate_shadows = False
+        # self.invis_kpts_render.draw_shadows = False
+        self.invis_kpts_render.init_context()
+        self.invis_kpts_render.set_overlay_color(np.array([255, 0, 0, 255], dtype=np.uint8))
 
         # Load scene mesh if available
         if isinstance(self.scene_obj, Path):
@@ -329,38 +346,52 @@ class SMPLViewer(BaseRenderer):
                 }
             )
 
-        keypoint_sequence = []
+        vis_kpts_seq = []
+        invis_kpts_seq = []
         
-        for i in range(traj.joints_wrt_world.shape[0]):
-            # Get visible joints for this frame
-            visible_mask = traj.visible_joints_mask[i]  # [J]
-            if visible_mask is not None:
-                # Get only visible joint positions
-                visible_joints = traj.joints_wrt_world[i][visible_mask.bool()].cpu().numpy()  # [num_visible, 3]
-                # Create colors array for visible joints
-                colors = np.tile(
-                    np.array([255, 0, 0, 255], dtype=np.uint8),
-                    (visible_joints.shape[0], 1)
-                )  # [num_visible, 4]
-                keypoint_sequence.append(
-                    {
-                        "vertices": visible_joints,
-                        "colors": colors,
-                    }
-                )
-            else:
-                # If no visibility mask, use all joints
-                joints = traj.joints_wrt_world[i].cpu().numpy()  # [J, 3]
-                colors = np.tile(
-                    np.array([255, 0, 0, 255], dtype=np.uint8),
-                    (joints.shape[0], 1)
-                )  # [J, 4]
-                keypoint_sequence.append(
-                    {
-                        "vertices": joints,
-                        "colors": colors,
-                    }
-                )
+        if traj.metadata.dataset_type == "AriaDataset" or traj.metadata.dataset_type == "EgoExoDataset":
+            seq_len = traj.metadata.aux_joints_wrt_world_placeholder.shape[1]
+            jnts = traj.metadata.aux_joints_wrt_world_placeholder[0, :, :].cpu().numpy()
+            vis_masks = traj.metadata.aux_visible_joints_mask_placeholder[0, :].cpu().numpy() if traj.metadata.aux_visible_joints_mask_placeholder is not None else np.ones_like(jnts[..., 0], dtype=bool)
+            in_smplh_flag = False
+        elif traj.metadata.dataset_type == "AdaptiveAmassHdf5Dataset" or traj.metadata.dataset_type == "VanillaAmassHdf5Dataset":
+            seq_len = traj.joints_wrt_world.shape[0]
+            jnts = traj.joints_wrt_world.cpu().numpy()
+            vis_masks = traj.visible_joints_mask.cpu().numpy() if traj.visible_joints_mask is not None else np.ones_like(jnts[..., 0], dtype=bool)
+            in_smplh_flag = True
+        else:
+            raise ValueError(f"Unknown dataset type: {traj.metadata.dataset_type}")
+
+        for i in range(seq_len):
+            # Get joints and visibility mask for this frame
+            _jnt = jnts[i] # [J, 3]
+            _vis_m = vis_masks[i] # [J]
+            
+            # Create skeleton point cloud by sampling points along bones
+            # breakpoint()
+            (visible_skeleton_points, visible_skeleton_colors), (invisible_skeleton_points, invisible_skeleton_colors) = create_skeleton_point_cloud(
+                joints_wrt_world=_jnt,
+                visible_joints_mask=_vis_m,
+                # input_smplh=False,
+                input_smplh=in_smplh_flag,
+                num_samples_per_bone=100,
+                return_colors=True,
+            )
+            
+            # # Create colors array for skeleton points
+            # colors = np.tile(
+            #     np.array([255, 0, 0, 255], dtype=np.uint8),
+            #     (skeleton_points.shape[0], 1)
+            # )  # [num_points, 4]
+            
+            vis_kpts_seq.append({
+                "vertices": visible_skeleton_points,
+                "colors": visible_skeleton_colors,
+            })
+            invis_kpts_seq.append({
+                "vertices": invisible_skeleton_points,
+                "colors": invisible_skeleton_colors,
+            })
       
 
 
@@ -372,10 +403,18 @@ class SMPLViewer(BaseRenderer):
         self.smpl_renderer.set_material(0.3, 1, 0, 0)
         self.scene.add_object(self.smpl_renderer)
 
-        self.keypoint_renderer.set_sequence(
-            keypoint_sequence, default_frame_time=1 / self.config.fps
+        # self.keypoint_renderer.set_sequence(
+        #     vis_kpts_seq, default_frame_time=1 / self.config.fps
+        # )
+        self.vis_kpts_render.set_sequence(
+            vis_kpts_seq, default_frame_time=1 / self.config.fps
         )
-        self.scene.add_object(self.keypoint_renderer)
+        self.invis_kpts_render.set_sequence(
+            invis_kpts_seq, default_frame_time=1 / self.config.fps
+        )
+        # self.scene.add_object(self.keypoint_renderer)
+        self.scene.add_object(self.vis_kpts_render)
+        self.scene.add_object(self.invis_kpts_render)
 
 
         # Camera looks from behind and slightly above
@@ -425,7 +464,11 @@ class SMPLViewer(BaseRenderer):
         """Render a single frame with camera pose and shadow updates."""
         # Update SMPL frame
         self.smpl_renderer.set_current_frame(frame_idx, **kwargs)
-        self.keypoint_renderer.set_current_frame(frame_idx)
+        # self.keypoint_renderer.set_current_frame(frame_idx)
+
+        self.vis_kpts_render.set_current_frame(frame_idx)
+        self.invis_kpts_render.set_current_frame(frame_idx)
+
 
         current_smpl_params = self.smpl_renderer.params_sequence[
             self.smpl_renderer.current_sequence_frame_ind

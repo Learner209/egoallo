@@ -1,5 +1,6 @@
 from pathlib import Path
 from typing import Union, assert_never, TYPE_CHECKING
+from typing import Any, Callable, Self, dataclass_transform
 import dataclasses
 import numpy as np
 import torch
@@ -10,8 +11,10 @@ from jaxtyping import Bool, Float, jaxtyped, Array
 from egoallo.transforms import SO3, SE3
 from torch import Tensor
 
+
 if TYPE_CHECKING:
     from egoallo.types import DenoiseTrajType
+    from egoallo.types import DatasetType
 
 from .. import fncsmpl, fncsmpl_extensions
 from .. import transforms as tf
@@ -84,6 +87,18 @@ class EgoTrainingData(TensorDataclass):
 
         scope: Literal["train", "test"] = "train"
         """Scope of the data: 'train' or 'test'."""
+
+        original_invalid_joints: Optional[Float[Tensor, "*batch timesteps 22 3"]] = None
+        """Original values of invalid joints before zeroing"""
+
+        aux_joints_wrt_world_placeholder: Optional[Float[Tensor, "*batch timesteps 22 3"]] = None
+        """Placeholder for auxiliary joints, used in EgoExoDataset helper."""
+
+        aux_visible_joints_mask_placeholder: Optional[Float[Tensor, "*batch timesteps 22"]] = None
+        """Placeholder for auxiliary joints, used in EgoExoDataset helper."""
+
+        dataset_type: "DatasetType" = "AdaptiveAmassHdf5Dataset"
+        """Type of dataset the trajectory belongs to."""
 
     metadata: MetaData = dataclasses.field(default_factory=MetaData)
     """Metadata about the trajectory."""
@@ -278,9 +293,18 @@ class EgoTrainingData(TensorDataclass):
         ], dim=-1)
 
         if self.visible_joints_mask is not None:
+            # Store original values of invalid joints before zeroing
+            self.metadata.original_invalid_joints = torch.where(
+                ~self.visible_joints_mask.unsqueeze(-1), 
+                self.joints_wrt_world,
+                torch.zeros_like(self.joints_wrt_world)
+            )
             # Set where joints are invalid to all zeros
-            # self.joints_wrt_world = torch.where(self.visible_joints_mask.unsqueeze(-1), self.joints_wrt_world, torch.zeros_like(self.joints_wrt_world))
-            self.joints_wrt_world = torch.where(self.visible_joints_mask.unsqueeze(-1), self.joints_wrt_world, torch.full_like(self.joints_wrt_world, -1))
+            self.joints_wrt_world = torch.where(
+                self.visible_joints_mask.unsqueeze(-1), 
+                self.joints_wrt_world, 
+                torch.zeros_like(self.joints_wrt_world)
+            )
 
         self.metadata.stage = "preprocessed"
 
@@ -300,7 +324,7 @@ class EgoTrainingData(TensorDataclass):
 
         self.joints_wrt_world = torch.cat([
             self.joints_wrt_world[..., :2],
-            self.joints_wrt_world[..., 2:3] + self.height_from_floor.unsqueeze(-2),
+            self.joints_wrt_world[..., 2:3] + self.height_from_floor.unsqueeze(-2), # [*batch, timesteps, 22, 1]
             self.joints_wrt_world[..., 3:]
         ], dim=-1)
         self.T_world_root = torch.cat([
@@ -339,6 +363,15 @@ class EgoTrainingData(TensorDataclass):
             self.T_world_cpf[..., 6:]
         ], dim=-1)
 
+        # Restore original values of invalid joints if they exist
+        if self.metadata.original_invalid_joints is not None and self.visible_joints_mask is not None:
+            self.joints_wrt_world = torch.where(
+                self.visible_joints_mask.unsqueeze(-1),
+                self.joints_wrt_world,
+                self.metadata.original_invalid_joints.to(device)
+            )
+            self.metadata.original_invalid_joints = None  # Clear stored values
+
         self.metadata.stage = "postprocessed"
 
         return self
@@ -349,18 +382,17 @@ class EgoTrainingData(TensorDataclass):
         assert traj.metadata.stage == "raw", "Only raw data is supported for postprocessing."
         assert isinstance(traj, AbsoluteDenoiseTraj), "Only AbsoluteDenoiseTraj is supported for postprocessing."
         # postprocess the DenoiseTrajType
-        # 1. t_world_root, t_world_cpf
         device = traj.t_world_root.device
 
-        # traj.t_world_root[..., :, 2:3].add_(self.height_from_floor.to(device)) # [*batch, timesteps, 3]
-        # traj.t_world_root[..., :, :2].add_(self.metadata.initial_xy.unsqueeze(-2).to(device)) # [*batch, timesteps, 3]
-        
         traj.t_world_root = torch.cat([
             traj.t_world_root[..., :, :2] + self.metadata.initial_xy.unsqueeze(-2).to(device),
             traj.t_world_root[..., :, 2:3] + self.height_from_floor.to(device),
             traj.t_world_root[..., :, 3:]
         ], dim=-1)
+        return traj
 
+
+    def _set_traj(self, traj: "DenoiseTrajType") -> "DenoiseTrajType":
 		# 2. assign joints_wrt_world and visible_joints_mask
         assert traj.joints_wrt_world is None and traj.visible_joints_mask is None, f"joints_wrt_world and visible_joints_mask should be None for postprocessing."
         traj.joints_wrt_world = self.joints_wrt_world.clone()
@@ -374,7 +406,7 @@ class EgoTrainingData(TensorDataclass):
         # 3. assign metadata
         traj.metadata = self.metadata
         return traj
-        
+
     # def __post_init__(self):
     #     """Validate that no tensor attributes contain NaN values."""
     #     for field in dataclasses.fields(self):
@@ -387,3 +419,67 @@ class EgoTrainingData(TensorDataclass):
     #             if torch.isnan(value).any():
     #                 raise ValueError(f"NaN values detected in {field.name}")
         
+
+    def __getitem__(self, index) -> Self:
+        """Implements native Python slicing for TensorDataclass.
+
+        Supports numpy/torch-style indexing including:
+        - Single index: data[0]
+        - Multiple indices: data[0,1]
+        - Slices: data[0:10]
+        - Mixed indexing: data[0, :10, 2:4]
+        - Ellipsis: data[..., 0]
+
+        Args:
+            index: Index specification. Can be int, slice, tuple, or ellipsis.
+            recursive_depth: How deep to recurse into nested structures. -1 means unlimited.
+
+        Returns:
+            A new TensorDataclass with sliced data.
+
+        Examples:
+            >>> data = TensorDataclass(...)
+            >>> # Single index
+            >>> first_item = data[0]
+            >>> # Multiple indices
+            >>> specific_item = data[0, 10]
+            >>> # Slice
+            >>> first_ten = data[:10]
+            >>> # Mixed indexing
+            >>> subset = data[0, :10, 2:4]
+            >>> # Limit recursion depth
+            >>> shallow_slice = data[0, recursive_depth=1]
+        """
+        # Convert single index to tuple for uniform handling
+        if not isinstance(index, tuple):
+            index = (index,)
+
+        def _getitem_impl[GetItemT](val: GetItemT, idx: tuple, depth: int) -> GetItemT:
+            if depth == 0:
+                return val
+            
+            if isinstance(val, torch.Tensor):
+                try:
+                    return val[idx]
+                except IndexError as e:
+                    raise IndexError(
+                        f"Invalid index {idx} for tensor of shape {val.shape}"
+                    ) from e
+            elif isinstance(val, TensorDataclass):
+                # Don't slice betas since it's a per-sequence attribute
+                vars_dict = vars(val)
+                if 'betas' in vars_dict:
+                    # Keep original betas tensor
+                    vars_dict['betas'] = val.betas
+                return type(val)(**{k: _getitem_impl(v, idx, depth - 1) if k != 'betas' else v 
+                                  for k, v in vars_dict.items()})
+            elif isinstance(val, (list, tuple)):
+                return type(val)(_getitem_impl(v, idx, depth - 1) for v in val)
+            elif isinstance(val, dict):
+                assert type(val) is dict  # No subclass support
+                return {k: _getitem_impl(v, idx, depth - 1) for k, v in val.items()}  # type: ignore
+            else:
+                return val
+
+		# ! Only slicing the highest level of attributes in the dataclass.
+        return _getitem_impl(self, index, 2)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import time
 from typing import TYPE_CHECKING
 
@@ -276,11 +277,13 @@ def run_sampling_with_masked_data(
     alpha_bar_t = noise_constants.alpha_bar_t
     alpha_t = noise_constants.alpha_t
 
+    post_processed_batch = masked_data.postprocess()
+    del masked_data
     
     x_t_packed = torch.randn(
         (
             num_samples,
-            masked_data.joints_wrt_world.shape[1],
+            post_processed_batch.joints_wrt_world.shape[1],
             runtime_config.denoising.get_d_state(),
         ),
         device=device,
@@ -326,22 +329,31 @@ def run_sampling_with_masked_data(
                 ]
                 overlap_weights[:, start_t:end_t, :] += overlap_weights_slice
 
-                x_0_packed_pred[:, start_t:end_t, :] += (
-                    denoiser_network.forward(
+                this_window_data = copy.deepcopy(post_processed_batch[:, start_t:end_t])
+                # FIXME: this is a hack to follow the state machine of EgoTrainingData dataclass.
+                this_window_data.metadata.stage = "raw"
+                this_window_data = this_window_data.preprocess()
+
+                ret = denoiser_network.forward(
                         x_t_unpacked=runtime_config.denoising.unpack_traj(x_t_packed[:, start_t:end_t, :], include_hands=runtime_config.model.include_hands),
                         t=torch.tensor([t], device=device).expand((num_samples,)),
-                        joints=masked_data.joints_wrt_world[:, start_t:end_t, :],
-                        visible_joints_mask=masked_data.visible_joints_mask[
-                            :, start_t:end_t, :
-                        ],
+                        joints=this_window_data.joints_wrt_world,
+                        visible_joints_mask=this_window_data.visible_joints_mask,
                         project_output_rotmats=False,
-                        mask=masked_data.mask[:, start_t:end_t],
+                        mask=this_window_data.mask,
                     )
-                    * overlap_weights_slice
-                )
-                assert not torch.any(torch.isnan(x_0_packed_pred[:, start_t:end_t, :])), "Found nan in x_0_packed_pred"
+                
+                ret = runtime_config.denoising.unpack_traj(ret, include_hands=runtime_config.model.include_hands, project_rotmats=False)
+
+                this_window_data = this_window_data.postprocess()
+                ret = this_window_data._post_process(ret)
+                ret = this_window_data._set_traj(ret)
+
+                ret = ret.pack()
+                x_0_packed_pred[:, start_t:end_t, :] += ret * overlap_weights_slice
 
             x_0_packed_pred /= overlap_weights
+            assert not torch.any(torch.isnan(x_0_packed_pred)), "Found nan in x_0_packed_pred"
 
             x_0_pred = runtime_config.denoising.unpack_traj( # raw traj
                 x_0_packed_pred,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
+import copy
 import logging
 import time
 from dataclasses import dataclass
@@ -16,7 +17,6 @@ from tqdm import tqdm
 import multiprocessing
 import subprocess
 import os
-import dill
 from multiprocessing import Process
 if TYPE_CHECKING:
 	from egoallo.types import DenoiseTrajType
@@ -61,19 +61,6 @@ CFG = make_cfg(config_name="defaults", config_file=local_config_file, cli_args=[
 
 
 logger = setup_logger(output="logs/test", name=__name__)
-
-
-class DillProcess(Process):
-
-	def __init__(self, *args, **kwargs):
-		super().__init__(*args, **kwargs)
-		self._target = dill.dumps(self._target)  # Save the target function as bytes, using dill
-
-	def run(self):
-		if self._target:
-			self._target = dill.loads(self._target)    # Unpickle the target function before executing
-			self._target(*self._args, **self._kwargs)  # Execute the target function
-
 
 
 # Some helper functions to ensure compatibility with multiprocessing module, used in `TestRunner.run` class.
@@ -140,7 +127,7 @@ class SequenceProcessor:
 		denoised_traj = run_sampling_with_masked_data(
 			denoiser_network=denoiser,
 			body_model=self.body_model,
-			masked_data=batch,
+			masked_data=copy.deepcopy(batch),
 			runtime_config=runtime_config,
 			guidance_mode=inference_config.guidance_mode,
 			guidance_post=inference_config.guidance_post,
@@ -154,9 +141,12 @@ class SequenceProcessor:
 		gt_traj = runtime_config.denoising.from_ego_data(batch, include_hands=True)
 		
 
+		# breakpoint()
 		post_batch = batch.postprocess()
-		denoised_traj = post_batch._post_process(denoised_traj)
+		# no need to postprocess denoised_traj since its' already been postprocessed.
+		denoised_traj = post_batch._set_traj(denoised_traj)
 		gt_traj = post_batch._post_process(gt_traj)
+		gt_traj = post_batch._set_traj(gt_traj)
 
 		return gt_traj, denoised_traj
 
@@ -182,7 +172,7 @@ class TestRunner:
 		self.body_model = fncsmpl.SmplhModel.load(runtime_config.smplh_npz_path).to(
 			self.device
 		)
-		# Override runtime config with inference config values
+		# ! Override runtime config with inference config values
 		for field in dataclasses.fields(type(self.inference_config)):
 			if hasattr(runtime_config, field.name):
 				setattr(
@@ -199,6 +189,8 @@ class TestRunner:
 		else:
 			runtime_config.data_collate_fn = "TensorOnlyDataclassBatchCollator"
 			ds_init_config = runtime_config
+			ds_init_config.splits = ("train", "val")
+			# breakpoint()
 	 
 		self.dataloader = torch.utils.data.DataLoader(
 			dataset=build_dataset(cfg=runtime_config)(config=ds_init_config),
@@ -440,6 +432,10 @@ class TestRunner:
 		import tempfile
 		import shutil
 
+		# Add debug logging
+		if self.inference_config.debug_max_iters:
+			logger.warning(f"Running in debug mode with max {self.inference_config.debug_max_iters} iterations")
+
 		processor = SequenceProcessor(self.body_model, self.device)
 
 		# Create temporary directory for intermediate files
@@ -457,8 +453,10 @@ class TestRunner:
 				desc="Enumerating test loader",
 				ascii=" >=",
 			):
-				# if batch_idx == 10:
-				#     break
+				# Add debug iteration limit check
+				if self.inference_config.debug_max_iters and batch_idx >= self.inference_config.debug_max_iters:
+					logger.warning(f"Stopping after {batch_idx} iterations due to debug_max_iters={self.inference_config.debug_max_iters}")
+					break
 
 				batch.metadata.scope = "test"
 
@@ -576,19 +574,25 @@ class TestRunner:
 			persistent_output_dir = Path(self.inference_config.output_dir)
 			persistent_output_dir.mkdir(parents=True, exist_ok=True)
 			
-			# Move contents from temp dir to persistent dir
+			# Move contents from temp dir to persistent dir, overwriting existing files
 			for item in temp_output_dir.glob("*"):
-				if item.is_file():
-					shutil.move(item, persistent_output_dir)
-				else:
-					shutil.move(item, persistent_output_dir / item.name)
+				dest = persistent_output_dir / item.name
+				if dest.exists():
+					if dest.is_file():
+						dest.unlink()
+					else:
+						shutil.rmtree(dest)
+				shutil.move(str(item), str(dest))
 
 		return metrics
 
 
-def main(inference_config: InferenceConfig) -> None:
+def main(inference_config: InferenceConfig, debug: bool = False) -> None:
 	"""Main entry point."""
 	# try:
+	if debug:
+		import ipdb; ipdb.set_trace()
+		
 	runner = TestRunner(inference_config)
 	eval_metrics = runner.run()
 	eval_metrics.print_metrics(logger=logger, level="info")

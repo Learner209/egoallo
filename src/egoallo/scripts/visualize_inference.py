@@ -79,7 +79,7 @@ def visualize_saved_trajectory(
 
         frame_keys = pred_traj.metadata.frame_keys if pred_traj.metadata.frame_keys and len(pred_traj.metadata.frame_keys) > 0 else None
         aria_inference_toolkit = AriaInference(config, traj_root, output_path=output_dir, glasses_x_angle_offset=0.0)
-        rgb_frames = aria_inference_toolkit.extract_rgb_frames(list(frame_keys))
+        rgb_frames = aria_inference_toolkit.extract_rgb_frames(list(frame_keys), cache_files=True)
         pc_container, points_data, floor_z = aria_inference_toolkit.load_pc_and_find_ground()
 
         EgoTrainingData.visualize_ego_training_data(
@@ -89,8 +89,6 @@ def visualize_saved_trajectory(
             scene_obj=pc_container
             # scene_obj=""
         )
-        # Save frames as video
-        
         # Save frames as video
         if len(rgb_frames) > 0:
             first_frame = rgb_frames[0]
@@ -145,21 +143,23 @@ def visualize_saved_trajectory(
         if pred_width < max_width:
             pad_width = max_width - pred_width
             frame2 = cv2.copyMakeBorder(frame2, 0, 0, 0, pad_width, cv2.BORDER_CONSTANT, value=[0,0,0])
-
-        # Add text labels
+        # Add text labels with colorful text
         cv2.putText(frame1, 'Ground Truth', (10, 30), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255), 2)
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, (50,205,50), 2)  # Lime Green
         cv2.putText(frame2, 'Prediction', (10, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255), 2)
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, (255,140,0), 2)  # Dark Orange
 
-        # Add masked joints text
+        # Calculate mask ratio
+        mask_ratio = len(masked_joints) / len(SMPLH_BODY_JOINTS)
+
+        # Add masked joints text with mask ratio
         y_offset = 60
-        cv2.putText(frame1, 'Masked Joints:', (10, y_offset),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,255,255), 1)
+        cv2.putText(frame1, f'Masked Joints ({mask_ratio:.1%}):', (10, y_offset),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (147,112,219), 1)  # Medium Purple
         for i, joint in enumerate(masked_joints):
             y_pos = y_offset + (i+1)*20
             cv2.putText(frame1, joint, (20, y_pos),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,255,255), 1)
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,20,147), 1)  # Deep Pink
 
         # Combine frames vertically
         combined_frame = np.vstack((frame1, frame2))
@@ -178,6 +178,7 @@ def main(
     smplh_model_path: Path = Path("./data/smplh/neutral/model.npz"),
     output_dir: Path = Path("./visualization_output"),
     device: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu"),
+    debug: bool = False,
 ) -> None:
     """Main entry point for trajectory visualization.
     
@@ -187,6 +188,9 @@ def main(
         smplh_model_path: Path to SMPL-H model file
         output_dir: Directory to save visualization outputs
     """
+    if debug:
+        import ipdb; ipdb.set_trace()
+
     ipdb_safety_net()
 
     visualize_saved_trajectory(

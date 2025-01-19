@@ -66,27 +66,27 @@ def main(
                 denoising_mode="absolute", include_hands=True
             )
 
-            test_data = test_data.preprocess()
-            train_traj = denoising_config.from_ego_data(test_data)
-            test_data = test_data.postprocess()
-            train_traj = test_data._post_process(train_traj)
+            # test_data = test_data.preprocess()
+            # train_traj = denoising_config.from_ego_data(test_data)
+            # test_data = test_data.postprocess()
+            # train_traj = test_data._post_process(train_traj)
 
 
-            # Adaptive sampling if sequence is longer than 1500 frames
-            if len(train_traj.t_world_root) > 1500:
-                # Calculate stride to get under 1500 frames
-                stride = len(train_traj.t_world_root) // 1499 + 1
-                train_traj = train_traj[::stride]
+            # # Adaptive sampling if sequence is longer than 1500 frames
+            # if len(train_traj.t_world_root) > 1500:
+            #     # Calculate stride to get under 1500 frames
+            #     stride = len(train_traj.t_world_root) // 1499 + 1
+            #     train_traj = train_traj[::stride]
 
-            output_path = Path("./exp/debug_frame_rate_diff/")
-            output_path.mkdir(parents=True, exist_ok=True)
+            # output_path = Path("./exp/debug_frame_rate_diff/")
+            # output_path.mkdir(parents=True, exist_ok=True)
 
-            if not (output_path / output_name).exists():
-                EgoTrainingData.visualize_ego_training_data(
-                    train_traj,
-                    body_model,
-                    output_path=str(output_path / output_name),
-                )
+            # if not (output_path / output_name).exists():
+            #     EgoTrainingData.visualize_ego_training_data(
+            #         train_traj,
+            #         body_model,
+            #         output_path=str(output_path / output_name),
+            #     )
 
             for data_npz_dir in data_npz_dirs:
                 if str(data_npz_dir) in str(npz_path):
@@ -124,18 +124,18 @@ def main(
                 f"{time.time() - start_time} seconds",
             )
 
-    # workers = [
-    #     threading.Thread(target=worker, args=(0,))
-    #     # for i in range(torch.cuda.device_count())
-    #     for i in range(40)
-    # ]
-    # for w in workers:
-    #     w.start()
-    # for w in workers:
-    #     w.join()
+    workers = [
+        threading.Thread(target=worker, args=(0,))
+        # for i in range(torch.cuda.device_count())
+        for i in range(40)
+    ]
+    for w in workers:
+        w.start()
+    for w in workers:
+        w.join()
 
     # Single-threaded version
-    worker(0)
+    # worker(0)
     output_list_file.write_text("\n".join(file_list))
 
 

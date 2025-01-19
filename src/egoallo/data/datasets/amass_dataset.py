@@ -286,6 +286,18 @@ class VanillaEgoAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         kwargs["joints_wrt_world"] = (
             joints_wrt_world  # Keep original joints for computing loss
         )
+
+        # Create metadata object first
+        metadata = EgoTrainingData.MetaData()
+        metadata.stage = "raw"  # Set initial stage
+        # uid servers as a null value just for compatibility with EgoExoDataset
+        metadata.take_name = f"name_{group}_uid_{group}_t{start_t}_{end_t}"
+        metadata.scope = "train"
+        metadata.dataset_type = "VanillaAmassHdf5Dataset"
+        
+        # Add metadata to kwargs before creating EgoTrainingData
+        kwargs["metadata"] = metadata
+
         # Close the file if we opened it.
         if hdf5_file is not None:
             hdf5_file.close()
@@ -460,6 +472,7 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         # uid servers as a null value just for compatibility with EgoExoDataset
         metadata.take_name = f"name_{group}_uid_{group}_t{start_t}_{end_t}"
         metadata.scope = "train"
+        metadata.dataset_type = "AdaptiveAmassHdf5Dataset"
         
         # Add metadata to kwargs before creating EgoTrainingData
         kwargs["metadata"] = metadata

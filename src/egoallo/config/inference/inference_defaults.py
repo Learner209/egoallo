@@ -8,6 +8,7 @@ import torch
 from typing import Any
 from egoallo.types import DatasetType, DatasetSliceStrategy, DatasetSplit
 from egoallo.guidance_optimizer_jax import GuidanceMode
+from typing import Optional
 
 
 @dataclasses.dataclass
@@ -74,6 +75,10 @@ class InferenceConfig:
 
     splits: tuple[DatasetSplit, ...] = ("test",)
     """Dataset splits to use"""
+
+    debug_max_iters: Optional[int] = None
+    """Maximum number of iterations for debugging"""
+
     @dataclasses.dataclass
     class EgoExoConfig:
         """Configuration specific to EgoExo dataset."""

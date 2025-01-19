@@ -10,7 +10,9 @@ from egoallo.utils.setup_logger import setup_logger
 from third_party.cloudrender.cloudrender.render.pointcloud import Pointcloud
 
 logger = setup_logger(output=None, name=__name__)
-
+import hashlib
+import tempfile
+import os
 
 def load_point_cloud_and_find_ground(
     points_path: Path,
@@ -24,8 +26,15 @@ def load_point_cloud_and_find_ground(
         return_points: Which set of points to return ("all", "filtered", or "less_filtered")
         cache_files: Whether to cache filtered points to disk for faster future loading
     """
-    filtered_points_npz_cache_path = points_path.parent / "_cached_filtered_points.npz"
-    less_filtered_points_npz_cache_path = points_path.parent / "_cached_less_filtered_points.npz"
+    # Create hash of points path to use as cache filename
+    points_path_hash = hashlib.md5(str(points_path).encode()).hexdigest()
+    
+    # Create persistent temp directory if it doesn't exist
+    temp_cache_dir = Path(tempfile.gettempdir()) / "aria_mps_cache"
+    temp_cache_dir.mkdir(exist_ok=True, parents=True)
+    
+    filtered_points_npz_cache_path = temp_cache_dir / f"{points_path_hash}_filtered_points.npz"
+    less_filtered_points_npz_cache_path = temp_cache_dir / f"{points_path_hash}_less_filtered_points.npz"
 
     # Check if we should use cached files
     use_cache = cache_files and (
@@ -63,7 +72,6 @@ def load_point_cloud_and_find_ground(
 
         # Only save cache files if caching is enabled
         if cache_files:
-            filtered_points_npz_cache_path.parent.mkdir(exist_ok=True, parents=True)
             np.savez_compressed(filtered_points_npz_cache_path, points=filtered_points_data)
             logger.debug("Cached filtered points to %s", filtered_points_npz_cache_path)
             np.savez_compressed(less_filtered_points_npz_cache_path, points=less_filtered_points_data)

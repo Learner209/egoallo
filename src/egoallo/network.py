@@ -433,7 +433,7 @@ class BaseDenoiseTraj(TensorDataclass, ABC, Generic[T]):
         """Encode trajectory into latent representation.
 
         Args:
-            encoders: Dictionary of encoder networks
+            encoders: Dictionary of encoder networksF
             batch: Batch size
             time: Sequence length
 

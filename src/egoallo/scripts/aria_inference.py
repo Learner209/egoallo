@@ -34,6 +34,7 @@ from egoallo.transforms import SE3, SO3
 from egoallo.vis_helpers import visualize_traj_and_hand_detections
 from egoallo.training_utils import ipdb_safety_net
 from egoallo.config.inference.inference_defaults import InferenceConfig
+from egoallo.utils.setup_logger import setup_logger
 
 if TYPE_CHECKING:
     from third_party.cloudrender.cloudrender.render.pointcloud import Pointcloud
@@ -42,6 +43,10 @@ from projectaria_tools.core import data_provider
 from projectaria_tools.core.sensor_data import TimeDomain, TimeQueryOptions
 from projectaria_tools.core.stream_id import RecordableTypeId, StreamId
 
+import hashlib
+import tempfile
+
+logger = setup_logger(output=None, name=__name__)
 
 class AriaInference:
     def __init__(self, config: InferenceConfig, traj_root: Path, output_path: Path, glasses_x_angle_offset: float = 0.0):
@@ -110,12 +115,12 @@ class AriaInference:
         """Load point cloud and find ground plane."""
         pc_container, points_data, floor_z = load_point_cloud_and_find_ground(
             points_path=self.traj_paths.points_path,
-            cache_files=False,
+            cache_files=True,
             return_points="filtered",
         )
         return pc_container, points_data, floor_z
 
-    def extract_rgb_frames(self, times: list[float] | list[int] | None = None) -> list[np.ndarray]:
+    def extract_rgb_frames(self, times: list[float] | list[int] | None = None, cache_files: bool = True) -> list[np.ndarray]:
         """Extract RGB frames from VRS file and save as video.
         
         Args:
@@ -123,52 +128,48 @@ class AriaInference:
                   If float values are provided, they are treated as timestamps in seconds.
                   If int values are provided, they are treated as frame indices.
                   If None, uses sequential frame indices.
+            cache_files: Whether to cache extracted frames to disk for faster future loading
         """
-        # Old code using VRS file
-        # vrs_data_provider = data_provider.create_vrs_data_provider(str(self.traj_paths.vrs_file))
-        # rgb_stream_id = vrs_data_provider.get_stream_id_from_label("camera-rgb")
-        # 
-        # rgb_frames = []
-        # if times is not None:
-        #     # Check if times contains floats or ints
-        #     is_float = any(isinstance(t, float) for t in times)
-        #     
-        #     for time in times:
-        #         if is_float:
-        #             # Use timestamp-based extraction for float values
-        #             rgb_record = vrs_data_provider.get_image_data_by_time_ns(rgb_stream_id, int(time * 1e9))
-        #         else:
-        #             # Use index-based extraction for int values
-        #             rgb_record = vrs_data_provider.get_image_data_by_index(rgb_stream_id, time)
-        #         
-        #         if rgb_record is not None and rgb_record[0].pixel_frame is not None:
-        #             rgb_frames.append(rgb_record[0].to_numpy_array())
-        # else:
-        #     # Extract frames by sequential indices
-        #     for frame_idx in range(self.config.start_index, self.config.start_index + self.config.traj_length + 1):
-        #         rgb_record = vrs_data_provider.get_image_data_by_index(rgb_stream_id, frame_idx)
-        #         if rgb_record is not None and rgb_record[0].pixel_frame is not None:
-        #             rgb_frames.append(rgb_record[0].to_numpy_array())
-
-        # New code using ego preview mp4
-        video = cv2.VideoCapture(str(self.traj_paths.ego_preview_path))
-        rgb_frames = []
+        # Create hash of video path and times to use as cache filename
+        cache_key = f"{str(self.traj_paths.ego_preview_path)}_{str(times)}"
+        frames_path_hash = hashlib.md5(cache_key.encode()).hexdigest()
         
-        if times is not None:
-            for frame_idx in times:
-                video.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
-                ret, frame = video.read()
-                if ret:
-                    rgb_frames.append(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+        # Create persistent temp directory if it doesn't exist
+        temp_cache_dir = Path(tempfile.gettempdir()) / "aria_frames_cache"
+        temp_cache_dir.mkdir(exist_ok=True, parents=True)
+        
+        frames_cache_path = temp_cache_dir / f"{frames_path_hash}_frames.npz"
+
+        # Check if we should use cached files
+        if cache_files and frames_cache_path.exists():
+            # breakpoint()
+            logger.debug("Loading cached frames from %s", frames_cache_path)
+            rgb_frames = list(np.load(frames_cache_path)["frames"])
         else:
-            while True:
-                ret, frame = video.read()
-                if not ret:
-                    break
-                rgb_frames.append(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-                
-        video.release()
-        print(f"Extracted {len(rgb_frames)} RGB frames")
+            # Extract frames from video
+            video = cv2.VideoCapture(str(self.traj_paths.ego_preview_path))
+            rgb_frames = []
+            
+            if times is not None:
+                for frame_idx in times:
+                    video.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+                    ret, frame = video.read()
+                    if ret:
+                        rgb_frames.append(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+            else:
+                while True:
+                    ret, frame = video.read()
+                    if not ret:
+                        break
+                    rgb_frames.append(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+                    
+            video.release()
+            logger.debug(f"Extracted {len(rgb_frames)} RGB frames")
+
+            # Cache frames if enabled
+            if cache_files and len(rgb_frames) > 0:
+                np.savez_compressed(frames_cache_path, frames=rgb_frames)
+                logger.debug("Cached frames to %s", frames_cache_path)
         
         # Save frames as video
         if len(rgb_frames) > 0:

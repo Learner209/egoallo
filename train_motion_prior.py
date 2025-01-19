@@ -78,6 +78,8 @@ def run_training(
     # Set up experiment directory + HF accelerate.
     # We're getting to manage logging, checkpoint directories, etc manually,
     # and just use `accelerate` for distibuted training.
+    if debug_mode:
+        breakpoint()
     if restore_checkpoint_dir:
         config: EgoAlloTrainConfig = load_runtime_config(restore_checkpoint_dir)
         config.batch_size = 64 # FIXME: this is a temporary fix to distill a large model trained on thecluster to local machine.
