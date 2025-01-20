@@ -14,7 +14,7 @@ class EgoAlloTrainConfig:
     smplh_npz_path: Path = Path("./data/smplh/neutral/model.npz")
 
     mask_ratio: float = 0.75
-    random_sample_mask_ratio: bool = False
+    random_sample_mask_ratio: bool = True
     """If True, randomly sample mask ratio between mask_ratio / 4 ~ mask_ratio for each batch"""
 
     joint_cond_mode: JointCondMode = "vel_acc"
@@ -54,6 +54,7 @@ class EgoAlloTrainConfig:
 
     # debug
     debug: bool = False
+    max_steps: int = 1000000000 # never reached , since max_steps is a debug-only handle.
 
     def __post_init__(self):
         # Create model config with denoising settings

@@ -128,7 +128,7 @@ class DenoisingConfig:
                 "hand_rotmats": 0.00,
                 "R_world_root": 2.0,
                 "t_world_root": 2.0,
-                "joints": 0.0,
+                "joints": 2.0,
                 "foot_skating": 0.3,
                 "velocity": 0.1,
             }

@@ -208,13 +208,17 @@ def run_training(
     epoch = 0
 
     while True:
-        for train_batch in train_loader:
+        for idx, train_batch in enumerate(train_loader):
+
             # Record batch loading time
             batch_load_time = time.time() - batch_start_time
             batch_start_time = time.time()
 
             loop_metrics = next(loop_metrics_gen)
             step = loop_metrics.counter
+
+            if step >= config.max_steps:
+                break
 
             loss, log_outputs = loss_helper.compute_denoising_loss(
                 model,
@@ -384,6 +388,9 @@ def run_training(
                         logger.exception("Detailed error:")
 
                 del checkpoint_path
+        
+        if step >= config.max_steps:
+            break
 
         # End of epoch
         epoch += 1
@@ -395,40 +402,6 @@ def run_training(
     # Finish wandb run
     if accelerator.is_main_process:
         wandb.finish()
-
-
-def test_run_training_cli():
-    # Store original argv
-    original_argv = sys.argv.copy()
-
-    try:
-        # Create test config directly instead of using CLI args
-        test_config = EgoAlloTrainConfig(
-            batch_size=64,
-            experiment_name="test_experiment",
-            learning_rate=1e-4,
-            dataset_hdf5_path=Path(
-                "./data/amass_rich_hps/processed_amass_rich_hps.hdf5"
-            ),
-            dataset_files_path=Path(
-                "./data/amass_rich_hps/processed_amass_rich_hps.txt"
-            ),
-            mask_ratio=0.0,
-            splits=("train", "val"),
-            joint_cond_mode="absrel",
-            use_fourier_in_masked_joints=False,
-            random_sample_mask_ratio=True,
-            data_collate_fn="TensorOnlyDataclassBatchCollator",
-        )
-
-        # Mock wandb to prevent actual wandb initialization
-        with patch("wandb.init"), patch("wandb.log"), patch("wandb.finish"):
-            # Run the main function
-            run_training(test_config)
-
-    finally:
-        # Restore original argv
-        sys.argv = original_argv
 
 
 if __name__ == "__main__":

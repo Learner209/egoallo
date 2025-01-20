@@ -341,7 +341,7 @@ class SMPLViewer(BaseRenderer):
             motion_sequence.append(
                 {
                     "pose": pose[i].cpu().numpy(),
-                    "shape": traj.betas[0, :10].cpu().numpy(),
+                    "shape": traj.betas[0, :16].cpu().numpy(),
                     "translation": T_world_root[i, 4:].cpu().numpy(),
                 }
             )

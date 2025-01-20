@@ -473,7 +473,7 @@ class TestRunner:
 				# TODO: the current implementation assumes that the leading `TensorDataClass` batch size dim() returns `1`.
 				gt_trajs.append(gt_traj)
 				denoised_trajs.append(denoised_traj)
-				identifiers.append(batch.metadata.take_name)
+				identifiers.append(batch.metadata.take_name[0][0])
 
 				torch.cuda.empty_cache()
 			# Prepare arguments for parallel metric computation

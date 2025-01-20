@@ -73,7 +73,7 @@ class EgoTrainingData(TensorDataclass):
     @dataclass
     class MetaData:
         """Metadata about the trajectory."""
-        take_name: tuple[str, ...] = ()
+        take_name: tuple[str, ...] | tuple[tuple[str, ...], ...] = ()
         """Name of the take."""
 
         frame_keys: tuple[int, ...] = ()
