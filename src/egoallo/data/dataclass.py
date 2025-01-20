@@ -299,11 +299,11 @@ class EgoTrainingData(TensorDataclass):
                 self.joints_wrt_world,
                 torch.zeros_like(self.joints_wrt_world)
             )
-            # Set where joints are invalid to all zeros
+            # Set where joints are invalid to all -1.
             self.joints_wrt_world = torch.where(
                 self.visible_joints_mask.unsqueeze(-1), 
                 self.joints_wrt_world, 
-                torch.zeros_like(self.joints_wrt_world)
+                torch.ones_like(self.joints_wrt_world) * -1
             )
 
         self.metadata.stage = "preprocessed"
