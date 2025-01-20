@@ -360,7 +360,7 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
             self._max_seq_len = self._subseq_len
 
         self._traj_aug = config.traj_aug
-        assert not self._traj_aug, "Trajectory augmentation is not supported for AdaptiveAmassHdf5Dataset yet."
+        # assert not self._traj_aug, "Trajectory augmentation is not supported for AdaptiveAmassHdf5Dataset yet."
 
         # Initialize groups and cache
         with h5py.File(self._hdf5_path, "r") as hdf5_file:
@@ -569,6 +569,11 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         
         ret = EgoTrainingData(**kwargs)  # Create with metadata
         ret = ret.preprocess()  # Preprocess data (will update metadata.stage)
+
+        # Apply SE2 trajectory augmentation if enabled
+        if self._traj_aug:
+            rand_radian = torch.rand(1) * 2 * np.pi
+            ret = ret._rotate(rand_radian)
 
         return ret
 

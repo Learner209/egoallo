@@ -82,6 +82,9 @@ class EgoAlloTrainConfig:
     traj_aug: bool = False
     """Whether to augment data with different traj rotations. Implemented with random rotations in the 2D plane."""
 
+    # traj_aug_num_samples: int = 10
+    # """Number of samples the aug rotation is sampled uniformly along the unit circle."""
+
     # Misc
     ts_keys: tuple[str, ...] = tuple([field.name for field in dataclasses.fields(EgoTrainingData) if field.name != "betas" and field.name != "metadata"])
     """Keys that contain time-series data in the `EgoTrainingData` dataclass.""" 

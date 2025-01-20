@@ -9,6 +9,7 @@ from torch.utils.data.dataloader import _InfiniteConstantSampler
 import typeguard
 from jaxtyping import Bool, Float, jaxtyped, Array
 from egoallo.transforms import SO3, SE3
+from jaxlie import SE2, SO2
 from torch import Tensor
 
 
@@ -418,6 +419,25 @@ class EgoTrainingData(TensorDataclass):
     #         if value is not None:  # Handle optional fields
     #             if torch.isnan(value).any():
     #                 raise ValueError(f"NaN values detected in {field.name}")
+
+    def _rotate(self, radian: Tensor) -> Self:
+        assert self.metadata.stage == "preprocessed", "Only preprocessed data is supported for rotation. since preprocessing aligns data's xy to zeros. and rotation is applied only on yaw(rpy zyx convention.)"
+
+        so3_rot = SO3.from_z_radians(radian)
+        # 1. rotate T_world_cpf
+        self.T_world_cpf = SE3.from_rotation_and_translation(
+            rotation=so3_rot.multiply(SO3(self.T_world_cpf[..., :4])),
+            translation=so3_rot.apply(self.T_world_cpf[..., 4:]),
+        ).parameters()
+        # 2. rotate T_world_root
+        self.T_world_root = SE3.from_rotation_and_translation(
+            rotation=so3_rot.multiply(SO3(self.T_world_root[..., :4])),
+            translation=so3_rot.apply(self.T_world_root[..., 4:]),
+        ).parameters()
+        # 3. rotate joints_wrt_world
+        self.joints_wrt_world = so3_rot.apply(self.joints_wrt_world)
+
+        return self
         
 
     def __getitem__(self, index) -> Self:
