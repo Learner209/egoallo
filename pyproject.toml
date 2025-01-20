@@ -45,7 +45,10 @@ dependencies = [
     "smplx",
     "joblib",
     "dill",
-    "pytest",
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "pytest-mock>=3.12.0",
+    "pytest-xdist>=3.1.0",
 ]
 
 [tool.setuptools.package-data]
@@ -78,5 +81,10 @@ ignore = [
     "PLW2901",  # For loop variable overwritten.
 ]
 
-# [tool.pytest.ini_options]
-# addopts = "--jaxtyping-packages=egoallo,typeguard.typechecked"
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = "-ra -s -vv --pdbcls=IPython.terminal.debugger:TerminalPdb"
+testpaths = [
+    "src/egoallo/scripts",
+]
+python_files = ["test_*.py"]

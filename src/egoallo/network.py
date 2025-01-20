@@ -1560,7 +1560,7 @@ class EgoDenoiserConfig:
 
     # Model settings
     activation: Literal["gelu", "relu"] = "gelu"
-    positional_encoding: Literal["transformer", "rope"] = "transformer"
+    positional_encoding: Literal["transformer", "rope"] = "rope"
     noise_conditioning: Literal["token", "film"] = "token"
     xattn_mode: Literal["kv_from_cond_q_from_x", "kv_from_x_q_from_cond"] = (
         "kv_from_cond_q_from_x"
@@ -2177,7 +2177,7 @@ class TransformerBlock(nn.Module):
         self.rotary_emb = (
             RotaryEmbedding(
                 config.d_latent // config.n_heads,
-                learned_freq=False,
+                learned_freq=True,
             )
             if config.use_rope_embedding
             else None

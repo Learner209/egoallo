@@ -132,7 +132,7 @@ EgoAllo requires Python 3.12 or newer.
 
 	The inference main script for **EgoExo** is located at './src/egoallo/scripts/test.py'. A full working example of using it would be:
 	```bash
-	python ./src/egoallo/scripts/test.py --inference-config.dataset-slice-strategy full_sequence --inference-config.splits test --inference-config.checkpoint-dir <your-ckpt-path> --inference-config.dataset-type EgoExoDataset --inference-config.visualize-traj --inference-config.output-dir ./exp/test-egoexo-train
+   python ./src/egoallo/scripts/test.py --inference-config.dataset-slice-strategy full_sequence --inference-config.splits test --inference-config.checkpoint-dir <your-ckpt-path> --inference-config.dataset-type AriaDataset --inference-config.visualize-traj --inference-config.output-dir ./exp/test-egoexo-train --inference-config.egoexo.split train --inference-config.guidance-mode no_hands
 	```
 
 3. **Running inference with post-processing.**
