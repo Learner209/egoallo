@@ -58,7 +58,7 @@ class CosineNoiseScheduleConstants(TensorDataclass):
     @staticmethod
     def compute(timesteps: int, s: float = 0.008) -> CosineNoiseScheduleConstants:
         steps = timesteps + 1
-        x = torch.linspace(0, 1, steps, dtype=torch.float64)
+        x = torch.linspace(0, 1, steps, dtype=torch.float32)
 
         def get_betas():
             alphas_cumprod = torch.cos((x + s) / (1 + s) * torch.pi * 0.5) ** 2

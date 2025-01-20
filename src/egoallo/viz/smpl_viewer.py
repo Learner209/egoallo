@@ -496,7 +496,7 @@ class SMPLViewer(BaseRenderer):
         look_dir = look_dir / torch.norm(look_dir)
 
         # Calculate up vector (always pointing up in z direction)
-        up = torch.tensor([0.0, 0.0, 1.0], dtype=torch.float64)
+        up = torch.tensor([0.0, 0.0, 1.0], dtype=torch.float32)
 
         # Calculate right vector
         right = torch.cross(look_dir, up, dim=-1)

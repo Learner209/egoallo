@@ -57,7 +57,7 @@ class EgoExoDataset(torch.utils.data.Dataset[EgoTrainingData]):
         self.config = config
         self._slice_strategy = config.dataset_slice_strategy
         self._subseq_len = config.subseq_len
-        self._mask_ratio = config.mask_ratio
+        # self._mask_ratio = config.mask_ratio
 
         # Load annotation files
         self._anno_dirs = config.bodypose_anno_dir
@@ -365,8 +365,8 @@ class EgoExoDataset(torch.utils.data.Dataset[EgoTrainingData]):
 
         return torch.tensor(poses, dtype=torch.float32)
 
-    def _get_mask_ratio(self) -> float:
-        """Get mask ratio for MAE training."""
-        if self.config.random_sample_mask_ratio:
-            return np.random.uniform(self.config.mask_ratio / 4, self.config.mask_ratio)
-        return self.config.mask_ratio
+    # def _get_mask_ratio(self) -> float:
+    #     """Get mask ratio for MAE training."""
+    #     if self.config.random_sample_mask_ratio:
+    #         return np.random.uniform(self.config.mask_ratio / 4, self.config.mask_ratio)
+    #     return self.config.mask_ratio

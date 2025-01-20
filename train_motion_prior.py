@@ -43,6 +43,7 @@ from egoallo.utils.utils import make_source_code_snapshot
 from egoallo.utils.setup_logger import setup_logger
 
 import wandb
+from torch.amp import autocast
 import datetime
 import tempfile
 from egoallo.config.inference.inference_defaults import InferenceConfig
@@ -220,12 +221,13 @@ def run_training(
             if step >= config.max_steps:
                 break
 
-            loss, log_outputs = loss_helper.compute_denoising_loss(
-                model,
-                unwrapped_model=accelerator.unwrap_model(model),
-                train_config=config,
-                train_batch=train_batch,
-            )
+            with autocast(device_type=device.type, dtype=torch.float32):
+                loss, log_outputs = loss_helper.compute_denoising_loss(
+                    model,
+                    unwrapped_model=accelerator.unwrap_model(model),
+                    train_config=config,
+                    train_batch=train_batch,
+                )
 
             # Add learning rate to outputs
             log_outputs["learning_rate"] = scheduler.get_last_lr()[0]

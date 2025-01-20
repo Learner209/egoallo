@@ -153,8 +153,8 @@ class HandEvaluator(BaseEvaluator):
         if a.shape[0] == 1:
             return np.zeros_like(a)
 
-        a_tensor = torch.tensor(a, dtype=torch.float64, device=self.device)
-        b_tensor = torch.tensor(b, dtype=torch.float64, device=self.device)
+        a_tensor = torch.tensor(a, dtype=torch.float32, device=self.device)
+        b_tensor = torch.tensor(b, dtype=torch.float32, device=self.device)
 
         aligned_b = (
             procrustes_align(

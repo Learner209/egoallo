@@ -24,6 +24,7 @@ from .data.dataclass import EgoTrainingData
 from .sampling import CosineNoiseScheduleConstants
 from .transforms import SO3
 from .types import LossWeights
+from torch.amp import autocast, GradScaler
 
 local_config_file = CONFIG_FILE
 CFG = make_cfg(config_name="defaults", config_file=local_config_file, cli_args=[])
@@ -160,7 +161,7 @@ class TrainingLossComputer:
         # Compute loss using x_0_pred and x_0
         # breakpoint()
 
-		# postprocessing
+        # postprocessing
         # breakpoint()
         train_batch = train_batch.postprocess()
         x_0_pred = train_batch._post_process(x_0_pred)

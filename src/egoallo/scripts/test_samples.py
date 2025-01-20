@@ -60,7 +60,7 @@ def test_run_training_real_data(tmp_path, mock_accelerator, mock_wandb, temp_dat
         learning_rate=1e-4,
         dataset_hdf5_path=temp_dataset[0],
         dataset_files_path=temp_dataset[1], 
-        mask_ratio=0.75,
+        spatial_mask_ratio=0.75,
         splits=("train", "val"),
         joint_cond_mode="absrel",
         use_fourier_in_masked_joints=True,

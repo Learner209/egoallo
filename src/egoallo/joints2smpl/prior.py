@@ -106,7 +106,7 @@ class MaxMixturePrior(nn.Module):
 
         if dtype == DEFAULT_DTYPE:
             np_dtype = np.float32
-        elif dtype == torch.float64:
+        elif dtype == torch.float32:
             np_dtype = np.float64
         else:
             print('Unknown float type {}, exiting!'.format(dtype))

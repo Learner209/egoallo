@@ -150,11 +150,11 @@ def visualize_saved_trajectory(
                     cv2.FONT_HERSHEY_SIMPLEX, 1, (255,140,0), 2)  # Dark Orange
 
         # Calculate mask ratio
-        mask_ratio = len(masked_joints) / len(SMPLH_BODY_JOINTS)
+        spatial_mask_ratio = len(masked_joints) / len(SMPLH_BODY_JOINTS)
 
         # Add masked joints text with mask ratio
         y_offset = 60
-        cv2.putText(frame1, f'Masked Joints ({mask_ratio:.1%}):', (10, y_offset),
+        cv2.putText(frame1, f'Masked Joints ({spatial_mask_ratio:.1%}):', (10, y_offset),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (147,112,219), 1)  # Medium Purple
         for i, joint in enumerate(masked_joints):
             y_pos = y_offset + (i+1)*20
