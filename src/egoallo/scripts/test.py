@@ -191,6 +191,8 @@ class TestRunner:
 			ds_init_config = runtime_config
 			# ds_init_config.splits = ("train", "val")
 			# breakpoint()
+		# ! Temporal masking is disabled for testing, since it can cause RuntimeError no frames found within visible joints.
+		runtime_config.temporal_mask_ratio = 0.0
 	 
 		self.dataloader = torch.utils.data.DataLoader(
 			dataset=build_dataset(cfg=runtime_config)(config=ds_init_config),

@@ -522,7 +522,7 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         # prevent corner cases.
         if num_masked_patches >= num_patches - 1:
             logger.warning(f"num_masked_patches >= num_patches - 1: {num_patches}, {num_masked_patches}")
-        if num_masked_patches == 0:
+        if num_masked_patches == 0 and temporal_mask_ratio > 0:
             logger.warning(f"num_masked_patches == 0: {num_masked_patches}")
 
         # Generate random indices excluding the first patch
