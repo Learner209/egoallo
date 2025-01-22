@@ -53,7 +53,7 @@ def draw_coco_kinematic_tree(coco_kpts, coco_cfg) -> List[o3d.geometry.LineSet]:
         line_set = o3d.geometry.LineSet()
         line_set.points = o3d.utility.Vector3dVector(points)
         line_set.lines = o3d.utility.Vector2iVector([[0, 1]])
-        line_set.paint_uniform_color(np.asarray(coco_cfg.color_rgb_line_body).astype(np.float64) if p1 > 4 else np.asarray(coco_cfg.color_rgb_line_head).astype(np.float64))
+        line_set.paint_uniform_color(np.asarray(coco_cfg.color_rgb_line_body).astype(np.float32) if p1 > 4 else np.asarray(coco_cfg.color_rgb_line_head).astype(np.float32))
         line_sets.append(line_set)
 
     return line_sets

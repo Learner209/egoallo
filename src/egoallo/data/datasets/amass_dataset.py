@@ -478,7 +478,7 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         # assert num_joints == 22, f"Expected 22 joints, got {num_joints}"
         device = kwargs["joints_wrt_world"].device
 
-        if self._fps_aug and seq_len != self._subseq_len:
+        if self._fps_aug and seq_len != self._subseq_len and self._slice_strategy != "full_sequence":
             assert multiplier is not None and multiplier != 1, f"multiplier should not be 1, got {multiplier}"
             for key in self.config.ts_keys:
                 if key in kwargs:

@@ -55,8 +55,8 @@ def draw_coco_kinematic_tree(coco_kpts, coco_cfg, curve_network_id=None) -> None
         # Create a line between the two points
         network = ps.register_curve_network("coco_{}_{}_{}".format(p1, p2, curve_network_id), points, 
                                    np.array([[0, 1]]),
-                                   color=np.asarray(coco_cfg.color_rgb_line_body).astype(np.float64) if p1 > 4 else 
-                                         np.asarray(coco_cfg.color_rgb_line_head).astype(np.float64))
+                                   color=np.asarray(coco_cfg.color_rgb_line_body).astype(np.float32) if p1 > 4 else 
+                                         np.asarray(coco_cfg.color_rgb_line_head).astype(np.float32))
         # network.set_radius(0.0009)
         network.set_radius(0.005, relative=False) # radius in absolute world units
 
