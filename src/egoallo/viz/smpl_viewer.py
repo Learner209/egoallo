@@ -489,7 +489,7 @@ class SMPLViewer(BaseRenderer):
         camera_offset = torch.tensor(
             [distance * np.cos(angle), distance * np.sin(angle), height]
         )
-        camera_pos = smpl_pos + camera_offset
+        camera_pos = smpl_pos + camera_offset.to(dtype=smpl_pos.dtype)
 
         # Make camera look at SMPL model
         look_dir = smpl_pos - camera_pos

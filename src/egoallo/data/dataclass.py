@@ -213,6 +213,7 @@ class EgoTrainingData(TensorDataclass):
         """
         assert self.metadata.stage == "raw"
         # Get initial preprocessed x,y position offset from visible joints in first frame
+        # FIXME: there is chance that after exerting temporal_dim_mask, thre won't exist a timestep s.t. visible_joints has at least one joint visible for all batch..
         if self.visible_joints_mask is not None:
             # Find first frame with at least one visible joint
             *B, T, J, _ = self.joints_wrt_world.shape  # Get temporal dimension
@@ -238,6 +239,7 @@ class EgoTrainingData(TensorDataclass):
                     initial_xy = (sums[..., :2] / counts).clone()  # [*batch, 2]
                     break
             else:
+                import ipdb; ipdb.set_trace()
                 raise RuntimeError("No frames found with visible joints")
         else:
             # raise RuntimeWarning("No visibility mask found, using mean of all joints in first frame")

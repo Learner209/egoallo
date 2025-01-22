@@ -520,12 +520,14 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         num_masked_patches = int(num_patches * temporal_mask_ratio)
 
         # prevent corner cases.
-        if num_patches == num_masked_patches:
-            logger.warning(f"num_patches == num_masked_patches: {num_patches}")
+        if num_masked_patches >= num_patches - 1:
+            logger.warning(f"num_masked_patches >= num_patches - 1: {num_patches}, {num_masked_patches}")
         if num_masked_patches == 0:
             logger.warning(f"num_masked_patches == 0: {num_masked_patches}")
 
-        patch_indices = torch.randperm(num_patches)[:num_masked_patches]
+        # Generate random indices excluding the first patch
+        # NOTE: this is to prevent the first patch from being masked, since the first patch should be visible for all batch for the **preprocessing** process to work as fine.
+        patch_indices = torch.randperm(num_patches-1)[:(num_masked_patches)] + 1
         temporal_patches[patch_indices] = False
         
         # Rearrange back and trim padding
