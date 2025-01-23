@@ -23,7 +23,7 @@ from typing import List, Dict, Any, Tuple
 from jaxtyping import Float, Bool, jaxtyped
 import typeguard
 from torch import Tensor
-from egoallo.mapping import EGOEXO4D_BODYPOSE_TO_SMPLH_INDICES
+from egoallo.mapping import EGOEXO4D_BODYPOSE_TO_SMPLH_INDICES, SMPLH_KINTREE, EGOEXO4D_BODYPOSE_KINTREE_PARENTS
 from egoallo.utils.setup_logger import setup_logger
 from egoallo.utilities import find_numerical_key_in_dict
 from pathlib import Path
@@ -246,6 +246,107 @@ class Dataset_EgoExo(Dataset):
         else:
             return data, vis.bool()
 
+    @jaxtyped(typechecker=typeguard.typechecked)
+    def apply_kinematic_constraints(
+        self,
+        joints_world: Float[Tensor, "timesteps 22 3"],  # SMPLH joints: (T, 22, 3)
+        joints_world_coco: Float[Tensor, "timesteps 17 3"],  # COCO joints: (T, 17, 3)
+        threshold: float = 3.0  # Number of standard deviations for outlier detection
+    ) -> Tuple[Float[Tensor, "timesteps 22 3"], Float[Tensor, "timesteps 17 3"]]:
+        """
+        Applies kinematic constraints to joint positions to filter outliers and adjust positions based on expected distances.
+        
+        Args:
+            joints_world (torch.Tensor): SMPLH joint positions in world coordinates, shape (T, 22, 3)
+            joints_world_coco (torch.Tensor): COCO joint positions in world coordinates, shape (T, 17, 3)
+            threshold (float): Number of standard deviations for defining outlier thresholds
+        
+        Returns:
+            Tuple[torch.Tensor, torch.Tensor]: Adjusted SMPLH and COCO joints
+        """
+        # Define kinematic trees for SMPLH and COCO
+        smplh_kintree = SMPLH_KINTREE
+        coco_kintree = EGOEXO4D_BODYPOSE_KINTREE_PARENTS
+        
+        # Process SMPLH joints
+        for joint_idx in range(len(smplh_kintree)):
+            parent_idx = smplh_kintree[joint_idx]
+            if parent_idx == -1:
+                continue  # Skip root node
+            
+            valid_frames = []
+            for t in range(joints_world.shape[0]):
+                # Check if parent and child are not NaN
+                parent_valid = not torch.isnan(joints_world[t, parent_idx]).any()
+                child_valid = not torch.isnan(joints_world[t, joint_idx]).any()
+                if parent_valid and child_valid:
+                    valid_frames.append(t)
+            
+            if not valid_frames:
+                continue
+            
+            # Calculate distances between parent and child in valid frames
+            parent_pos = joints_world[valid_frames, parent_idx] # [valid_frames, 3]
+            child_pos = joints_world[valid_frames, joint_idx] # [valid_frames, 3]
+            distances = torch.norm(child_pos - parent_pos, dim=1) # [valid_frames]
+            mean_dist = torch.mean(distances)
+            std_dist = torch.std(distances)
+            
+            upper_bound = mean_dist + threshold * std_dist
+            lower_bound = mean_dist - threshold * std_dist
+            
+            # Adjust outliers in each valid frame
+            for t in valid_frames:
+                current_parent = joints_world[t, parent_idx] # [3]
+                current_child = joints_world[t, joint_idx] # [3]j
+                dist = torch.norm(current_child - current_parent) # [1]
+                
+                if dist < lower_bound or dist > upper_bound:
+                    direction = current_child - current_parent # [3]
+                    direction_normalized = direction / (dist + 1e-7) # [3]
+                    adjusted_child = current_parent + direction_normalized * mean_dist # [3]
+                    joints_world[t, joint_idx] = adjusted_child
+        
+        # Process COCO joints
+        for joint_idx in range(len(coco_kintree)):
+            parent_idx = coco_kintree[joint_idx]
+            if parent_idx == -1:
+                continue  # Skip root node
+            
+            valid_frames = []
+            for t in range(joints_world_coco.shape[0]):
+                parent_valid = not torch.isnan(joints_world_coco[t, parent_idx]).any()
+                child_valid = not torch.isnan(joints_world_coco[t, joint_idx]).any()
+                if parent_valid and child_valid:
+                    valid_frames.append(t)
+            
+            if not valid_frames:
+                continue
+            
+            # Calculate distances between parent and child in valid frames
+            parent_pos = joints_world_coco[valid_frames, parent_idx]
+            child_pos = joints_world_coco[valid_frames, joint_idx]
+            distances = torch.norm(child_pos - parent_pos, dim=1)
+            mean_dist = torch.mean(distances)
+            std_dist = torch.std(distances)
+            
+            upper_bound = mean_dist + threshold * std_dist
+            lower_bound = mean_dist - threshold * std_dist
+            
+            # Adjust outliers in each valid frame
+            for t in valid_frames:
+                current_parent = joints_world_coco[t, parent_idx]
+                current_child = joints_world_coco[t, joint_idx]
+                dist = torch.norm(current_child - current_parent)
+                
+                if dist < lower_bound or dist > upper_bound:
+                    direction = current_child - current_parent
+                    direction_normalized = direction / (dist + 1e-7)
+                    adjusted_child = current_parent + direction_normalized * mean_dist
+                    joints_world_coco[t, joint_idx] = adjusted_child
+        
+        return joints_world, joints_world_coco
+
     def __getitem__(self, index):
         take_uid = self.valid_take_uids[index]
 
@@ -368,6 +469,9 @@ class Dataset_EgoExo(Dataset):
 
                 joints_world_coco[:, j, d] = torch.from_numpy(interpolated)
         
+        joints_world, joints_world_coco = self.apply_kinematic_constraints(
+            joints_world=joints_world, joints_world_coco=joints_world_coco
+        )
         # Create visibility mask based on non-nan values in world coordinates
         visible_mask = ~torch.isnan(joints_world).any(dim=-1)  # shape: (seq_len, num_joints)
         visible_mask_orig_coco = ~torch.isnan(joints_world_coco).any(dim=-1)  # shape: (seq_len, num_joints)

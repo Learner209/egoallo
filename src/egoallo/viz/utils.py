@@ -4,7 +4,7 @@ from jaxtyping import Float, Bool, Array, jaxtyped
 import typeguard
 import numpy as np
 from typing import Optional
-from egoallo.mapping import EGOEXO4D_BODYPOSE_KINTREE_PARENTS, EGOEXO4D_EGOPOSE_BODYPOSE_MAPPINGS, SMPLH_TO_EGOEXO4D_BODYPOSE_INDICES
+from egoallo.mapping import EGOEXO4D_BODYPOSE_KINTREE_PARENTS, EGOEXO4D_EGOPOSE_BODYPOSE_MAPPINGS, SMPLH_TO_EGOEXO4D_BODYPOSE_INDICES, SMPLH_KINTREE
 
 def blend_with_background(image: np.ndarray, background_color: tuple) -> np.ndarray:
     """Blend RGBA image with solid background color."""
@@ -42,24 +42,11 @@ def create_skeleton_point_cloud(
         assert joints_wrt_world.shape[0] == 22, f"SMPLH joints should have 22 joints, got {joints_wrt_world.shape[0]}"
         # SMPLH kinematic tree (parent indices for each joint)
         # Only includes body joints, not hand joints
-        kintree = [-1,  # pelvis
-                   0, 0,  # left_hip, right_hip 
-                   0,  # spine1
-                   1, 2,  # left_knee, right_knee
-                   3,  # spine2 
-                   4, 5,  # left_ankle, right_ankle
-                   6,  # spine3
-                   7, 8,  # left_foot, right_foot
-                   9,  # neck
-                   12, 12,  # left_collar, right_collar
-                   12,  # head
-                   13, 14,  # left_shoulder, right_shoulder
-                   16, 17,  # left_elbow, right_elbow
-                   18, 19]  # left_wrist, right_wrist
+        kintree = SMPLH_KINTREE
     else:
         assert joints_wrt_world.shape[0] == 17, f"COCO joints should have 17 joints, got {joints_wrt_world.shape[0]}"
         # COCO kinematic tree (parent indices for each joint)
-        kintree = [-1, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 12, 11, 11, 12, 13, 14] 
+        kintree = EGOEXO4D_BODYPOSE_KINTREE_PARENTS 
 
     # Initialize list to store sampled points and colors
     vis_pts = []

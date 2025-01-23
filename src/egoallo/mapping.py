@@ -131,3 +131,7 @@ SMPLH_w_HAND_TO_EGOEXO4D_HANDPOSE_INDICES = np.array([1, 29, 30, 31, -1, 17, 18,
 # egoexo4d bodypose kintree parents mapping: NOTE that the kintree table is only used in hand jnts dist angle check func
 # and it doesn't represents any kinematic or hierarchical grounded structure.
 EGOEXO4D_BODYPOSE_KINTREE_PARENTS = [-1, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 12, 11, 11, 12, 13, 14]
+
+SMPLH_KINTREE =[
+            -1, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 12, 12, 12, 13, 14, 16, 17, 18, 19
+        ]  # Parent indices for each of 22 SMPLH joints
