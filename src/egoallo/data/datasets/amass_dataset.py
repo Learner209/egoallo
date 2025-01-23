@@ -570,12 +570,7 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         kwargs["metadata"] = metadata
         
         ret = EgoTrainingData(**kwargs)  # Create with metadata
-        ret = ret.preprocess()  # Preprocess data (will update metadata.stage)
-
-        # Apply SE2 trajectory augmentation if enabled
-        if self._traj_aug:
-            rand_radian = torch.rand(1) * 2 * np.pi
-            ret = ret._rotate(rand_radian)
+        ret = ret.preprocess(_rotate_radian=torch.rand(1) * 2 * np.pi if self._traj_aug else None)  # Preprocess data (will update metadata.stage)
 
         return ret
 

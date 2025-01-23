@@ -141,7 +141,7 @@ class SequenceProcessor:
 		gt_traj = runtime_config.denoising.from_ego_data(batch, include_hands=True)
 		
 
-		# breakpoint()
+		
 		post_batch = batch.postprocess()
 		# no need to postprocess denoised_traj since its' already been postprocessed.
 		denoised_traj = post_batch._set_traj(denoised_traj)
@@ -190,7 +190,7 @@ class TestRunner:
 			runtime_config.data_collate_fn = "TensorOnlyDataclassBatchCollator"
 			ds_init_config = runtime_config
 			# ds_init_config.splits = ("train", "val")
-			# breakpoint()
+			
 		# ! Temporal masking is disabled for testing, since it can cause RuntimeError no frames found within visible joints.
 		runtime_config.temporal_mask_ratio = 0.0
 	 

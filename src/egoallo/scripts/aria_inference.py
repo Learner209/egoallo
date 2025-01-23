@@ -142,7 +142,7 @@ class AriaInference:
 
         # Check if we should use cached files
         if cache_files and frames_cache_path.exists():
-            # breakpoint()
+            
             logger.debug("Loading cached frames from %s", frames_cache_path)
             rgb_frames = list(np.load(frames_cache_path)["frames"])
         else:

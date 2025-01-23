@@ -368,7 +368,7 @@ class SMPLViewer(BaseRenderer):
             _vis_m = vis_masks[i] # [J]
             
             # Create skeleton point cloud by sampling points along bones
-            # breakpoint()
+            
             (visible_skeleton_points, visible_skeleton_colors), (invisible_skeleton_points, invisible_skeleton_colors) = create_skeleton_point_cloud(
                 joints_wrt_world=_jnt,
                 visible_joints_mask=_vis_m,

@@ -101,6 +101,9 @@ class EgoTrainingData(TensorDataclass):
         dataset_type: "DatasetType" = "AdaptiveAmassHdf5Dataset"
         """Type of dataset the trajectory belongs to."""
 
+        rotate_radian: Optional[Float[Tensor, "1"]] = None
+        """Rotation radian for trajectory augmentation."""
+
     metadata: MetaData = dataclasses.field(default_factory=MetaData)
     """Metadata about the trajectory."""
 
@@ -202,7 +205,7 @@ class EgoTrainingData(TensorDataclass):
         )
 
     @jaxtyped(typechecker=typeguard.typechecked)
-    def preprocess(self) -> "EgoTrainingData":
+    def preprocess(self, _rotate_radian: None | Tensor = None) -> "EgoTrainingData":
         """
         Modifies the current EgoTrainingData instance by:
         1. Aligning x,y coordinates to the first frame
@@ -295,6 +298,10 @@ class EgoTrainingData(TensorDataclass):
             self.T_world_cpf[..., 7:]
         ], dim=-1)
 
+        if _rotate_radian is not None:
+            self._rotate(_rotate_radian)
+            self.metadata.rotate_radian = _rotate_radian
+
         if self.visible_joints_mask is not None:
             # Store original values of invalid joints before zeroing
             self.metadata.original_invalid_joints = torch.where(
@@ -314,13 +321,17 @@ class EgoTrainingData(TensorDataclass):
         return self
 
     @jaxtyped(typechecker=typeguard.typechecked)
-    def postprocess(self) -> "EgoTrainingData":
+    def postprocess(self, _rotate_radian: None | Tensor = None) -> "EgoTrainingData":
         """
         Modifies the current EgoTrainingData instance by:
         """
         assert self.metadata.stage == "preprocessed"
-
         device = self.T_world_root.device
+        dtype=self.T_world_root.dtype
+
+        if self.metadata.rotate_radian is not None:
+            self._rotate(self.metadata.rotate_radian.to(dtype=dtype, device=device) * -1)
+
         # Restore original values of invalid joints if they exist.
         if self.metadata.original_invalid_joints is not None and self.visible_joints_mask is not None:
             self.joints_wrt_world = torch.where(
@@ -363,7 +374,7 @@ class EgoTrainingData(TensorDataclass):
             self.T_world_root[..., 4:6] + self.metadata.initial_xy.unsqueeze(-2).to(device),
             self.T_world_root[..., 6:]
         ], dim=-1)
-        # breakpoint()
+        
         self.joints_wrt_world = torch.cat([
             self.joints_wrt_world[..., :2] + expanded_xy.to(device),
             self.joints_wrt_world[..., 2:]
@@ -423,21 +434,22 @@ class EgoTrainingData(TensorDataclass):
     #                 raise ValueError(f"NaN values detected in {field.name}")
 
     def _rotate(self, radian: Tensor) -> Self:
-        assert self.metadata.stage == "preprocessed", "Only preprocessed data is supported for rotation. since preprocessing aligns data's xy to zeros. and rotation is applied only on yaw(rpy zyx convention.)"
+        # assert self.metadata.stage == "preprocessed", "Only preprocessed data is supported for rotation. since preprocessing aligns data's xy to zeros. and rotation is applied only on yaw(rpy zyx convention.)"
 
         so3_rot = SO3.from_z_radians(radian)
         # 1. rotate T_world_cpf
-        self.T_world_cpf = SE3.from_rotation_and_translation(
+        self.T_world_cpf = SE3.from_rotation_and_translation( # [*batch, timesteps, 7]
             rotation=so3_rot.multiply(SO3(self.T_world_cpf[..., :4])),
             translation=so3_rot.apply(self.T_world_cpf[..., 4:]),
         ).parameters()
         # 2. rotate T_world_root
-        self.T_world_root = SE3.from_rotation_and_translation(
+        self.T_world_root = SE3.from_rotation_and_translation( # [*batch, timesteps, 7]
             rotation=so3_rot.multiply(SO3(self.T_world_root[..., :4])),
             translation=so3_rot.apply(self.T_world_root[..., 4:]),
         ).parameters()
         # 3. rotate joints_wrt_world
-        self.joints_wrt_world = so3_rot.apply(self.joints_wrt_world)
+        expanded_rot = SO3(wxyz=so3_rot.wxyz.unsqueeze(-2))
+        self.joints_wrt_world = expanded_rot.apply(self.joints_wrt_world) # [*batch, timesteps, 22, 3]
 
         return self
         
