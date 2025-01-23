@@ -27,6 +27,10 @@ from egoallo.mapping import EGOEXO4D_BODYPOSE_TO_SMPLH_INDICES, SMPLH_KINTREE, E
 from egoallo.utils.setup_logger import setup_logger
 from egoallo.utilities import find_numerical_key_in_dict
 from pathlib import Path
+import torch
+import numpy as np
+from scipy.signal import savgol_filter
+from typing import Tuple
 
 logger = setup_logger(output=None, name=__name__)
 import joblib
@@ -245,6 +249,113 @@ class Dataset_EgoExo(Dataset):
             return smplh_world, smplh_visible
         else:
             return data, vis.bool()
+
+
+
+    def apply_kinematic_constraints_v2(
+        self,
+        joints_world: torch.Tensor,
+        joints_world_coco: torch.Tensor,
+        threshold: float = 3.0,
+        window_size: int = 11,  # Odd number for centered window
+        temporal_sigma: float = 2.0  # For Gaussian weighting
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Enhanced version with temporal awareness and smoothing:
+        1. Uses weighted temporal window for distance statistics
+        2. Applies Savitzky-Golay temporal smoothing
+        3. Fallback to global statistics when local window is insufficient
+        """
+        
+        def process_joints(joints: torch.Tensor, kintree: list) -> torch.Tensor:
+            T, J, _ = joints.shape
+            device = joints.device
+            
+            # Create Gaussian weights for temporal window
+            half_window = window_size // 2
+            x = np.linspace(-temporal_sigma, temporal_sigma, window_size)
+            weights = torch.tensor(np.exp(-x**2/2), dtype=torch.float32, device=device)
+            weights /= weights.sum()
+
+            for j in range(J):
+                parent_idx = kintree[j]
+                if parent_idx == -1:
+                    continue
+
+                # Pre-calculate valid frames for efficiency
+                valid_mask = ~torch.isnan(joints[:, j]).any(dim=1) & ~torch.isnan(joints[:, parent_idx]).any(dim=1)
+                valid_ts = torch.where(valid_mask)[0].cpu().numpy()
+
+                # Calculate global statistics as fallback
+                if len(valid_ts) > 1:
+                    global_dists = torch.norm(joints[valid_ts, j] - joints[valid_ts, parent_idx], dim=1)
+                    global_mean = global_dists.mean()
+                    global_std = global_dists.std()
+                else:
+                    continue  # Insufficient data for this joint pair
+
+                for t in range(T):
+                    if not valid_mask[t]:
+                        continue
+
+                    # Get temporal window bounds
+                    start = max(0, t - half_window)
+                    end = min(T, t + half_window + 1)
+                    window_ts = torch.arange(start, end, device=device)
+                    
+                    # Find valid frames in window
+                    window_valid = valid_mask[window_ts]
+                    if window_valid.sum() < 3:  # Use global stats if insufficient
+                        mean_dist = global_mean
+                        std_dist = global_std
+                    else:
+                        # Calculate weighted statistics in window
+                        window_weights = weights[window_ts - t + half_window][window_valid]
+                        window_dists = torch.norm(
+                            joints[window_ts[window_valid], j] - 
+                            joints[window_ts[window_valid], parent_idx], 
+                            dim=1
+                        )
+                        mean_dist = (window_dists * window_weights).sum() / window_weights.sum()
+                        std_dist = torch.sqrt(
+                            (window_weights * (window_dists - mean_dist)**2).sum() / window_weights.sum()
+                        )
+
+                    # Adjust outliers
+                    current_dist = torch.norm(joints[t, j] - joints[t, parent_idx])
+                    if not (mean_dist - threshold*std_dist <= current_dist <= mean_dist + threshold*std_dist):
+                        direction = joints[t, j] - joints[t, parent_idx]
+                        direction_normalized = direction / (current_dist + 1e-7)
+                        adjusted_joint = joints[t, parent_idx] + direction_normalized * mean_dist
+                        joints[t, j] = adjusted_joint
+
+            # Temporal smoothing after adjustments
+            for j in range(J):
+                valid_ts = torch.where(~torch.isnan(joints[:, j]).any(dim=1))[0]
+                if len(valid_ts) > window_size:
+                    # Savitzky-Golay smoothing for joint trajectories
+                    try:
+                        smoothed = savgol_filter(joints[valid_ts, j].cpu().numpy(), 
+                                            window_length=window_size,
+                                            polyorder=2,
+                                            axis=0)
+                        joints[valid_ts, j] = torch.tensor(smoothed, device=device)
+                    except:
+                        pass
+
+            return joints
+
+        # SMPLH kinematic tree (parent indices)
+        smplh_kintree = SMPLH_KINTREE
+        
+        # COCO kinematic tree (parent indices)
+        coco_kintree = EGOEXO4D_BODYPOSE_KINTREE_PARENTS
+
+        # Process both joint sets
+        joints_world = process_joints(joints_world, smplh_kintree)
+        joints_world_coco = process_joints(joints_world_coco, coco_kintree)
+
+        return joints_world, joints_world_coco
 
     @jaxtyped(typechecker=typeguard.typechecked)
     def apply_kinematic_constraints(
@@ -469,7 +580,8 @@ class Dataset_EgoExo(Dataset):
 
                 joints_world_coco[:, j, d] = torch.from_numpy(interpolated)
         
-        joints_world, joints_world_coco = self.apply_kinematic_constraints(
+        # joints_world, joints_world_coco = self.apply_kinematic_constraints(
+        joints_world, joints_world_coco = self.apply_kinematic_constraints_v2(
             joints_world=joints_world, joints_world_coco=joints_world_coco
         )
         # Create visibility mask based on non-nan values in world coordinates

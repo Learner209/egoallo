@@ -88,7 +88,12 @@ class VanillaEgoAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         random_variable_len_min: int = 16,
     ) -> None:
         import warnings
-        warnings.warn("VanillaEgoAmassHdf5Dataset is deprecated. Use AdaptiveAmassHdf5Dataset instead.", DeprecationWarning, stacklevel=2)
+
+        warnings.warn(
+            "VanillaEgoAmassHdf5Dataset is deprecated. Use AdaptiveAmassHdf5Dataset instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
 
         min_subseq_len = None
 
@@ -302,7 +307,7 @@ class VanillaEgoAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         metadata.take_name = (f"name_{group}_uid_{group}_t{start_t}_{end_t}",)
         metadata.scope = "train"
         metadata.dataset_type = "VanillaAmassHdf5Dataset"
-        
+
         # Add metadata to kwargs before creating EgoTrainingData
         kwargs["metadata"] = metadata
 
@@ -320,12 +325,22 @@ class VanillaEgoAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         if self.config.random_sample_mask_ratio:
             # Randomly sample between 0~mask_ratio
             if mask_type == "spatial":
-                return np.random.uniform(self.config.spatial_mask_ratio / 4, self.config.spatial_mask_ratio)
+                return np.random.uniform(
+                    self.config.spatial_mask_ratio / 4, self.config.spatial_mask_ratio
+                )
             elif mask_type == "temporal":
-                return np.random.uniform(self.config.temporal_mask_ratio / 4, self.config.temporal_mask_ratio)
-        return self.config.spatial_mask_ratio if mask_type == "spatial" else self.config.temporal_mask_ratio
+                return np.random.uniform(
+                    self.config.temporal_mask_ratio / 4, self.config.temporal_mask_ratio
+                )
+        return (
+            self.config.spatial_mask_ratio
+            if mask_type == "spatial"
+            else self.config.temporal_mask_ratio
+        )
+
 
 # endrange
+
 
 class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
     """Dataset that loads from a preprocessed HDF5 file with dynamic window support."""
@@ -350,12 +365,16 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         if self._fps_aug:
             self._fps_aug_rates = config.fps_aug_rates
             self._base_fps_rate = config.base_fps_rate
-            self._fps_aug_multiplier = list(set(rate / self._base_fps_rate for rate in self._fps_aug_rates))
+            self._fps_aug_multiplier = list(
+                set(rate / self._base_fps_rate for rate in self._fps_aug_rates)
+            )
             del self._fps_aug_rates
             del self._base_fps_rate
 
             self._min_fps_multiplier = min(self._fps_aug_multiplier)
-            self._max_seq_len = int(math.ceil(self._subseq_len / self._min_fps_multiplier))
+            self._max_seq_len = max(self._subseq_len, int(
+                math.ceil(self._subseq_len / self._min_fps_multiplier)
+            ))
         else:
             self._max_seq_len = self._subseq_len
 
@@ -417,7 +436,9 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         Returns:
             list[int]: List of lengths for each group.
         """
-        assert self._max_seq_len >= self._subseq_len, f"max_seq_len {self._max_seq_len} should be greater than subseq_len {self._subseq_len}"
+        # assert (
+        #     self._max_seq_len >= self._subseq_len
+        # ), f"max_seq_len {self._max_seq_len} should be greater than subseq_len {self._subseq_len}"
         return [
             cast(h5py.Dataset, cast(h5py.Group, hdf5_file[g])["T_world_root"]).shape[0]
             - self._max_seq_len
@@ -470,28 +491,47 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         seq_len = (
             total_t if self._slice_strategy == "full_sequence" else end_t - start_t
         )
-        dtype=torch.float32
-        kwargs = self._load_sequence_data(group, start_t, end_t, total_t, seq_len, dtype=dtype)
+        dtype = torch.float32
+        kwargs = self._load_sequence_data(
+            group, start_t, end_t, total_t, seq_len, dtype=dtype
+        )
 
         # Add MAE-style masking
         num_joints = CFG.smplh.num_joints
         # assert num_joints == 22, f"Expected 22 joints, got {num_joints}"
         device = kwargs["joints_wrt_world"].device
 
-        if self._fps_aug and seq_len != self._subseq_len and self._slice_strategy != "full_sequence":
-            assert multiplier is not None and multiplier != 1, f"multiplier should not be 1, got {multiplier}"
+        if (
+            self._fps_aug
+            and seq_len != self._subseq_len
+            and self._slice_strategy != "full_sequence"
+        ):
+            assert (
+                multiplier is not None and multiplier != 1
+            ), f"multiplier should not be 1, got {multiplier}"
             for key in self.config.ts_keys:
                 if key in kwargs:
-                    assert isinstance(kwargs[key], torch.Tensor) and kwargs[key].shape[0] == seq_len, f"Expected shape: {(seq_len, *kwargs[key].shape[1:])}, got: {kwargs[key].shape}"
+                    assert (
+                        isinstance(kwargs[key], torch.Tensor)
+                        and kwargs[key].shape[0] == seq_len
+                    ), f"Expected shape: {(seq_len, *kwargs[key].shape[1:])}, got: {kwargs[key].shape}"
                     data = kwargs[key].numpy(force=True)
-                    resampled_data = self.resample_data(data, self._subseq_len, multiplier < 1)
-                    kwargs[key] = torch.from_numpy(resampled_data).to(device=device, dtype=dtype)
+                    resampled_data = self.resample_data(
+                        data, self._subseq_len, multiplier < 1
+                    )
+                    kwargs[key] = torch.from_numpy(resampled_data).to(
+                        device=device, dtype=dtype
+                    )
 
-		# After performing possible fps aug down/up sampling, set seq_len to the default window length.
-        seq_len = total_t if self._slice_strategy == "full_sequence" else self._subseq_len
+        # After performing possible fps aug down/up sampling, set seq_len to the default window length.
+        seq_len = (
+            total_t if self._slice_strategy == "full_sequence" else self._subseq_len
+        )
 
-        # NOTE: the height from floor shoud be set to zeros as the preprocessing process alredy subtracted the floor height. 
-        kwargs['height_from_floor'] = torch.zeros((seq_len, 1), dtype=dtype, device=device)
+        # NOTE: the height from floor shoud be set to zeros as the preprocessing process alredy subtracted the floor height.
+        kwargs["height_from_floor"] = torch.zeros(
+            (seq_len, 1), dtype=dtype, device=device
+        )
 
         kwargs["mask"] = torch.ones(seq_len, dtype=torch.bool, device=device)
 
@@ -509,11 +549,11 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         # Pad sequence length to be divisible by patch size
         pad_len = (patch_size - seq_len % patch_size) % patch_size
         padded_seq_len = seq_len + pad_len
-        
+
         # Create padded mask and rearrange into patches
         temporal_mask = torch.ones((padded_seq_len,), dtype=torch.bool, device=device)
-        temporal_patches = rearrange(temporal_mask, '(n p) -> n p', p=patch_size)
-        
+        temporal_patches = rearrange(temporal_mask, "(n p) -> n p", p=patch_size)
+
         # Randomly mask temporal patches
         temporal_mask_ratio = self._get_mask_ratio(mask_type="temporal")
         num_patches = temporal_patches.shape[0]
@@ -521,24 +561,26 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
 
         # prevent corner cases.
         if num_masked_patches >= num_patches - 1:
-            logger.warning(f"num_masked_patches >= num_patches - 1: {num_patches}, {num_masked_patches}")
+            logger.warning(
+                f"num_masked_patches >= num_patches - 1: {num_patches}, {num_masked_patches}"
+            )
         if num_masked_patches == 0 and temporal_mask_ratio > 0:
             logger.warning(f"num_masked_patches == 0: {num_masked_patches}")
 
         # Generate random indices excluding the first patch
         # NOTE: this is to prevent the first patch from being masked, since the first patch should be visible for all batch for the **preprocessing** process to work as fine.
-        patch_indices = torch.randperm(num_patches-1)[:(num_masked_patches)] + 1
+        patch_indices = torch.randperm(num_patches - 1)[:(num_masked_patches)] + 1
         temporal_patches[patch_indices] = False
-        
+
         # Rearrange back and trim padding
-        temporal_mask = rearrange(temporal_patches, 'n p -> (n p)')[:seq_len]
-        
+        temporal_mask = rearrange(temporal_patches, "n p -> (n p)")[:seq_len]
+
         # Apply both spatial and temporal masks
         # First apply spatial masking
         rand_indices = torch.randperm(num_joints)
         masked_indices = rand_indices[:num_masked]
         visible_joints_mask[:, masked_indices] = False
-        
+
         # Then apply temporal patch mask
         visible_joints_mask = visible_joints_mask & temporal_mask.unsqueeze(-1)
 
@@ -565,33 +607,61 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         metadata.take_name = (f"name_{group}_uid_{group}_t{start_t}_{end_t}",)
         metadata.scope = "train"
         metadata.dataset_type = self.__class__.__name__
-        
+
         # Add metadata to kwargs before creating EgoTrainingData
         kwargs["metadata"] = metadata
-        
+
         ret = EgoTrainingData(**kwargs)  # Create with metadata
-        ret = ret.preprocess(_rotate_radian=torch.rand(1) * 2 * np.pi if self._traj_aug else None)  # Preprocess data (will update metadata.stage)
+        ret = ret.preprocess(
+            _rotate_radian=torch.rand(1) * 2 * np.pi if self._traj_aug else None
+        )  # Preprocess data (will update metadata.stage)
 
         return ret
 
     @jaxtyped(typechecker=typeguard.typechecked)
-    def resample_data(self, data: Float[np.ndarray, "time *dim"] | Bool[np.ndarray, "time *dim"], target_len: int, upsample: bool) -> Float[np.ndarray, "{target_len} *dim"] |  Bool[np.ndarray, "{target_len} *dim"]:
+    def resample_data(
+        self,
+        data: Float[np.ndarray, "time *dim"] | Bool[np.ndarray, "time *dim"],
+        target_len: int,
+        upsample: bool,
+    ) -> Float[np.ndarray, "{target_len} *dim"] | Bool[np.ndarray, "{target_len} *dim"]:
         current_len = data.shape[0]
         if current_len == target_len:
             return data
         if upsample:
-            assert target_len > current_len, f"target_len {target_len} should be greater than current_len {current_len}"
+            assert (
+                target_len > current_len
+            ), f"target_len {target_len} should be greater than current_len {current_len}"
             # Use spline interpolation for upsampling
             t_current = np.linspace(0, 1, current_len)
             t_target = np.linspace(0, 1, target_len)
-            return scipy.interpolate.interp1d(t_current, data, kind='cubic', axis=0, fill_value='extrapolate')(t_target)
+            # breakpoint()
+            return scipy.interpolate.interp1d(
+                t_current, data, kind="cubic", axis=0, fill_value="extrapolate"
+            )(t_target)
         else:
-            assert target_len < current_len, f"target_len {target_len} should be less than current_len {current_len}"
-            # Use signal resample for downsampling
+            assert (
+                target_len < current_len
+            ), f"target_len {target_len} should be less than current_len {current_len}"
+            # assert (
+            #     current_len % target_len == 0
+            # ), f"current_len {current_len} must be divisible by target_len {target_len} for direct downsampling"
+            # # Use signal resample for downsampling
+            # breakpoint()
             return scipy.signal.resample(data, target_len, axis=0)
 
+            # Use direct downsampling by taking evenly spaced samples
+            # downsample_factor = current_len // target_len
+            # return data[::downsample_factor]
+
     def _load_sequence_data(
-        self, group: str, start_t: int, end_t: int, total_t: int, seq_len: int, dtype: torch.dtype = torch.float32
+        self,
+        group: str,
+        start_t: int,
+        end_t: int,
+        total_t: int,
+        seq_len: int,
+        dtype: torch.dtype = torch.float32,
     ) -> dict[str, Any]:
         """Load sequence data from HDF5 file or cache.
 
@@ -684,7 +754,16 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         if self.config.random_sample_mask_ratio:
             # Randomly sample between 0~mask_ratio
             if mask_type == "spatial":
-                return np.random.uniform(self.config.spatial_mask_ratio / 3, self.config.spatial_mask_ratio)
+                return np.random.uniform(
+                    self.config.spatial_mask_ratio / 3, self.config.spatial_mask_ratio
+                )
             elif mask_type == "temporal":
-                return np.random.uniform(self.config.temporal_mask_ratio / 3, self.config.temporal_mask_ratio)
-        return self.config.spatial_mask_ratio if mask_type == "spatial" else self.config.temporal_mask_ratio
+                return np.random.uniform(
+                    self.config.temporal_mask_ratio / 3, self.config.temporal_mask_ratio
+                )
+        return (
+            self.config.spatial_mask_ratio
+            if mask_type == "spatial"
+            else self.config.temporal_mask_ratio
+        )
+
