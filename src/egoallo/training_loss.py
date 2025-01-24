@@ -207,7 +207,6 @@ class TrainingLossComputer:
             assert gt_joints.shape == (batch, time, num_joints, 3)
 
             # Calculate joint position loss with masking
-            breakpoint()
             joint_loss = (pred_joints - gt_joints) ** 2  # (b, t, 22, 3)
 
             # Apply joint visibility mask and average

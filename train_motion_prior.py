@@ -79,11 +79,13 @@ def run_training(
     # Set up experiment directory + HF accelerate.
     # We're getting to manage logging, checkpoint directories, etc manually,
     # and just use `accelerate` for distibuted training.
+
     if debug_mode:
         breakpoint()
+
     if restore_checkpoint_dir:
         config: EgoAlloTrainConfig = load_runtime_config(restore_checkpoint_dir)
-        config.batch_size = 64 # FIXME: this is a temporary fix to distill a large model trained on thecluster to local machine.
+        config.batch_size = 64  # FIXME: this is a temporary fix to distill a large model trained on thecluster to local machine.
         # experiment_dir =  restore_checkpoint_dir.parent
         experiment_dir = get_experiment_dir(config.experiment_name)
     else:
@@ -127,7 +129,7 @@ def run_training(
 
         # Save various things that might be useful.
         experiment_dir.mkdir(exist_ok=True, parents=True)
-        
+
         if not (experiment_dir / "git_commit.txt").exists():
             (experiment_dir / "git_commit.txt").write_text(
                 training_utils.get_git_commit_hash()
@@ -164,7 +166,6 @@ def run_training(
         drop_last=True,
     )
 
-    
     optim = torch.optim.AdamW(  # type: ignore
         model.parameters(),
         lr=config.learning_rate,
@@ -210,7 +211,6 @@ def run_training(
 
     while True:
         for idx, train_batch in enumerate(train_loader):
-
             # Record batch loading time
             batch_load_time = time.time() - batch_start_time
             batch_start_time = time.time()
@@ -345,14 +345,12 @@ def run_training(
                 # Keep checkpoints from only every 100k steps
                 if prev_checkpoint_path is not None:
                     shutil.rmtree(prev_checkpoint_path)
-                prev_checkpoint_path = (
-                    None if step == 0 else checkpoint_path
-                )
+                prev_checkpoint_path = None if step == 0 else checkpoint_path
 
             # Evaluation
             steps_to_eval = 1e4
             if step % steps_to_eval == 0:
-            # if step % steps_to_eval == 0 and step != 0:
+                # if step % steps_to_eval == 0 and step != 0:
                 # Create temporary directory for evaluation outputs
                 with tempfile.TemporaryDirectory() as temp_dir:
                     # Create inference config for evaluation
@@ -390,7 +388,7 @@ def run_training(
                         logger.exception("Detailed error:")
 
                 del checkpoint_path
-        
+
         if step >= config.max_steps:
             break
 
@@ -407,5 +405,4 @@ def run_training(
 
 
 if __name__ == "__main__":
-    
     tyro.cli(run_training)

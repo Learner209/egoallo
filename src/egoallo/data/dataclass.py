@@ -21,6 +21,7 @@ from .. import fncsmpl, fncsmpl_extensions
 from .. import transforms as tf
 from ..tensor_dataclass import TensorDataclass
 from typing import Optional, TYPE_CHECKING, Literal
+
 if TYPE_CHECKING:
     from ..network import EgoDenoiserConfig
     from ..network import AbsoluteDenoiseTraj
@@ -35,6 +36,7 @@ from dataclasses import dataclass
 @jaxtyped(typechecker=typeguard.typechecked)
 class EgoTrainingData(TensorDataclass):
     """Dictionary of tensors we use for EgoAllo training."""
+
     # NOTE: if the attr is tensor/np.ndarray type, then it must has a leading batch dimension, whether it can be broadcasted or not.
     # NOTE: since the `tensor_dataclass` will convert the tensor to a single element tensor, we need to make sure the leading dimension is always there.
 
@@ -74,6 +76,7 @@ class EgoTrainingData(TensorDataclass):
     @dataclass
     class MetaData:
         """Metadata about the trajectory."""
+
         take_name: tuple[str, ...] | tuple[tuple[str, ...], ...] = ()
         """Name of the take."""
 
@@ -92,10 +95,14 @@ class EgoTrainingData(TensorDataclass):
         original_invalid_joints: Optional[Float[Tensor, "*batch timesteps 22 3"]] = None
         """Original values of invalid joints before zeroing"""
 
-        aux_joints_wrt_world_placeholder: Optional[Float[Tensor, "*batch timesteps 22 3"]] = None
+        aux_joints_wrt_world_placeholder: Optional[
+            Float[Tensor, "*batch timesteps 22 3"]
+        ] = None
         """Placeholder for auxiliary joints, used in EgoExoDataset helper."""
 
-        aux_visible_joints_mask_placeholder: Optional[Float[Tensor, "*batch timesteps 22"]] = None
+        aux_visible_joints_mask_placeholder: Optional[
+            Float[Tensor, "*batch timesteps 22"]
+        ] = None
         """Placeholder for auxiliary joints, used in EgoExoDataset helper."""
 
         dataset_type: "DatasetType" = "AdaptiveAmassHdf5Dataset"
@@ -182,7 +189,7 @@ class EgoTrainingData(TensorDataclass):
             mask=torch.ones((timesteps,), dtype=torch.bool),
             hand_quats=hand_quats.cpu() if include_hands else None,
             visible_joints_mask=None,
-            metadata=EgoTrainingData.MetaData( # default metadata.
+            metadata=EgoTrainingData.MetaData(  # default metadata.
                 take_name=(path.name,),
                 frame_keys=tuple(),  # Convert to tuple of ints
                 stage="raw",
@@ -223,18 +230,21 @@ class EgoTrainingData(TensorDataclass):
             for t in range(T):
                 frame_joints = self.joints_wrt_world[..., t, :, :]  # [*batch, 22, 3]
                 frame_mask = self.visible_joints_mask[..., t, :]  # [*batch, 22]
-                
+
                 # Expand frame_mask to match batch dimensions
                 frame_mask = frame_mask.view(*B, -1)  # [*batch, 22]
-                
+
                 # Get visible joints while preserving batch dimensions
-                visible_joints_mask = frame_mask.unsqueeze(-1).expand(*B, -1, 3)  # [*batch, 22, 3]
-                visible_joints = torch.where(visible_joints_mask, frame_joints, torch.zeros_like(frame_joints))
-                
+                visible_joints_mask = frame_mask.unsqueeze(-1).expand(
+                    *B, -1, 3
+                )  # [*batch, 22, 3]
+                visible_joints = torch.where(
+                    visible_joints_mask, frame_joints, torch.zeros_like(frame_joints)
+                )
+
                 # Check if any joints are visible in each batch element
                 has_visible = frame_mask.any(dim=-1)  # [*batch]
-                
-                
+
                 if has_visible.all():  # all batch elements have visible joints
                     # Calculate mean only over visible joints, preserving batch dims
                     sums = visible_joints.sum(dim=-2)  # [*batch, 3]
@@ -242,61 +252,87 @@ class EgoTrainingData(TensorDataclass):
                     initial_xy = (sums[..., :2] / counts).clone()  # [*batch, 2]
                     break
             else:
-                import ipdb; ipdb.set_trace()
                 raise RuntimeError("No frames found with visible joints")
         else:
             # raise RuntimeWarning("No visibility mask found, using mean of all joints in first frame")
             # If no visibility mask, use mean of all joints in first frame
-            initial_xy = self.joints_wrt_world[..., 0, :, :2].mean(dim=-2)  # [*batch, 2]
-        
-        # Store initial offset 
+            initial_xy = self.joints_wrt_world[..., 0, :, :2].mean(
+                dim=-2
+            )  # [*batch, 2]
+
+        # Store initial offset
         self.metadata.initial_xy = initial_xy
-        assert isinstance(self.metadata.initial_xy, torch.Tensor) and self.metadata.initial_xy.shape[-1] == 2 and not torch.isnan(self.metadata.initial_xy).any()
+        assert (
+            isinstance(self.metadata.initial_xy, torch.Tensor)
+            and self.metadata.initial_xy.shape[-1] == 2
+            and not torch.isnan(self.metadata.initial_xy).any()
+        )
 
         # Modify positions in-place by subtracting x,y offset
         # Expand initial_xy to match broadcast dimensions
-        expanded_xy = initial_xy.view(*initial_xy.shape[:-1], 1, 1, 2).clone()  # Add dims for broadcasting
-        
+        expanded_xy = initial_xy.view(
+            *initial_xy.shape[:-1], 1, 1, 2
+        ).clone()  # Add dims for broadcasting
+
         # FIXME: the in-place operations just won't work, indictaed by the increasing loss and finally nan values.
         # FIXME: and the problem only occurs at the in-place operations with self.T_world_root, not others?
         # self.T_world_root[..., 4:6].sub_(initial_xy) # [*batch, timesteps, 2]
-        # self.joints_wrt_world[..., :2].sub_(expanded_xy) # [*batch, timesteps, 22, 2] 
+        # self.joints_wrt_world[..., :2].sub_(expanded_xy) # [*batch, timesteps, 22, 2]
         # self.T_world_cpf[..., 4:6].sub_(initial_xy) # [*batch, timesteps, 2]
 
-        self.T_world_root = torch.cat([
-            self.T_world_root[..., :4],
-            self.T_world_root[..., 4:6] - initial_xy,
-            self.T_world_root[..., 6:]
-        ], dim=-1)
-        self.joints_wrt_world = torch.cat([
-            self.joints_wrt_world[..., :2] - expanded_xy,
-            self.joints_wrt_world[..., 2:]
-        ], dim=-1)
-        self.T_world_cpf = torch.cat([
-            self.T_world_cpf[..., :4],
-            self.T_world_cpf[..., 4:6] - initial_xy,
-            self.T_world_cpf[..., 6:]
-        ], dim=-1)
+        self.T_world_root = torch.cat(
+            [
+                self.T_world_root[..., :4],
+                self.T_world_root[..., 4:6] - initial_xy,
+                self.T_world_root[..., 6:],
+            ],
+            dim=-1,
+        )
+        self.joints_wrt_world = torch.cat(
+            [
+                self.joints_wrt_world[..., :2] - expanded_xy,
+                self.joints_wrt_world[..., 2:],
+            ],
+            dim=-1,
+        )
+        self.T_world_cpf = torch.cat(
+            [
+                self.T_world_cpf[..., :4],
+                self.T_world_cpf[..., 4:6] - initial_xy,
+                self.T_world_cpf[..., 6:],
+            ],
+            dim=-1,
+        )
 
         # Subtract floor height using existing height_from_floor attribute
         # self.joints_wrt_world[..., :, :, 2:3].sub_(self.height_from_floor.unsqueeze(-2)) # [*batch, timesteps, 22, 1]
         # self.T_world_root[..., 6:7].sub_(self.height_from_floor) # [*batch, timesteps, 1]
         # self.T_world_cpf[..., 6:7].sub_(self.height_from_floor) # [*batch, timesteps, 1]
 
-        self.joints_wrt_world = torch.cat([
-            self.joints_wrt_world[..., :2],
-            self.joints_wrt_world[..., 2:3] - self.height_from_floor.unsqueeze(-2), # [*batch, timesteps, 22, 1]
-        ], dim=-1)
-        self.T_world_root = torch.cat([
-            self.T_world_root[..., :6],
-            self.T_world_root[..., 6:7] - self.height_from_floor,
-            self.T_world_root[..., 7:]
-        ], dim=-1)
-        self.T_world_cpf = torch.cat([
-            self.T_world_cpf[..., :6],
-            self.T_world_cpf[..., 6:7] - self.height_from_floor,
-            self.T_world_cpf[..., 7:]
-        ], dim=-1)
+        self.joints_wrt_world = torch.cat(
+            [
+                self.joints_wrt_world[..., :2],
+                self.joints_wrt_world[..., 2:3]
+                - self.height_from_floor.unsqueeze(-2),  # [*batch, timesteps, 22, 1]
+            ],
+            dim=-1,
+        )
+        self.T_world_root = torch.cat(
+            [
+                self.T_world_root[..., :6],
+                self.T_world_root[..., 6:7] - self.height_from_floor,
+                self.T_world_root[..., 7:],
+            ],
+            dim=-1,
+        )
+        self.T_world_cpf = torch.cat(
+            [
+                self.T_world_cpf[..., :6],
+                self.T_world_cpf[..., 6:7] - self.height_from_floor,
+                self.T_world_cpf[..., 7:],
+            ],
+            dim=-1,
+        )
 
         if _rotate_radian is not None:
             self._rotate(_rotate_radian)
@@ -305,15 +341,15 @@ class EgoTrainingData(TensorDataclass):
         if self.visible_joints_mask is not None:
             # Store original values of invalid joints before zeroing
             self.metadata.original_invalid_joints = torch.where(
-                ~self.visible_joints_mask.unsqueeze(-1), 
+                ~self.visible_joints_mask.unsqueeze(-1),
                 self.joints_wrt_world,
-                torch.zeros_like(self.joints_wrt_world)
+                torch.zeros_like(self.joints_wrt_world),
             )
             # Set where joints are invalid to all -1.
             self.joints_wrt_world = torch.where(
-                self.visible_joints_mask.unsqueeze(-1), 
-                self.joints_wrt_world, 
-                torch.ones_like(self.joints_wrt_world) * -1
+                self.visible_joints_mask.unsqueeze(-1),
+                self.joints_wrt_world,
+                torch.ones_like(self.joints_wrt_world) * -1,
             )
 
         self.metadata.stage = "preprocessed"
@@ -321,71 +357,98 @@ class EgoTrainingData(TensorDataclass):
         return self
 
     @jaxtyped(typechecker=typeguard.typechecked)
-    def postprocess(self, _rotate_radian: None | Tensor = None) -> "EgoTrainingData":
+    def postprocess(self) -> "EgoTrainingData":
         """
         Modifies the current EgoTrainingData instance by:
         """
         assert self.metadata.stage == "preprocessed"
         device = self.T_world_root.device
-        dtype=self.T_world_root.dtype
+        dtype = self.T_world_root.dtype
 
         # Restore original values of invalid joints if they exist.
-        if self.metadata.original_invalid_joints is not None and self.visible_joints_mask is not None:
+        if (
+            self.metadata.original_invalid_joints is not None
+            and self.visible_joints_mask is not None
+        ):
             self.joints_wrt_world = torch.where(
                 self.visible_joints_mask.unsqueeze(-1),
                 self.joints_wrt_world,
-                self.metadata.original_invalid_joints.to(device)
+                self.metadata.original_invalid_joints.to(device),
             )
             self.metadata.original_invalid_joints = None  # Clear stored values
 
         if self.metadata.rotate_radian is not None:
-            self._rotate(self.metadata.rotate_radian.to(dtype=dtype, device=device) * -1)
-
+            # rad = SO3(self.metadata.rotate_radian.to(dtype=dtype, device=device)).inverse().
+            self._rotate(
+                self.metadata.rotate_radian.to(dtype=dtype, device=device) * -1
+            )
 
         # self.joints_wrt_world[..., :, :, 2:3].add_(self.height_from_floor.unsqueeze(-2)) # [*batch, timesteps, 22, 1]
         # self.T_world_root[..., :, 6:7].add_(self.height_from_floor) # [*batch, timesteps, 1]
         # self.T_world_cpf[..., :, 6:7].add_(self.height_from_floor) # [*batch, timesteps, 1]
 
-        self.joints_wrt_world = torch.cat([
-            self.joints_wrt_world[..., :2],
-            self.joints_wrt_world[..., 2:3] + self.height_from_floor.unsqueeze(-2), # [*batch, timesteps, 22, 1]
-            self.joints_wrt_world[..., 3:]
-        ], dim=-1)
-        self.T_world_root = torch.cat([
-            self.T_world_root[..., :6],
-            self.T_world_root[..., 6:7] + self.height_from_floor,
-            self.T_world_root[..., 7:]
-        ], dim=-1)
-        self.T_world_cpf = torch.cat([
-            self.T_world_cpf[..., :6], 
-            self.T_world_cpf[..., 6:7] + self.height_from_floor,
-            self.T_world_cpf[..., 7:]
-        ], dim=-1)
+        self.joints_wrt_world = torch.cat(
+            [
+                self.joints_wrt_world[..., :2],
+                self.joints_wrt_world[..., 2:3]
+                + self.height_from_floor.unsqueeze(-2),  # [*batch, timesteps, 22, 1]
+                self.joints_wrt_world[..., 3:],
+            ],
+            dim=-1,
+        )
+        self.T_world_root = torch.cat(
+            [
+                self.T_world_root[..., :6],
+                self.T_world_root[..., 6:7] + self.height_from_floor,
+                self.T_world_root[..., 7:],
+            ],
+            dim=-1,
+        )
+        self.T_world_cpf = torch.cat(
+            [
+                self.T_world_cpf[..., :6],
+                self.T_world_cpf[..., 6:7] + self.height_from_floor,
+                self.T_world_cpf[..., 7:],
+            ],
+            dim=-1,
+        )
 
         # Add initial x,y position offset
         # Expand initial_xy to match broadcast dimensions like in preprocess()
-        expanded_xy = self.metadata.initial_xy.view(*self.metadata.initial_xy.shape[:-1], 1, 1, 2)  # Add dims for broadcasting
-        
+        expanded_xy = self.metadata.initial_xy.view(
+            *self.metadata.initial_xy.shape[:-1], 1, 1, 2
+        )  # Add dims for broadcasting
+
         # self.T_world_root[..., 4:6].add_(self.metadata.initial_xy.unsqueeze(-2).to(device)) # [*batch, timesteps, 2]
         # self.joints_wrt_world[..., :2].add_(expanded_xy.to(device)) # [*batch, timesteps, 22, 2]
         # self.T_world_cpf[..., 4:6].add_(self.metadata.initial_xy.unsqueeze(-2).to(device)) # [*batch, timesteps, 2]
 
-        self.T_world_root = torch.cat([
-            self.T_world_root[..., :4],
-            self.T_world_root[..., 4:6] + self.metadata.initial_xy.unsqueeze(-2).to(device),
-            self.T_world_root[..., 6:]
-        ], dim=-1)
-        
-        self.joints_wrt_world = torch.cat([
-            self.joints_wrt_world[..., :2] + expanded_xy.to(device),
-            self.joints_wrt_world[..., 2:]
-        ], dim=-1)
-        self.T_world_cpf = torch.cat([
-            self.T_world_cpf[..., :4],
-            self.T_world_cpf[..., 4:6] + self.metadata.initial_xy.unsqueeze(-2).to(device),
-            self.T_world_cpf[..., 6:]
-        ], dim=-1)
+        self.T_world_root = torch.cat(
+            [
+                self.T_world_root[..., :4],
+                self.T_world_root[..., 4:6]
+                + self.metadata.initial_xy.unsqueeze(-2).to(device),
+                self.T_world_root[..., 6:],
+            ],
+            dim=-1,
+        )
 
+        self.joints_wrt_world = torch.cat(
+            [
+                self.joints_wrt_world[..., :2] + expanded_xy.to(device),
+                self.joints_wrt_world[..., 2:],
+            ],
+            dim=-1,
+        )
+        self.T_world_cpf = torch.cat(
+            [
+                self.T_world_cpf[..., :4],
+                self.T_world_cpf[..., 4:6]
+                + self.metadata.initial_xy.unsqueeze(-2).to(device),
+                self.T_world_cpf[..., 6:],
+            ],
+            dim=-1,
+        )
 
         self.metadata.stage = "postprocessed"
 
@@ -393,30 +456,59 @@ class EgoTrainingData(TensorDataclass):
 
     def _post_process(self, traj: "DenoiseTrajType") -> "DenoiseTrajType":
         from egoallo.network import AbsoluteDenoiseTraj
+
         assert self.metadata.stage == "postprocessed"
-        assert traj.metadata.stage == "raw", "Only raw data is supported for postprocessing."
-        assert isinstance(traj, AbsoluteDenoiseTraj), "Only AbsoluteDenoiseTraj is supported for postprocessing."
+        assert (
+            traj.metadata.stage == "raw"
+        ), "Only raw data is supported for postprocessing."
+        assert isinstance(
+            traj, AbsoluteDenoiseTraj
+        ), "Only AbsoluteDenoiseTraj is supported for postprocessing."
         # postprocess the DenoiseTrajType
         device = traj.t_world_root.device
 
-        traj.t_world_root = torch.cat([
-            traj.t_world_root[..., :, :2] + self.metadata.initial_xy.unsqueeze(-2).to(device),
-            traj.t_world_root[..., :, 2:3] + self.height_from_floor.to(device),
-            traj.t_world_root[..., :, 3:]
-        ], dim=-1)
-        return traj
+        # NOTE: remember to rotate back traj's root translation since the network operates on the rotated traj.
+        if self.metadata.rotate_radian is not None:
+            dtype, device = traj.t_world_root.dtype, traj.t_world_root.device
 
+            assert self.metadata.rotate_radian.shape[0] == traj.R_world_root.shape[0]
+            assert self.metadata.rotate_radian.shape[0] == traj.t_world_root.shape[0]
+
+            inv_so3_rot = SO3.from_z_radians(
+                theta=self.metadata.rotate_radian.to(dtype=dtype, device=device) * -1
+            )
+            # Rotate translation
+            traj.t_world_root = inv_so3_rot.apply(target=traj.t_world_root)
+            # Rotate rotation matrices
+            traj.R_world_root = inv_so3_rot.multiply(SO3.from_matrix(traj.R_world_root)).as_matrix()
+
+        traj.t_world_root = torch.cat(
+            [
+                traj.t_world_root[..., :, :2]
+                + self.metadata.initial_xy.unsqueeze(-2).to(device),
+                traj.t_world_root[..., :, 2:3] + self.height_from_floor.to(device),
+                traj.t_world_root[..., :, 3:],
+            ],
+            dim=-1,
+        )
+        return traj
 
     def _set_traj(self, traj: "DenoiseTrajType") -> "DenoiseTrajType":
         # 2. assign joints_wrt_world and visible_joints_mask
-        assert traj.joints_wrt_world is None and traj.visible_joints_mask is None, f"joints_wrt_world and visible_joints_mask should be None for postprocessing."
+        assert (
+            traj.joints_wrt_world is None and traj.visible_joints_mask is None
+        ), f"joints_wrt_world and visible_joints_mask should be None for postprocessing."
         traj.joints_wrt_world = self.joints_wrt_world.clone()
         if self.visible_joints_mask is not None:
             # assert self.metadata.scope == "train", "visible_joints_mask should only be set for train data."
             traj.visible_joints_mask = self.visible_joints_mask.clone()
         else:
-            assert self.metadata.scope == "test", "visible_joints_mask shouldn't be set for test data."
-            traj.visible_joints_mask = torch.ones_like(traj.joints_wrt_world, dtype=torch.float)
+            assert (
+                self.metadata.scope == "test"
+            ), "visible_joints_mask shouldn't be set for test data."
+            traj.visible_joints_mask = torch.ones_like(
+                traj.joints_wrt_world, dtype=torch.float
+            )
 
         # 3. assign metadata
         traj.metadata = self.metadata
@@ -428,7 +520,7 @@ class EgoTrainingData(TensorDataclass):
     #         # Skip non-tensor fields
     #         if field.name == "metadata":
     #             continue
-            
+
     #         value = getattr(self, field.name)
     #         if value is not None:  # Handle optional fields
     #             if torch.isnan(value).any():
@@ -439,21 +531,22 @@ class EgoTrainingData(TensorDataclass):
 
         so3_rot = SO3.from_z_radians(radian)
         # 1. rotate T_world_cpf
-        self.T_world_cpf = SE3.from_rotation_and_translation( # [*batch, timesteps, 7]
+        self.T_world_cpf = SE3.from_rotation_and_translation(  # [*batch, timesteps, 7]
             rotation=so3_rot.multiply(SO3(self.T_world_cpf[..., :4])),
             translation=so3_rot.apply(self.T_world_cpf[..., 4:]),
         ).parameters()
         # 2. rotate T_world_root
-        self.T_world_root = SE3.from_rotation_and_translation( # [*batch, timesteps, 7]
+        self.T_world_root = SE3.from_rotation_and_translation(  # [*batch, timesteps, 7]
             rotation=so3_rot.multiply(SO3(self.T_world_root[..., :4])),
             translation=so3_rot.apply(self.T_world_root[..., 4:]),
         ).parameters()
         # 3. rotate joints_wrt_world
         expanded_rot = SO3(wxyz=so3_rot.wxyz.unsqueeze(-2))
-        self.joints_wrt_world = expanded_rot.apply(self.joints_wrt_world) # [*batch, timesteps, 22, 3]
+        self.joints_wrt_world = expanded_rot.apply(
+            self.joints_wrt_world
+        )  # [*batch, timesteps, 22, 3]
 
         return self
-        
 
     def __getitem__(self, index) -> Self:
         """Implements native Python slicing for TensorDataclass.
@@ -492,7 +585,7 @@ class EgoTrainingData(TensorDataclass):
         def _getitem_impl[GetItemT](val: GetItemT, idx: tuple, depth: int) -> GetItemT:
             if depth == 0:
                 return val
-            
+
             if isinstance(val, torch.Tensor):
                 try:
                     return val[idx]
@@ -503,11 +596,15 @@ class EgoTrainingData(TensorDataclass):
             elif isinstance(val, TensorDataclass):
                 # Don't slice betas since it's a per-sequence attribute
                 vars_dict = vars(val)
-                if 'betas' in vars_dict:
+                if "betas" in vars_dict:
                     # Keep original betas tensor
-                    vars_dict['betas'] = val.betas
-                return type(val)(**{k: _getitem_impl(v, idx, depth - 1) if k != 'betas' else v 
-                                  for k, v in vars_dict.items()})
+                    vars_dict["betas"] = val.betas
+                return type(val)(
+                    **{
+                        k: _getitem_impl(v, idx, depth - 1) if k != "betas" else v
+                        for k, v in vars_dict.items()
+                    }
+                )
             elif isinstance(val, (list, tuple)):
                 return type(val)(_getitem_impl(v, idx, depth - 1) for v in val)
             elif isinstance(val, dict):

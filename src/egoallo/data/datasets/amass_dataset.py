@@ -372,9 +372,10 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
             del self._base_fps_rate
 
             self._min_fps_multiplier = min(self._fps_aug_multiplier)
-            self._max_seq_len = max(self._subseq_len, int(
-                math.ceil(self._subseq_len / self._min_fps_multiplier)
-            ))
+            self._max_seq_len = max(
+                self._subseq_len,
+                int(math.ceil(self._subseq_len / self._min_fps_multiplier)),
+            )
         else:
             self._max_seq_len = self._subseq_len
 
@@ -635,7 +636,6 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
             # Use spline interpolation for upsampling
             t_current = np.linspace(0, 1, current_len)
             t_target = np.linspace(0, 1, target_len)
-            # breakpoint()
             return scipy.interpolate.interp1d(
                 t_current, data, kind="cubic", axis=0, fill_value="extrapolate"
             )(t_target)
@@ -647,7 +647,6 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
             #     current_len % target_len == 0
             # ), f"current_len {current_len} must be divisible by target_len {target_len} for direct downsampling"
             # # Use signal resample for downsampling
-            # breakpoint()
             return scipy.signal.resample(data, target_len, axis=0)
 
             # Use direct downsampling by taking evenly spaced samples
@@ -766,4 +765,3 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
             if mask_type == "spatial"
             else self.config.temporal_mask_ratio
         )
-
