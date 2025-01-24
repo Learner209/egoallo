@@ -329,9 +329,6 @@ class EgoTrainingData(TensorDataclass):
         device = self.T_world_root.device
         dtype=self.T_world_root.dtype
 
-        if self.metadata.rotate_radian is not None:
-            self._rotate(self.metadata.rotate_radian.to(dtype=dtype, device=device) * -1)
-
         # Restore original values of invalid joints if they exist.
         if self.metadata.original_invalid_joints is not None and self.visible_joints_mask is not None:
             self.joints_wrt_world = torch.where(
@@ -340,6 +337,10 @@ class EgoTrainingData(TensorDataclass):
                 self.metadata.original_invalid_joints.to(device)
             )
             self.metadata.original_invalid_joints = None  # Clear stored values
+
+        if self.metadata.rotate_radian is not None:
+            self._rotate(self.metadata.rotate_radian.to(dtype=dtype, device=device) * -1)
+
 
         # self.joints_wrt_world[..., :, :, 2:3].add_(self.height_from_floor.unsqueeze(-2)) # [*batch, timesteps, 22, 1]
         # self.T_world_root[..., :, 6:7].add_(self.height_from_floor) # [*batch, timesteps, 1]
