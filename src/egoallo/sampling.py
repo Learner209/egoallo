@@ -263,6 +263,8 @@ def run_sampling_with_masked_data(
     hamer_detections: None | CorrespondedHamerDetections,
     aria_detections: None | CorrespondedAriaHandWristPoseDetections,
     num_samples: int,
+    window_size: int,
+    overlap_size:int,
     device: torch.device,
 ) -> network.AbsoluteDenoiseTraj:
 
@@ -295,8 +297,6 @@ def run_sampling_with_masked_data(
     ts = quadratic_ts(timesteps=1000)
 
     seq_len = x_t_packed.shape[1]
-    window_size = 128
-    overlap_size = 32
 
     canonical_overlap_weights = (
         torch.from_numpy(

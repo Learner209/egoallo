@@ -135,6 +135,8 @@ class SequenceProcessor:
             floor_z=0.0,
             hamer_detections=None,
             aria_detections=None,
+            window_size=runtime_config.subseq_len,
+            overlap_size=runtime_config.subseq_len // 4,
             num_samples=1,
             device=self.device,
         )

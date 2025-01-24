@@ -27,9 +27,6 @@ from egoallo.inference_utils import (
     InferenceTrajectoryPaths,
     load_denoiser,
 )
-from egoallo.sampling import (
-    run_sampling_with_masked_data,
-)
 from egoallo.transforms import SE3, SO3
 from egoallo.vis_helpers import visualize_traj_and_hand_detections
 from egoallo.training_utils import ipdb_safety_net
