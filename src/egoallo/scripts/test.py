@@ -204,7 +204,6 @@ class TestRunner:
         else:
             runtime_config.data_collate_fn = "TensorOnlyDataclassBatchCollator"
             ds_init_config = runtime_config
-            ds_init_config.splits = ("train", "val")
 
         # ! Temporal masking is disabled for testing, since it can cause RuntimeError no frames found within visible joints.
         runtime_config.temporal_mask_ratio = 0.0
