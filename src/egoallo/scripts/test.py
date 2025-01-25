@@ -207,6 +207,8 @@ class TestRunner:
 
         # ! Temporal masking is disabled for testing, since it can cause RuntimeError no frames found within visible joints.
         runtime_config.temporal_mask_ratio = 0.0
+        # ! FPS augmentation should be disabled for testing, as too slow or fast motion doesn't help evlaution really.
+        runtime_config.fps_aug = False
         # runtime_config.dataset_slice_strategy = "random_uniform_len"
 
         self.dataloader = torch.utils.data.DataLoader(
