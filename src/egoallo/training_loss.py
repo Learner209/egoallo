@@ -223,8 +223,19 @@ class TrainingLossComputer:
                     ((~train_batch.visible_joints_mask).sum(dim=-1) * 3)
                     + 1e-8  # Multiply by 3 for xyz channels
                 )  # Result: (b, t)
+                vis_jnt_loss = (
+                    joint_loss * (
+                        (train_batch.visible_joints_mask)[..., None]
+                    )
+                ).sum(dim=(-2, -1)) / (
+                    ((train_batch.visible_joints_mask).sum(dim=-1) * 3)
+                    + 1e-8
+                )
             else:
+                logger.warning("No visible joints mask found, using all joints for loss calculation, there should be no scenarios when visible_joints_mask is None")
                 invisible_joint_loss = torch.zeros((batch, time), device=device)
+                vis_jnt_loss = joint_loss
+                
 
             # Foot skating loss
             foot_indices = [7, 8, 10, 11]  # Indices for foot joints
@@ -268,12 +279,18 @@ class TrainingLossComputer:
 
             loss_terms.update(
                 {
+                    # empirically, invisible joints loss should be more important than visible joints loss.
                     "joints": x_0_pred._weight_and_mask_loss(
                         invisible_joint_loss.unsqueeze(-1),
                         train_batch.mask,
                         weight_t,
                         torch.sum(train_batch.mask),
-                    ),
+                    ) + x_0_pred._weight_and_mask_loss(
+                        vis_jnt_loss.unsqueeze(-1),
+                        train_batch.mask,
+                        weight_t,
+                        torch.sum(train_batch.mask),
+                    ) * 2.0,
                     "foot_skating": foot_skating_loss,
                     "velocity": x_0_pred._weight_and_mask_loss(
                         ((joint_velocities - gt_velocities) ** 2).reshape(
