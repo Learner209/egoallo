@@ -117,10 +117,10 @@ def run_training(
         (experiment_dir / "run_config.yaml").write_text(yaml.dump(config))
         (experiment_dir / "model_config.yaml").write_text(yaml.dump(config.model))
 
-        source_code_log_dir = experiment_dir / "logs"
+        # source_code_log_dir = experiment_dir / "logs"
 
-        llogger = setup_logger(output=None, name=__name__)
-        make_source_code_snapshot(source_code_log_dir, logger=llogger)
+        # llogger = setup_logger(output=None, name=__name__)
+        # make_source_code_snapshot(source_code_log_dir, logger=llogger)
 
         # Write logs to file.
         logger.add(experiment_dir / "trainlog.log", rotation="100 MB")
