@@ -200,8 +200,19 @@ class TrainingLossComputer:
                     ((~train_batch.visible_joints_mask).sum(dim=-1) * 3)
                     + 1e-8  # Multiply by 3 for xyz channels
                 )  # Result: (b, t)
+                
+                visible_joint_loss = (
+                    joint_loss
+                    * (
+                        train_batch.visible_joints_mask[..., None]
+                    )  # Use only visible joints
+                ).sum(dim=(-2, -1)) / (  # Sum over joints (22) and xyz (3)
+                    (train_batch.visible_joints_mask.sum(dim=-1) * 3)
+                    + 1e-8  # Multiply by 3 for xyz channels
+                )  # Result: (b, t)
             else:
                 invisible_joint_loss = torch.zeros((batch, time), device=device)
+                visible_joint_loss = torch.zeros((batch, time), device=device)
 
             # Foot skating loss
             foot_indices = [7, 8, 10, 11]  # Indices for foot joints
@@ -245,6 +256,11 @@ class TrainingLossComputer:
             loss_terms.update({
                 "joints": x_0_pred._weight_and_mask_loss(
                     invisible_joint_loss.unsqueeze(-1),
+                    train_batch.mask,
+                    weight_t,
+                    torch.sum(train_batch.mask),
+                ) + x_0_pred._weight_and_mask_loss(
+                    visible_joint_loss.unsqueeze(-1),
                     train_batch.mask,
                     weight_t,
                     torch.sum(train_batch.mask),

@@ -121,15 +121,15 @@ class DenoisingConfig:
         if self.loss_weights is None:
             # Default loss weights for absolute mode
             absolute_weights = {
-                "betas": 0.05,
-                "body_rotmats": 10.0,
-                "contacts": 0.05,
+                "betas": 0.1,
+                "body_rotmats": 1.0,
+                "contacts": 0.1,
                 "hand_rotmats": 0.00,
-                "R_world_root": 0.25,
-                "t_world_root": 0.25,
-                "joints": 0.0,
-                "foot_skating": 0.01,
-                "velocity": 0.01,
+                "R_world_root": 0.45,
+                "t_world_root": 0.45,
+                "joints": 1.0,
+                "foot_skating": 0.1,
+                "velocity": 0.05,
             }
 
             # Additional weights for velocity mode
@@ -424,6 +424,7 @@ class JointsOnlyTraj(BaseDenoiseTraj):
             joints: Joint positions tensor of shape (*batch, timesteps, 22, 3)
             **kwargs: Additional arguments that will be ignored
         """
+        raise DeprecationWarning("JointsOnlyTraj is deprecated. Use AbsoluteDenoiseTraj instead.")
         self.joints = joints
 
     def compute_loss(
