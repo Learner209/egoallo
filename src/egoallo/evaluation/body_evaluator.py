@@ -1,13 +1,9 @@
-import datetime
 import logging
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Optional
 
 import numpy as np
 import torch
-import yaml
-from tqdm.auto import tqdm
 
 from egoallo import fncsmpl
 from egoallo.config.train.train_config import EgoAlloTrainConfig
@@ -22,21 +18,16 @@ import typeguard
 
 from .base import BaseEvaluator
 from egoallo.constants import (
-    BODY_METRICS,
     FOOT_HEIGHT_THRESHOLDS,
     FOOT_INDICES,
     HEAD_JOINT_INDEX,
 )
 from egoallo.types import (
     BatchedJointTransforms,
-    BatchedRootTransforms,
     FloatArray,
-    JointTransforms,
-    MetricsDict,
     PathLike,
     ProcrustesMode,
     ProcrustesOutput,
-    RootTransforms,
 )
 
 logger = setup_logger(output="logs/evaluation", name=__name__, level=logging.INFO)
@@ -90,7 +81,6 @@ class BodyEvaluator(BaseEvaluator):
         )  # Convert to mm
 
         return fs_per_sample.cpu().numpy()
-
 
     @classmethod
     @jaxtyped(typechecker=typeguard.typechecked)

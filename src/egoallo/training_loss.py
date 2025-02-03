@@ -1,13 +1,10 @@
 """Training loss configuration."""
 
 import dataclasses
-from typing import TYPE_CHECKING, Any, Literal, cast, TypeVar, Optional, Union
+from typing import TYPE_CHECKING, Literal
 
 import torch
 import torch.utils.data
-import torch.nn.functional as F
-import typeguard
-from jaxtyping import Bool, Float, Int
 from torch import Tensor
 from torch._dynamo import OptimizedModule
 from torch.nn.parallel import DistributedDataParallel
@@ -22,8 +19,6 @@ if TYPE_CHECKING:
 from . import network
 from .data.dataclass import EgoTrainingData
 from .sampling import CosineNoiseScheduleConstants
-from .transforms import SO3
-from .types import LossWeights
 
 local_config_file = CONFIG_FILE
 CFG = make_cfg(config_name="defaults", config_file=local_config_file, cli_args=[])
@@ -82,18 +77,19 @@ class TrainingLossComputer:
         num_joints = CFG.smplh.num_joints
         assert num_joints == 22
         # Create trajectory using denoising config factory method
-        x_0: DenoiseTrajType = (
-            train_config.denoising.create_trajectory(
-                **train_config.denoising.from_ego_data(
-                    train_batch,
-                    include_hands=unwrapped_model.config.include_hands
-                ).__dict__
-            )
+        x_0: DenoiseTrajType = train_config.denoising.create_trajectory(
+            **train_config.denoising.from_ego_data(
+                train_batch, include_hands=unwrapped_model.config.include_hands
+            ).__dict__
         )
 
         x_0_packed = x_0.pack()
         device = x_0_packed.device
-        assert x_0_packed.shape == (batch, time, x_0.get_packed_dim(include_hands=unwrapped_model.config.include_hands))
+        assert x_0_packed.shape == (
+            batch,
+            time,
+            x_0.get_packed_dim(include_hands=unwrapped_model.config.include_hands),
+        )
 
         # Diffuse.
         t = torch.randint(
@@ -111,7 +107,11 @@ class TrainingLossComputer:
         x_t_packed = (
             torch.sqrt(alpha_bar_t) * x_0_packed + torch.sqrt(1.0 - alpha_bar_t) * eps
         )
-        x_t_unpacked: DenoiseTrajType = train_config.denoising.unpack_traj(x_t_packed, include_hands=unwrapped_model.config.include_hands, project_rotmats=False) # type: ignore
+        x_t_unpacked: DenoiseTrajType = train_config.denoising.unpack_traj(
+            x_t_packed,
+            include_hands=unwrapped_model.config.include_hands,
+            project_rotmats=False,
+        )  # type: ignore
 
         # define per-time step weighting scheme and construct weighting function.
         weight_t = self.weight_t[t].to(device)
@@ -150,7 +150,11 @@ class TrainingLossComputer:
             if self.config.cond_dropout_prob > 0.0
             else None,
         )
-        assert isinstance(x_0_packed_pred, torch.Tensor) and x_0_packed_pred.shape == (batch, time, x_0.get_packed_dim(include_hands=unwrapped_model.config.include_hands))
+        assert isinstance(x_0_packed_pred, torch.Tensor) and x_0_packed_pred.shape == (
+            batch,
+            time,
+            x_0.get_packed_dim(include_hands=unwrapped_model.config.include_hands),
+        )
 
         x_0_pred = train_config.denoising.unpack_traj(
             x_0_packed_pred,
@@ -158,12 +162,16 @@ class TrainingLossComputer:
             project_rotmats=False,
         )
         # Compute loss using x_0_pred and x_0
-        loss_terms: dict[str, Tensor | float] = x_0_pred.compute_loss(other=x_0, mask=train_batch.mask, weight_t=weight_t)
+        loss_terms: dict[str, Tensor | float] = x_0_pred.compute_loss(
+            other=x_0, mask=train_batch.mask, weight_t=weight_t
+        )
 
         if train_config.denoising.denoising_mode == "joints_only":
             assert isinstance(x_0, network.JointsOnlyTraj)
         else:
-            assert isinstance(x_0, (network.AbsoluteDenoiseTraj, network.VelocityDenoiseTraj))
+            assert isinstance(
+                x_0, (network.AbsoluteDenoiseTraj, network.VelocityDenoiseTraj)
+            )
             # Add joint position loss calculation
             # Get predicted joint positions through forward kinematics
             x_0_posed = x_0_pred.apply_to_body(
@@ -200,7 +208,7 @@ class TrainingLossComputer:
                     ((~train_batch.visible_joints_mask).sum(dim=-1) * 3)
                     + 1e-8  # Multiply by 3 for xyz channels
                 )  # Result: (b, t)
-                
+
                 visible_joint_loss = (
                     joint_loss
                     * (
@@ -236,7 +244,8 @@ class TrainingLossComputer:
                     bt_mask=foot_skating_mask[..., i],  # (batch, time-1)
                     weight_t=weight_t,
                     bt_mask_sum=torch.maximum(
-                        torch.sum(foot_skating_mask[..., i]) * 3,  # Multiply by 3 for x,y,z
+                        torch.sum(foot_skating_mask[..., i])
+                        * 3,  # Multiply by 3 for x,y,z
                         torch.tensor(1, device=device),
                     ),
                 )
@@ -250,29 +259,33 @@ class TrainingLossComputer:
                 pred_joints[:, 1:] - pred_joints[:, :-1]
             )  # (batch, time-1, num_joints, 3)
             gt_velocities = (
-                train_batch.joints_wrt_world[:, 1:] - train_batch.joints_wrt_world[:, :-1]
+                train_batch.joints_wrt_world[:, 1:]
+                - train_batch.joints_wrt_world[:, :-1]
             )
 
-            loss_terms.update({
-                "joints": x_0_pred._weight_and_mask_loss(
-                    invisible_joint_loss.unsqueeze(-1),
-                    train_batch.mask,
-                    weight_t,
-                    torch.sum(train_batch.mask),
-                ) + x_0_pred._weight_and_mask_loss(
-                    visible_joint_loss.unsqueeze(-1),
-                    train_batch.mask,
-                    weight_t,
-                    torch.sum(train_batch.mask),
-                ),
-                "foot_skating": foot_skating_loss,
-                "velocity": x_0_pred._weight_and_mask_loss(
-                    (joint_velocities - gt_velocities).reshape(batch, time - 1, -1),
-                    train_batch.mask[:, 1:],
-                    weight_t,
-                    torch.sum(train_batch.mask[:, 1:]),
-                ),
-            })
+            loss_terms.update(
+                {
+                    "joints": x_0_pred._weight_and_mask_loss(
+                        invisible_joint_loss.unsqueeze(-1),
+                        train_batch.mask,
+                        weight_t,
+                        torch.sum(train_batch.mask),
+                    )
+                    + x_0_pred._weight_and_mask_loss(
+                        visible_joint_loss.unsqueeze(-1),
+                        train_batch.mask,
+                        weight_t,
+                        torch.sum(train_batch.mask),
+                    ),
+                    "foot_skating": foot_skating_loss,
+                    "velocity": x_0_pred._weight_and_mask_loss(
+                        (joint_velocities - gt_velocities).reshape(batch, time - 1, -1),
+                        train_batch.mask[:, 1:],
+                        weight_t,
+                        torch.sum(train_batch.mask[:, 1:]),
+                    ),
+                }
+            )
             # Include hand objective.
             # We didn't use this in the paper.
             # TODO: hand-rotmats loss is incorporated in the network.py DenoiseTraj class, keep it here for reference.
@@ -323,8 +336,11 @@ class TrainingLossComputer:
             # else:
             #     loss_terms["hand_rotmats"] = 0.0
 
-        assert all(k in train_config.denoising.loss_weights.keys() for k in loss_terms.keys()), \
+        assert all(
+            k in train_config.denoising.loss_weights.keys() for k in loss_terms.keys()
+        ), (
             f"Missing loss weights for terms: {set(loss_terms.keys()) - set(train_config.denoising.loss_weights.keys())}"
+        )
         # Log loss terms.
         for name, term in loss_terms.items():
             loss_term = term * train_config.denoising.loss_weights[name]
@@ -338,4 +354,3 @@ class TrainingLossComputer:
         log_outputs["train_loss"] = loss
 
         return loss, log_outputs
-

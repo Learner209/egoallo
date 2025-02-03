@@ -69,4 +69,3 @@ def procrustes_align(
     t = my - s * torch.matmul(R, mx[..., None])[..., 0]
 
     return s, R, t
-

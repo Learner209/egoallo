@@ -1,10 +1,6 @@
 """Translate data from HuMoR-style npz format to an hdf5-based one."""
 
-from dataclasses import dataclass
-import dataclasses
 import queue
-from tarfile import AbsoluteLinkError
-import threading
 import time
 from pathlib import Path
 
@@ -12,12 +8,10 @@ import h5py
 import torch
 import torch.cuda
 import tyro
-import numpy as np
 from egoallo import network
 from egoallo import fncsmpl
 from egoallo.data.dataclass import EgoTrainingData
 from egoallo import training_utils
-import faulthandler
 
 # faulthandler.enable()
 
@@ -61,12 +55,12 @@ def main(
                 device_body_model, npz_path, include_hands=include_hands
             )
 
-            output_name = npz_path.stem + ".mp4"
+            npz_path.stem + ".mp4"
             # FIXME: the from_ego_data function is an instance moethod of network.DenoisingConfig
             denoising_config = network.DenoisingConfig(
                 denoising_mode="absolute", include_hands=True
             )
-            train_traj = denoising_config.from_ego_data(train_data)
+            denoising_config.from_ego_data(train_data)
 
             # Adaptive sampling if sequence is longer than 1500 frames
             # if len(train_traj.t_world_root) > 1500:
@@ -104,7 +98,7 @@ def main(
                     continue
 
                 # Chunk into 32 timesteps at a time.
-                if k != "contacts" and k != "mask":
+                if k not in ("contacts", "mask"):
                     assert v.dtype == torch.float32, f"{k} {v.dtype}"
 
                 if v.shape[0] == train_data.T_world_cpf.shape[0]:
@@ -116,7 +110,7 @@ def main(
 
             print(
                 f"Finished ~{total_count - task_queue.qsize()}/{total_count},",
-                f"{(total_count - task_queue.qsize())/total_count * 100:.2f}% in",
+                f"{(total_count - task_queue.qsize()) / total_count * 100:.2f}% in",
                 f"{time.time() - start_time} seconds",
             )
 

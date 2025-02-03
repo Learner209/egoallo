@@ -1,11 +1,9 @@
 """Script to run HaMeR on VRS data and save outputs to a pickle file."""
 
 import pickle
-import shutil
 from pathlib import Path
 
 import cv2
-import imageio.v3 as iio
 import numpy as np
 import tyro
 from egoallo.hand_detection_structs import (
@@ -28,7 +26,9 @@ if not hasattr(inspect, "getargspec"):
     inspect.getargspec = inspect.getfullargspec
 
 
-def main(traj_root: Path, output_root: Path | None = None, overwrite: bool = False) -> None:
+def main(
+    traj_root: Path, output_root: Path | None = None, overwrite: bool = False
+) -> None:
     """Run HaMeR for on trajectory. We'll save outputs to
     `output_root/hamer_outputs.pkl` and `output_root/hamer_outputs_render".
     If output_root is not provided, will save to traj_root.

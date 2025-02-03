@@ -90,5 +90,5 @@ class PyAvReader(StridedReader):
         if self.resize is not None:
             ret = self.resize(ret)
         if self.mean is not None:
-            ret =  ret - self.mean
+            ret = ret - self.mean
         return ret

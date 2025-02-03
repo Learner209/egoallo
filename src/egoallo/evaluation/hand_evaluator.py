@@ -2,15 +2,13 @@ import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
 import yaml
-from tqdm import tqdm
 
 from egoallo import fncsmpl
-from egoallo.guidance_optimizer_jax import GuidanceMode
 from egoallo.utilities import procrustes_align
 from egoallo.utils.setup_logger import setup_logger
 import typeguard
@@ -353,4 +351,3 @@ class HandEvaluator(BaseEvaluator):
     def process_file(self, *args, **kwargs) -> MetricsDict:
         """Not implemented for HandEvaluator."""
         raise NotImplementedError("HandEvaluator does not support file processing")
-

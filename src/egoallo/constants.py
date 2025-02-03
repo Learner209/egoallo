@@ -1,4 +1,4 @@
-from typing import Dict, List
+from typing import Dict
 
 # Hand evaluation constants
 EGOEXO_NAMES_LEFT = [
@@ -25,9 +25,7 @@ EGOEXO_NAMES_LEFT = [
     "left_pinky_4",
 ]
 
-EGOEXO_NAMES_RIGHT = [
-    name.replace("left", "right") for name in EGOEXO_NAMES_LEFT
-]
+EGOEXO_NAMES_RIGHT = [name.replace("left", "right") for name in EGOEXO_NAMES_LEFT]
 
 # Vertex indices for different model types
 VERTEX_IDS: Dict[str, Dict[str, int]] = {
@@ -53,13 +51,13 @@ FOOT_HEIGHT_THRESHOLDS = [0.08, 0.08, 0.04, 0.04]
 # Metrics names
 BODY_METRICS = [
     "mpjpe",
-    "pampjpe", 
+    "pampjpe",
     "head_ori",
     "head_trans",
     "foot_skate",
-    "foot_contact"
+    "foot_contact",
 ]
 
 # Default file names
 DEFAULT_METRICS_FILENAME = "_eval_cached_disaggregated_metrics{}.npz"
-DEFAULT_SUMMARY_FILENAME = "_eval_cached_summary{}.yaml" 
+DEFAULT_SUMMARY_FILENAME = "_eval_cached_summary{}.yaml"

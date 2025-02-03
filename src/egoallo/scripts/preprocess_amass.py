@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Optional, List
 
 import tyro
-from tqdm import tqdm
 
 from egoallo.data.amass.amass_processor import AMASSProcessor
 from egoallo.data.amass.amass_dataset_config import AMASSDatasetConfig
@@ -110,13 +109,11 @@ def main(config: AMASSDatasetConfig) -> None:
 
             logger.info(
                 f"Progress: {total_count - task_queue.qsize()}/{total_count} "
-                f"({(total_count - task_queue.qsize())/total_count * 100:.2f}%)"
+                f"({(total_count - task_queue.qsize()) / total_count * 100:.2f}%)"
             )
 
     # Start worker threads
-    workers = [
-        threading.Thread(target=worker, args=(i,)) for i in range(config.num_processes)
-    ]
+    [threading.Thread(target=worker, args=(i,)) for i in range(config.num_processes)]
     # for w in workers:
     #     w.start()
     # for w in workers:
@@ -130,7 +127,7 @@ def main(config: AMASSDatasetConfig) -> None:
     config.output_list_file.write_text("\n".join(sorted(processed_files)))
 
     total_time = time.time() - start_time
-    logger.info(f"Total processing time: {total_time/60:.2f} minutes")
+    logger.info(f"Total processing time: {total_time / 60:.2f} minutes")
 
 
 if __name__ == "__main__":

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import time
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -271,7 +270,6 @@ def run_sampling_with_masked_data(
     alpha_bar_t = noise_constants.alpha_bar_t
     alpha_t = noise_constants.alpha_t
 
-    
     x_t_packed = torch.randn(
         (
             num_samples,
@@ -281,7 +279,9 @@ def run_sampling_with_masked_data(
         device=device,
     )
     x_t_list = [
-        runtime_config.denoising.unpack_traj(x_t_packed, include_hands=runtime_config.model.include_hands)
+        runtime_config.denoising.unpack_traj(
+            x_t_packed, include_hands=runtime_config.model.include_hands
+        )
     ]
 
     ts = quadratic_ts(timesteps=1000)
@@ -323,7 +323,10 @@ def run_sampling_with_masked_data(
 
                 x_0_packed_pred[:, start_t:end_t, :] += (
                     denoiser_network.forward(
-                        x_t_unpacked=runtime_config.denoising.unpack_traj(x_t_packed[:, start_t:end_t, :], include_hands=runtime_config.model.include_hands),
+                        x_t_unpacked=runtime_config.denoising.unpack_traj(
+                            x_t_packed[:, start_t:end_t, :],
+                            include_hands=runtime_config.model.include_hands,
+                        ),
                         t=torch.tensor([t], device=device).expand((num_samples,)),
                         joints=masked_data.joints_wrt_world[:, start_t:end_t, :],
                         visible_joints_mask=masked_data.visible_joints_mask[
@@ -433,7 +436,6 @@ def run_sampling_with_masked_data_ddpm(
         device=device
     )
     alpha_bar_t = noise_constants.alpha_bar_t
-    alpha_t = noise_constants.alpha_t
 
     # Initialize random noise
     # FIXME: the denoiser_network.get_d_state() is not Implemented for now.
@@ -493,7 +495,10 @@ def run_sampling_with_masked_data_ddpm(
 
                 x_0_packed_pred[:, start_t:end_t, :] += (
                     denoiser_network.forward(
-                        x_t_unpacked=runtime_config.denoising.unpack_traj(x_t_packed[:, start_t:end_t, :], include_hands=runtime_config.model.include_hands),
+                        x_t_unpacked=runtime_config.denoising.unpack_traj(
+                            x_t_packed[:, start_t:end_t, :],
+                            include_hands=runtime_config.model.include_hands,
+                        ),
                         t=torch.tensor([t], device=device).expand((num_samples,)),
                         joints=masked_data.joints_wrt_world[:, start_t:end_t, :],
                         visible_joints_mask=masked_data.visible_joints_mask[
@@ -570,4 +575,3 @@ def run_sampling_with_masked_data_ddpm(
         return constrained_traj
     else:
         return x_t_list[-1]
-

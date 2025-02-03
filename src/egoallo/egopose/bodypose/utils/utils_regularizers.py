@@ -1,13 +1,12 @@
 import torch
-import torch.nn as nn
 
 
-'''
+"""
 # --------------------------------------------
 # Kai Zhang (github: https://github.com/cszn)
 # 03/Mar/2019
 # --------------------------------------------
-'''
+"""
 
 
 # --------------------------------------------
@@ -26,11 +25,11 @@ def regularizer_orth(m):
     # ----------------------------------------
     """
     classname = m.__class__.__name__
-    if classname.find('Conv') != -1:
+    if classname.find("Conv") != -1:
         w = m.weight.data.clone()
         c_out, c_in, f1, f2 = w.size()
         # dtype = m.weight.data.type()
-        w = w.permute(2, 3, 1, 0).contiguous().view(f1*f2*c_in, c_out)
+        w = w.permute(2, 3, 1, 0).contiguous().view(f1 * f2 * c_in, c_out)
         # self.netG.apply(svd_orthogonalization)
         u, s, v = torch.svd(w)
         s[s > 1.5] = s[s > 1.5] - 1e-4
@@ -55,20 +54,19 @@ def regularizer_orth2(m):
     # ----------------------------------------
     """
     classname = m.__class__.__name__
-    if classname.find('Conv') != -1:
+    if classname.find("Conv") != -1:
         w = m.weight.data.clone()
         c_out, c_in, f1, f2 = w.size()
         # dtype = m.weight.data.type()
-        w = w.permute(2, 3, 1, 0).contiguous().view(f1*f2*c_in, c_out)
+        w = w.permute(2, 3, 1, 0).contiguous().view(f1 * f2 * c_in, c_out)
         u, s, v = torch.svd(w)
         s_mean = s.mean()
-        s[s > 1.5*s_mean] = s[s > 1.5*s_mean] - 1e-4
-        s[s < 0.5*s_mean] = s[s < 0.5*s_mean] + 1e-4
+        s[s > 1.5 * s_mean] = s[s > 1.5 * s_mean] - 1e-4
+        s[s < 0.5 * s_mean] = s[s < 0.5 * s_mean] + 1e-4
         w = torch.mm(torch.mm(u, torch.diag(s)), v.t())
         m.weight.data = w.view(f1, f2, c_in, c_out).permute(3, 2, 0, 1)  # .type(dtype)
     else:
         pass
-
 
 
 def regularizer_clip(m):
@@ -82,7 +80,7 @@ def regularizer_clip(m):
     c_max = 1.5
 
     classname = m.__class__.__name__
-    if classname.find('Conv') != -1 or classname.find('Linear') != -1:
+    if classname.find("Conv") != -1 or classname.find("Linear") != -1:
         w = m.weight.data.clone()
         w[w > c_max] -= eps
         w[w < c_min] += eps
@@ -93,6 +91,7 @@ def regularizer_clip(m):
             b[b > c_max] -= eps
             b[b < c_min] += eps
             m.bias.data = b
+
 
 #    elif classname.find('BatchNorm2d') != -1:
 #

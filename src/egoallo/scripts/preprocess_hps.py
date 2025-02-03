@@ -8,7 +8,6 @@ from typing import Optional
 
 import torch
 import tyro
-from tqdm import tqdm
 
 
 from egoallo.data.hps.hps_processor import HPSProcessor
@@ -109,9 +108,9 @@ def main(config: HPSPreprocessConfig) -> None:
 
     # Collect all sequences to process
     sequences = []
-    assert config.splits == [
-        "train"
-    ], "the HPS dataset doesn't splits on train,val,test set, so all in train set."
+    assert config.splits == ["train"], (
+        "the HPS dataset doesn't splits on train,val,test set, so all in train set."
+    )
     for split in config.splits:
         split_dir = config.output_dir / split
         split_dir.mkdir(exist_ok=True)
@@ -142,13 +141,11 @@ def main(config: HPSPreprocessConfig) -> None:
 
             logger.info(
                 f"Progress: {total_count - task_queue.qsize()}/{total_count} "
-                f"({(total_count - task_queue.qsize())/total_count * 100:.2f}%)"
+                f"({(total_count - task_queue.qsize()) / total_count * 100:.2f}%)"
             )
 
     # Start worker threads
-    workers = [
-        threading.Thread(target=worker, args=(i,)) for i in range(config.num_processes)
-    ]
+    [threading.Thread(target=worker, args=(i,)) for i in range(config.num_processes)]
     # for w in workers:
     #     w.start()
     # for w in workers:
@@ -160,7 +157,7 @@ def main(config: HPSPreprocessConfig) -> None:
     config.output_list_file.write_text("\n".join(sorted(processed_files)))
 
     total_time = time.time() - start_time
-    logger.info(f"Total processing time: {total_time/60:.2f} minutes")
+    logger.info(f"Total processing time: {total_time / 60:.2f} minutes")
 
 
 if __name__ == "__main__":

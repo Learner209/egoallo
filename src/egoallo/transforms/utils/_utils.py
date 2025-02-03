@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Callable, Type, TypeVar
+from typing import Callable, Type, TypeVar
 
 import torch
 

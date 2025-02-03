@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
-from typing import Any, Dict, Optional, List
+from typing import Any, Dict, Optional
 
 import numpy as np
 import torch
@@ -15,7 +14,7 @@ import typeguard
 
 from egoallo.utils.setup_logger import setup_logger
 from egoallo.data.motion_processing import MotionProcessor
-from egoallo.fncsmpl import SmplMesh, SmplhModel, SmplhShaped, SmplhShapedAndPosed
+from egoallo.fncsmpl import SmplhModel, SmplhShaped, SmplhShapedAndPosed
 from egoallo.transforms import SE3, SO3
 
 logger = setup_logger(output="logs/amass_processor", name=__name__)
@@ -154,9 +153,9 @@ class AMASSProcessor:
             return None
 
         # Resample if target FPS is different from source FPS
-        assert (
-            self.target_fps <= fps
-        ), f"target_fps: {self.target_fps}, fps: {fps}, seq_path: {seq_path}"
+        assert self.target_fps <= fps, (
+            f"target_fps: {self.target_fps}, fps: {fps}, seq_path: {seq_path}"
+        )
         if self.target_fps != fps and self.target_fps < fps:
             fps_ratio = float(self.target_fps) / fps
             new_num_frames = int(fps_ratio * num_frames)
@@ -175,9 +174,12 @@ class AMASSProcessor:
         hand_pose = poses[:, 66:]  # (N, 90)
 
         # Convert rotations to required format
-        T_world_root, body_quats, left_hand_quats, right_hand_quats = (
-            self._convert_rotations(root_orient, body_pose, hand_pose, trans)
-        )
+        (
+            T_world_root,
+            body_quats,
+            left_hand_quats,
+            right_hand_quats,
+        ) = self._convert_rotations(root_orient, body_pose, hand_pose, trans)
 
         # Process through SMPL-H pipeline
         body_model: SmplhModel = self.body_models[gender].to(self.device)

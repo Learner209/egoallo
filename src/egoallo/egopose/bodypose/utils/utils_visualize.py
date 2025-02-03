@@ -14,7 +14,7 @@ import egoego.utils.transformation
 # import trimesh.util as util
 # from psbody.mesh import Mesh
 
-os.environ['PYOPENGL_PLATFORM'] = 'egl'
+os.environ["PYOPENGL_PLATFORM"] = "egl"
 
 """
 # --------------------------------
@@ -22,24 +22,29 @@ os.environ['PYOPENGL_PLATFORM'] = 'egl'
 # --------------------------------
 """
 
+
 class CheckerBoard:
     def __init__(self, white=(247, 246, 244), black=(146, 163, 171)):
-        self.white = np.array(white)/255.
-        self.black = np.array(black)/255.
+        self.white = np.array(white) / 255.0
+        self.black = np.array(black) / 255.0
         self.verts, self.faces, self.texts = None, None, None
         self.offset = None
 
-    def init_checker(self, offset, plane='xz', xlength=500, ylength=200, square_size=0.5):
+    def init_checker(
+        self, offset, plane="xz", xlength=500, ylength=200, square_size=0.5
+    ):
         "generate checkerboard and prepare v, f, t"
-        checker = self.gen_checker_xy(self.black, self.white, square_size, xlength, ylength)
+        checker = self.gen_checker_xy(
+            self.black, self.white, square_size, xlength, ylength
+        )
         rot = np.eye(3)
-        if plane == 'xz':
+        if plane == "xz":
             # rotate around x-axis by 90
             rot[1, 1] = rot[2, 2] = 0
             rot[1, 2] = -1
             rot[2, 1] = 1
-        elif plane == 'yz':
-            raise NotImplemented
+        elif plane == "yz":
+            raise NotImplementedError
         checker.v = np.matmul(checker.v, rot.T)
 
         # apply offsets
@@ -56,31 +61,33 @@ class CheckerBoard:
         v, f, t = checker.get_rends()
         nv = self.verts.shape[1]
         self.verts = torch.cat([self.verts, v], 1)
-        self.faces = torch.cat([self.faces, f+nv], 1)
+        self.faces = torch.cat([self.faces, f + nv], 1)
         self.texts = torch.cat([self.texts, t], 1)
 
     @staticmethod
-    def gen_checkerboard(square_size=0.5, total_size=50.0, plane='xz'):
+    def gen_checkerboard(square_size=0.5, total_size=50.0, plane="xz"):
         "plane: the checkboard is in parallal to which plane"
         checker = CheckerBoard.gen_checker_xy(square_size, total_size)
         rot = np.eye(3)
-        if plane == 'xz':
+        if plane == "xz":
             # rotate around x-axis by 90, so that the checker plane is perpendicular to y-axis
             rot[1, 1] = rot[2, 2] = 0
             rot[1, 2] = -1
             rot[2, 1] = 1
-        elif plane == 'yz':
-            raise NotImplemented
+        elif plane == "yz":
+            raise NotImplementedError
         checker.v = np.matmul(checker.v, rot.R)
         return checker
 
-    def prep_checker_rend(self, checker:Mesh):
+    def prep_checker_rend(self, checker: Mesh):
         verts = torch.from_numpy(checker.v.astype(np.float32)).cuda().unsqueeze(0)
         faces = torch.from_numpy(checker.f.astype(int)).cuda().unsqueeze(0)
         nf = checker.f.shape[0]
         texts = torch.zeros(1, nf, 4, 4, 4, 3).cuda()
         for i in range(nf):
-            texts[0, i, :, :, :, :] = torch.tensor(checker.fc[i], dtype=torch.float32).cuda()
+            texts[0, i, :, :, :, :] = torch.tensor(
+                checker.fc[i], dtype=torch.float32
+            ).cuda()
         return verts, faces, texts
 
     @staticmethod
@@ -122,10 +129,7 @@ class CheckerBoard:
                 else:
                     texts.append(white)
                     texts.append(white)
-                    
 
-                    
-                    
         # now compose as mesh
         mesh = Mesh(v=np.array(verts), f=np.array(faces), fc=np.array(texts))
         # mesh.write_ply("/BS/xxie2020/work/hoi3d/utils/checkerboards/mychecker.ply")
@@ -144,7 +148,7 @@ class CheckerBoard:
         else:
             # take ymax
             y_off = np.min(np.concatenate(vertices, 0), 0)
-        offset = np.array([xlength/2, y_off[1], ylength/2]) # center to origin
+        offset = np.array([xlength / 2, y_off[1], ylength / 2])  # center to origin
         checker = CheckerBoard()
         checker.init_checker(offset, xlength=xlength, ylength=ylength)
         return checker
@@ -159,10 +163,16 @@ class CheckerBoard:
         else:
             y_off = torch.max(verts[0], 0)[0].cpu().numpy()
         # print(verts.shape, y_off.shape)
-        offset = np.array([-xlength/2, y_off[1], -ylength/2])
-        print(offset, torch.min(verts[0], 0)[0].cpu().numpy(), torch.max(verts[0], 0)[0].cpu().numpy())
+        offset = np.array([-xlength / 2, y_off[1], -ylength / 2])
+        print(
+            offset,
+            torch.min(verts[0], 0)[0].cpu().numpy(),
+            torch.max(verts[0], 0)[0].cpu().numpy(),
+        )
         checker = CheckerBoard()
-        checker.init_checker(offset, xlength=xlength, ylength=ylength, square_size=square_size)
+        checker.init_checker(
+            offset, xlength=xlength, ylength=ylength, square_size=square_size
+        )
         return checker
 
 
@@ -173,38 +183,52 @@ class CheckerBoard:
 """
 
 
-
-
-def save_animation(body_pose, savepath, bm, fps = 60, resolution = (800,800)):
+def save_animation(body_pose, savepath, bm, fps=60, resolution=(800, 800)):
     imw, imh = resolution
     mv = MeshViewer(width=imw, height=imh, use_offscreen=True)
     faces = c2c(bm.f)
     img_array = []
     for fId in range(body_pose.v.shape[0]):
-        body_mesh = trimesh.Trimesh(vertices=c2c(body_pose.v[fId]), faces=faces, vertex_colors=np.tile(colors['purple'], (6890, 1)))
-
+        body_mesh = trimesh.Trimesh(
+            vertices=c2c(body_pose.v[fId]),
+            faces=faces,
+            vertex_colors=np.tile(colors["purple"], (6890, 1)),
+        )
 
         generator = CheckerBoard()
         checker = generator.gen_checker_xy(generator.black, generator.white)
-        checker_mesh = trimesh.Trimesh(checker.v,checker.f,process=False,face_colors=checker.fc)
+        checker_mesh = trimesh.Trimesh(
+            checker.v, checker.f, process=False, face_colors=checker.fc
+        )
 
-        body_mesh.apply_transform(egoego.utils.torch_geometry_transforms.rotation_matrix(-90, (0, 0, 10)))
-        body_mesh.apply_transform(egoego.utils.torch_geometry_transforms.rotation_matrix(30, (10, 0, 0)))
-        body_mesh.apply_transform(egoego.utils.torch_geometry_transforms.scale_matrix(0.5))
+        body_mesh.apply_transform(
+            egoego.utils.torch_geometry_transforms.rotation_matrix(-90, (0, 0, 10))
+        )
+        body_mesh.apply_transform(
+            egoego.utils.torch_geometry_transforms.rotation_matrix(30, (10, 0, 0))
+        )
+        body_mesh.apply_transform(
+            egoego.utils.torch_geometry_transforms.scale_matrix(0.5)
+        )
 
-        checker_mesh.apply_transform(egoego.utils.torch_geometry_transforms.rotation_matrix(-90, (0, 0, 10)))
-        checker_mesh.apply_transform(egoego.utils.torch_geometry_transforms.rotation_matrix(30, (10, 0, 0)))
-        checker_mesh.apply_transform(egoego.utils.torch_geometry_transforms.scale_matrix(0.5))
+        checker_mesh.apply_transform(
+            egoego.utils.torch_geometry_transforms.rotation_matrix(-90, (0, 0, 10))
+        )
+        checker_mesh.apply_transform(
+            egoego.utils.torch_geometry_transforms.rotation_matrix(30, (10, 0, 0))
+        )
+        checker_mesh.apply_transform(
+            egoego.utils.torch_geometry_transforms.scale_matrix(0.5)
+        )
 
-        mv.set_static_meshes([checker_mesh,body_mesh])
+        mv.set_static_meshes([checker_mesh, body_mesh])
         body_image = mv.render(render_wireframe=False)
         body_image = body_image.astype(np.uint8)
         body_image = cv2.cvtColor(body_image, cv2.COLOR_BGR2RGB)
 
         img_array.append(body_image)
-    out = cv2.VideoWriter(savepath,cv2.VideoWriter_fourcc(*'DIVX'), fps, resolution)
-     
+    out = cv2.VideoWriter(savepath, cv2.VideoWriter_fourcc(*"DIVX"), fps, resolution)
+
     for i in range(len(img_array)):
         out.write(img_array[i])
     out.release()
-

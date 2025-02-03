@@ -5,18 +5,18 @@ from __future__ import annotations
 import json
 import pickle
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional
 
 from jaxtyping import Float, jaxtyped
 import typeguard
 import numpy as np
 import torch
-from torch import Tensor, device
+from torch import Tensor
 from numpy import ndarray as Array
 
 from egoallo.utils.setup_logger import setup_logger
 from egoallo.data.motion_processing import MotionProcessor
-from egoallo.fncsmpl import SmplhModel, SmplhShaped, SmplhShapedAndPosed
+from egoallo.fncsmpl import SmplhModel
 from egoallo.transforms import SE3, SO3
 
 logger = setup_logger(output="logs/hps_processor", name=__name__)
@@ -154,9 +154,9 @@ class HPSProcessor:
             .float()
             .to(self.device)
         )
-        assert (
-            betas.dim() == 1 and betas.shape[-1] == 10
-        ), f"betas shape is {betas.shape}"  # HPS dataset betas shape is (10,)
+        assert betas.dim() == 1 and betas.shape[-1] == 10, (
+            f"betas shape is {betas.shape}"
+        )  # HPS dataset betas shape is (10,)
 
         # Convert sequence data to tensors
         poses = torch.from_numpy(seq_data["poses"]).float().to(self.device)

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import dataclasses
 import time
-from pathlib import Path
 
 import os
 
@@ -15,7 +14,6 @@ import yaml
 
 from egoallo import fncsmpl, fncsmpl_extensions
 from egoallo.data.aria_mps import load_point_cloud_and_find_ground
-from egoallo.guidance_optimizer_jax import GuidanceMode
 from egoallo.hand_detection_structs import (
     CorrespondedAriaHandWristPoseDetections,
     CorrespondedHamerDetections,
@@ -26,7 +24,6 @@ from egoallo.inference_utils import (
     load_denoiser,
 )
 from egoallo.sampling import (
-    run_sampling_with_stitching,
     run_sampling_with_masked_data,
 )
 from egoallo.transforms import SE3, SO3

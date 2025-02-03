@@ -4,7 +4,7 @@ from typing import Dict, Optional
 import numpy as np
 import torch
 import yaml
-from jaxtyping import Float, Bool, jaxtyped
+from jaxtyping import jaxtyped
 import typeguard
 import logging
 
@@ -24,12 +24,12 @@ class EgoAlloEvaluationMetrics:
 
     def __init__(self, **metrics):
         """Initialize with arbitrary metrics.
-        
+
         Args:
             **metrics: Arbitrary keyword arguments containing metric arrays
         """
         # Set file paths
-        self.metrics_file = None 
+        self.metrics_file = None
         self.summary_file = None
 
         # Store all provided metrics
@@ -37,8 +37,11 @@ class EgoAlloEvaluationMetrics:
             setattr(self, name, value)
 
         # Track metric names for iteration
-        self._metric_names = [name for name in metrics.keys() 
-                            if name not in ['metrics_file', 'summary_file']]
+        self._metric_names = [
+            name
+            for name in metrics.keys()
+            if name not in ["metrics_file", "summary_file"]
+        ]
 
     @property
     def summary(self) -> Dict[str, Dict[str, float]]:
@@ -63,10 +66,7 @@ class EgoAlloEvaluationMetrics:
             output_dir / f"_eval_cached_disaggregated_metrics{suffix}.pt"
         )
         torch.save(
-            {
-                field: getattr(self, field)
-                for field in self._metric_names
-            },
+            {field: getattr(self, field) for field in self._metric_names},
             self.metrics_file,
         )
 

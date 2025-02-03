@@ -23,20 +23,21 @@ from . import fncsmpl
 from . import transforms as tf
 from .data.dataclass import EgoTrainingData
 from .mapping import SMPLH_BODY_JOINTS
-from .network import EgoDenoiser, EgoDenoiserConfig, AbsoluteDenoiseTraj
+from .network import EgoDenoiser, EgoDenoiserConfig
 from .tensor_dataclass import TensorDataclass
 from .transforms import SE3
+from egoallo.config import CONFIG_FILE, make_cfg
 
 logger = setup_logger(output=None, name=__name__, level=logging.INFO)
 
-
-from egoallo.config import CONFIG_FILE, make_cfg
 
 local_config_file = CONFIG_FILE
 CFG = make_cfg(config_name="defaults", config_file=local_config_file, cli_args=[])
 
 
-def load_denoiser(checkpoint_dir: Path, runtime_config: EgoAlloTrainConfig) -> tuple[EgoDenoiser, EgoDenoiserConfig]:
+def load_denoiser(
+    checkpoint_dir: Path, runtime_config: EgoAlloTrainConfig
+) -> tuple[EgoDenoiser, EgoDenoiserConfig]:
     """Load a denoiser model."""
     checkpoint_dir = checkpoint_dir.absolute()
     experiment_dir = checkpoint_dir.parent
@@ -46,7 +47,12 @@ def load_denoiser(checkpoint_dir: Path, runtime_config: EgoAlloTrainConfig) -> t
     )
     assert isinstance(model_config, EgoDenoiserConfig)
 
-    model = EgoDenoiser(runtime_config.model, modality_dims=runtime_config.denoising.fetch_modality_dict(runtime_config.model.include_hands))
+    model = EgoDenoiser(
+        runtime_config.model,
+        modality_dims=runtime_config.denoising.fetch_modality_dict(
+            runtime_config.model.include_hands
+        ),
+    )
     with safe_open(checkpoint_dir / "model.safetensors", framework="pt") as f:  # type: ignore
         state_dict = {k: f.get_tensor(k) for k in f.keys()}
     model.load_state_dict(state_dict)
@@ -106,9 +112,9 @@ class InferenceTrajectoryPaths:
         if len(wrist_and_palm_poses_csv) == 0:
             wrist_and_palm_poses_csv = None
         else:
-            assert (
-                len(wrist_and_palm_poses_csv) == 1
-            ), "Found multiple wrist and palm poses files!"
+            assert len(wrist_and_palm_poses_csv) == 1, (
+                "Found multiple wrist and palm poses files!"
+            )
 
         splat_path = traj_root / "splat.ply"
         if not splat_path.exists():

@@ -2,12 +2,9 @@ import json
 import os
 import os.path as osp
 
-import cv2
 from tqdm import tqdm
-from collections import defaultdict
 import numpy as np
 import pandas as pd
-from projectaria_tools.core import calibration
 from egoallo.egopose.handpose.data_preparation.utils.utils import (
     aria_landscape_to_portrait,
     cam_to_img,
@@ -31,10 +28,9 @@ from egoallo.egopose.stats_collector import (
     PreprocessingStatsCollector,
     KeypointFilterStats,
 )
-from dataclasses import dataclass
 from egoallo.data.aria_mps import load_point_cloud_and_find_ground
 from pathlib import Path
-from typing import Dict, Optional, Any
+from typing import Dict, Any
 
 local_config_file = CONFIG_FILE
 CFG = make_cfg(config_name="defaults", config_file=local_config_file, cli_args=[])
@@ -119,10 +115,10 @@ class body_pose_anno_loader(hand_pose_anno_loader):
         # Find all annotation takes from local direcctory by splits
         # Check test anno availability. No gt-anno will be generated for public.
         if not os.path.exists(self.body_anno_dir):
-            assert (
-                self.split == "test"
-            ), f"No annotation found for {self.split} split at {self.body_anno_dir}.\
+            assert self.split == "test", (
+                f"No annotation found for {self.split} split at {self.body_anno_dir}.\
                 Make sure you follow step 0 to download data first."
+            )
             # return gt_db
         if not self.split == "test":
             # Get all local annotation takes for train/val split
@@ -135,7 +131,7 @@ class body_pose_anno_loader(hand_pose_anno_loader):
                 for t in self.takes
                 if t["take_uid"] in split_all_local_takes
             }
-            uid_to_take = {uid: take for take, uid in take_to_uid.items()}
+            {uid: take for take, uid in take_to_uid.items()}
             # (0). Filter common takes
             comm_local_take_uid = list(set(split_all_local_takes))
 
@@ -179,9 +175,9 @@ class body_pose_anno_loader(hand_pose_anno_loader):
             curr_take_name = EGOEXO_UTILS_INST.find_take_name_from_take_uid(
                 curr_take_uid
             )
-            assert (
-                curr_take_name is not None
-            ), f"Take name not found for {curr_take_uid}."
+            assert curr_take_name is not None, (
+                f"Take name not found for {curr_take_uid}."
+            )
             # Load annotation, camera pose JSON and image directory
             curr_take_anno_path = os.path.join(
                 self.body_anno_dir, f"{curr_take_uid}.json"
@@ -196,9 +192,9 @@ class body_pose_anno_loader(hand_pose_anno_loader):
             exo_traj_path = os.path.join(traj_dir, "gopro_calibs.csv")
 
             # assert os.path.exists(exo_traj_path), f"Exo trajectory file not found at {exo_traj_path}."
-            assert os.path.exists(
-                curr_take_cam_pose_path
-            ), f"Camera pose file not found at {curr_take_cam_pose_path}."
+            assert os.path.exists(curr_take_cam_pose_path), (
+                f"Camera pose file not found at {curr_take_cam_pose_path}."
+            )
 
             exo_traj_df = load_csv_to_df(exo_traj_path)
 
@@ -228,21 +224,22 @@ class body_pose_anno_loader(hand_pose_anno_loader):
                     overall_frames_num += len(curr_take_data)
                     overall_valid_frames_num += len(curr_take_data)
             else:
-                assert os.path.exists(
-                    curr_take_anno_path
-                ), f"Annotation file not found at {curr_take_anno_path}."
+                assert os.path.exists(curr_take_anno_path), (
+                    f"Annotation file not found at {curr_take_anno_path}."
+                )
 
                 curr_take_anno = json.load(open(curr_take_anno_path))
 
                 # Get valid takes info for all frames
                 if len(curr_take_anno) > 0:
-                    exo_cam_masks, exo_cam_names = (
-                        CalibrationUtilities.get_exo_cam_masks(
-                            curr_take,
-                            exo_traj_df,
-                            portrait_view=self.portrait_view,
-                            dimension=self.undist_img_dim[::-1],
-                        )
+                    (
+                        exo_cam_masks,
+                        exo_cam_names,
+                    ) = CalibrationUtilities.get_exo_cam_masks(
+                        curr_take,
+                        exo_traj_df,
+                        portrait_view=self.portrait_view,
+                        dimension=self.undist_img_dim[::-1],
                     )
                     if exo_cam_names is not None:
                         curr_take_data = self.load_take_raw_data(
@@ -316,9 +313,11 @@ class body_pose_anno_loader(hand_pose_anno_loader):
             keypoint_stats.total = self.num_joints
 
             # Load frame data
-            curr_body_2d_kpts, curr_body_3d_kpts, joints_view_stat = (
-                self.load_frame_body_2d_3d_kpts(curr_frame_anno, exo_cam_names)
-            )
+            (
+                curr_body_2d_kpts,
+                curr_body_3d_kpts,
+                joints_view_stat,
+            ) = self.load_frame_body_2d_3d_kpts(curr_frame_anno, exo_cam_names)
 
             curr_ego_intr, curr_ego_extr = self.load_frame_cam_pose(
                 frame_idx, cam_pose, aria_cam_name
@@ -459,7 +458,7 @@ class body_pose_anno_loader(hand_pose_anno_loader):
                 "ground_height": ground_height,
             }
             logger.info(
-                f"Take {take_name} has {len(curr_take_db)-1}/{len(anno.items())} valid frames."
+                f"Take {take_name} has {len(curr_take_db) - 1}/{len(anno.items())} valid frames."
             )
 
             return curr_take_db

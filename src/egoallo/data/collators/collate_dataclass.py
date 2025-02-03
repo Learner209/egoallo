@@ -1,8 +1,6 @@
-from dataclasses import dataclass
-from typing import Optional
-
 import numpy as np
 import torch
+
 
 def collate_dataclass[T](batch: list[T]) -> T:
     """Collate function that works for dataclasses."""

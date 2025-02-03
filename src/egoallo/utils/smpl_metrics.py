@@ -1,30 +1,30 @@
-import sys
 import warnings
-warnings.simplefilter(action='ignore', category=FutureWarning)
-import os.path as osp
-import glob
-import numpy as np
-
 from collections import defaultdict
 
-from egoallo.utils.transformation import quat_to_rotMat, rotMat_to_quat, euler_from_quat, quat_to_rotMat_t, get_qvel_fd, qpose_to_T
+import numpy as np
+import torch
 
-from mujoco_py import load_model_from_path, MjSim
-from tqdm import tqdm
-
-import torch 
-
-import joblib
+from egoallo.config import CONFIG_FILE, make_cfg
+from egoallo.smpl.smplh_utils import (
+    SMPLH_HEAD_IDX,
+    SMPLH_LEFT_ANKLE_IDX,
+    SMPLH_LEFT_FOOT_IDX,
+    SMPLH_RIGHT_ANKLE_IDX,
+    SMPLH_RIGHT_FOOT_IDX,
+)
 from egoallo.utils.setup_logger import setup_logger
+from egoallo.utils.transformation import (
+    euler_from_quat,
+    get_qvel_fd,
+    qpose_to_T,
+    quat_to_rotMat_t,
+)
+
+warnings.simplefilter(action="ignore", category=FutureWarning)
 logger = setup_logger(output=None, name=__name__)
-
-from egoallo.config import make_cfg, CONFIG_FILE
-
 local_config_file = CONFIG_FILE
 CFG = make_cfg(config_name="defaults", config_file=local_config_file, cli_args=[])
-from scipy.spatial.transform import Rotation as sRot
-from egoallo.smpl.smplh_utils import SMPLH_HEAD_IDX, SMPLH_LEFT_ANKLE_IDX, SMPLH_LEFT_FOOT_IDX, SMPLH_RIGHT_ANKLE_IDX, SMPLH_RIGHT_FOOT_IDX
-# from utils_common_root import vis_single_head_pose_traj, vis_multiple_head_pose_traj, vis_single_head_pose_traj_2d
+
 
 def smpl_mat_to_aa(poses):
     poses_aa = []
@@ -39,7 +39,6 @@ def smpl_mat_to_aa(poses):
 
 
 def get_root_angles(poses):
-
     root_angs = []
     for pose in poses:
         root_euler = np.array(euler_from_quat(pose[3:7]))
@@ -47,12 +46,13 @@ def get_root_angles(poses):
 
     return np.array(root_angs)
 
+
 def get_root_matrix(poses):
     """
     Parameters
     ----------
     poses : np.ndarray of shape (T, 7)
-    
+
     Returns
     -------
     T : np.ndarray of shape (T, 4, 4)
@@ -66,12 +66,12 @@ def get_root_matrix(poses):
         mat[:3, 3] = root_pos
         matrices.append(mat)
     return matrices
-    
+
 
 def get_joint_vels(poses, dt):
     vels = []
     for i in range(poses.shape[0] - 1):
-        v = get_qvel_fd(poses[i], poses[i+1], dt, 'heading')
+        v = get_qvel_fd(poses[i], poses[i + 1], dt, "heading")
         vels.append(v)
     vels = np.vstack(vels)
     return vels
@@ -81,6 +81,7 @@ def get_joint_accels(vels, dt):
     accels = np.diff(vels, axis=0) / dt
     accels = np.vstack(accels)
     return accels
+
 
 def get_root_pos(poses):
     return poses[:, :3]
@@ -96,12 +97,12 @@ def get_mean_abs(x):
 
 def get_frobenious_norm(x, y):
     """Compute the frobenious norm between two matrices.
-    
+
     Parameters
     ----------
     x : np.ndarray of shape (N, 4, 4)
     y : np.ndarray of shape (N, 4, 4)
-    
+
     Returns
     -------
     res : float, the average frobenious norm between the matrices.
@@ -112,17 +113,18 @@ def get_frobenious_norm(x, y):
         y_mat_inv = np.linalg.inv(y[i])
         error_mat = np.matmul(x_mat, y_mat_inv)
         ident_mat = np.identity(4)
-        error += np.linalg.norm(ident_mat - error_mat, 'fro')
+        error += np.linalg.norm(ident_mat - error_mat, "fro")
     return error / len(x)
+
 
 def get_frobenious_norm_rot_only(x, y):
     """Compute the frobenious norm between two rotMats.
-    
+
     Parameters
     ----------
     x : np.ndarray of shape (N, 4, 4)
     y : np.ndarray of shape (N, 4, 4)
-    
+
     Returns
     -------
     res : float, the average frobenious norm between the matrices.
@@ -133,8 +135,9 @@ def get_frobenious_norm_rot_only(x, y):
         y_mat_inv = np.linalg.inv(y[i][:3, :3])
         error_mat = np.matmul(x_mat, y_mat_inv)
         ident_mat = np.identity(3)
-        error += np.linalg.norm(ident_mat - error_mat, 'fro')
+        error += np.linalg.norm(ident_mat - error_mat, "fro")
     return error / len(x)
+
 
 def compute_accel(joints):
     """
@@ -150,6 +153,7 @@ def compute_accel(joints):
     acceleration = velocities[1:] - velocities[:-1]
     acceleration_normed = np.linalg.norm(acceleration, axis=2)
     return np.mean(acceleration_normed, axis=1)
+
 
 def compute_error_accel(joints_gt, joints_pred, vis=None):
     """
@@ -183,13 +187,15 @@ def compute_error_accel(joints_gt, joints_pred, vis=None):
 
     return np.mean(normed[new_vis], axis=1)
 
+
 def compute_vel(joints):
     velocities = joints[1:] - joints[:-1]
     velocity_normed = np.linalg.norm(velocities, axis=2)
     return np.mean(velocity_normed, axis=1)
 
-def compute_error_vel(joints_gt, joints_pred, vis = None):
-    vel_gt = joints_gt[1:] - joints_gt[:-1] 
+
+def compute_error_vel(joints_gt, joints_pred, vis=None):
+    vel_gt = joints_gt[1:] - joints_gt[:-1]
     vel_pred = joints_pred[1:] - joints_pred[:-1]
     normed = np.linalg.norm(vel_pred - vel_gt, axis=2)
 
@@ -208,35 +214,36 @@ def compute_head_pose_metrics(head_trans, head_rot, gt_head_trans, gt_head_rot):
     gt_head_rot : np.ndarray of shape (T, 3, 3)
     """
     T = head_trans.shape[0]
-    pred_head_mat = np.zeros((T, 4, 4)) 
+    pred_head_mat = np.zeros((T, 4, 4))
     gt_head_mat = np.zeros((T, 4, 4))
-    pred_head_mat[:, :3, :3] = head_rot 
+    pred_head_mat[:, :3, :3] = head_rot
     pred_head_mat[:, 3, 3] = 1.0
-    gt_head_mat[:, :3, :3] = gt_head_rot 
-    gt_head_mat[:, 3, 3] = 1.0 
-    pred_head_mat[:, :3, 3] = head_trans 
-    gt_head_mat[:, :3, 3] = gt_head_trans 
-  
+    gt_head_mat[:, :3, :3] = gt_head_rot
+    gt_head_mat[:, 3, 3] = 1.0
+    pred_head_mat[:, :3, 3] = head_trans
+    gt_head_mat[:, :3, 3] = gt_head_trans
+
     head_dist = get_frobenious_norm(pred_head_mat, gt_head_mat)
 
     head_dist_rot_only = get_frobenious_norm_rot_only(head_rot, gt_head_rot)
-    head_trans_err = np.linalg.norm(head_trans - gt_head_trans, axis = 1).mean() * 1000
-    
-    return head_dist, head_dist_rot_only, head_trans_err   
+    head_trans_err = np.linalg.norm(head_trans - gt_head_trans, axis=1).mean() * 1000
+
+    return head_dist, head_dist_rot_only, head_trans_err
+
 
 def compute_foot_sliding_for_smpl(pred_global_jpos, floor_height):
     """
     Compute foot sliding error for SMPL.
-    
+
     Parameters
     ----------
     pred_global_jpos : np.ndarray of shape (T, J, 3)
     floor_height : float
-    
+
     Returns
     -------
     float
-    
+
     Notes
     -----
     The foot sliding error is computed as the average of the following four metrics:
@@ -251,47 +258,67 @@ def compute_foot_sliding_for_smpl(pred_global_jpos, floor_height):
     """
     T, J, *_ = pred_global_jpos.shape
 
-    # Put human mesh to floor z = 0 and compute. 
-    pred_global_jpos[:, :, 2] = pred_global_jpos[:,:,2] - floor_height
+    # Put human mesh to floor z = 0 and compute.
+    pred_global_jpos[:, :, 2] = pred_global_jpos[:, :, 2] - floor_height
 
-    lankle_pos = pred_global_jpos[:, SMPLH_LEFT_ANKLE_IDX, :] # T X 3 
-    lfoot_pos = pred_global_jpos[:, SMPLH_LEFT_FOOT_IDX, :] # T X 3 
+    lankle_pos = pred_global_jpos[:, SMPLH_LEFT_ANKLE_IDX, :]  # T X 3
+    lfoot_pos = pred_global_jpos[:, SMPLH_LEFT_FOOT_IDX, :]  # T X 3
 
-    rankle_pos = pred_global_jpos[:, SMPLH_RIGHT_ANKLE_IDX, :] # T X 3 
-    rfoot_pos = pred_global_jpos[:, SMPLH_RIGHT_FOOT_IDX, :] # T X 3 
+    rankle_pos = pred_global_jpos[:, SMPLH_RIGHT_ANKLE_IDX, :]  # T X 3
+    rfoot_pos = pred_global_jpos[:, SMPLH_RIGHT_FOOT_IDX, :]  # T X 3
 
-    H_ankle = CFG.empirical_val.metric.foot_sliding.ankle_height_threshold 
-    H_toe = CFG.empirical_val.metric.foot_sliding.toe_height_threshold 
+    H_ankle = CFG.empirical_val.metric.foot_sliding.ankle_height_threshold
+    H_toe = CFG.empirical_val.metric.foot_sliding.toe_height_threshold
 
-    lankle_disp = np.linalg.norm(lankle_pos[1:, :2] - lankle_pos[:-1, :2], axis = 1) # T-1 
-    lfoot_disp = np.linalg.norm(lfoot_pos[1:, :2] - lfoot_pos[:-1, :2], axis = 1) # T-1 
-    rankle_disp = np.linalg.norm(rankle_pos[1:, :2] - rankle_pos[:-1, :2], axis = 1) # T-1 
-    rfoot_disp = np.linalg.norm(rfoot_pos[1:, :2] - rfoot_pos[:-1, :2], axis = 1) # T-1 
+    lankle_disp = np.linalg.norm(
+        lankle_pos[1:, :2] - lankle_pos[:-1, :2], axis=1
+    )  # T-1
+    lfoot_disp = np.linalg.norm(lfoot_pos[1:, :2] - lfoot_pos[:-1, :2], axis=1)  # T-1
+    rankle_disp = np.linalg.norm(
+        rankle_pos[1:, :2] - rankle_pos[:-1, :2], axis=1
+    )  # T-1
+    rfoot_disp = np.linalg.norm(rfoot_pos[1:, :2] - rfoot_pos[:-1, :2], axis=1)  # T-1
 
     lankle_subset = lankle_pos[:-1, -1] < H_ankle
     lfoot_subset = lfoot_pos[:-1, -1] < H_toe
     rankle_subset = rankle_pos[:-1, -1] < H_ankle
     rfoot_subset = rfoot_pos[:-1, -1] < H_toe
-   
-    lankle_sliding_stats = np.abs(lankle_disp * (2 - 2 ** (lankle_pos[:-1, -1]/H_ankle)))[lankle_subset]
-    lankle_sliding = np.sum(lankle_sliding_stats)/T * 1000
 
-    lfoot_sliding_stats = np.abs(lfoot_disp * (2 - 2 ** (lfoot_pos[:-1, -1]/H_toe)))[lfoot_subset]
-    lfoot_sliding = np.sum(lfoot_sliding_stats)/T * 1000
+    lankle_sliding_stats = np.abs(
+        lankle_disp * (2 - 2 ** (lankle_pos[:-1, -1] / H_ankle))
+    )[lankle_subset]
+    lankle_sliding = np.sum(lankle_sliding_stats) / T * 1000
 
-    rankle_sliding_stats = np.abs(rankle_disp * (2 - 2 ** (rankle_pos[:-1, -1]/H_ankle)))[rankle_subset]
-    rankle_sliding = np.sum(rankle_sliding_stats)/T * 1000
+    lfoot_sliding_stats = np.abs(lfoot_disp * (2 - 2 ** (lfoot_pos[:-1, -1] / H_toe)))[
+        lfoot_subset
+    ]
+    lfoot_sliding = np.sum(lfoot_sliding_stats) / T * 1000
 
-    rfoot_sliding_stats = np.abs(rfoot_disp * (2 - 2 ** (rfoot_pos[:-1, -1]/H_toe)))[rfoot_subset]
-    rfoot_sliding = np.sum(rfoot_sliding_stats)/T * 1000
+    rankle_sliding_stats = np.abs(
+        rankle_disp * (2 - 2 ** (rankle_pos[:-1, -1] / H_ankle))
+    )[rankle_subset]
+    rankle_sliding = np.sum(rankle_sliding_stats) / T * 1000
 
-    sliding = (lankle_sliding + lfoot_sliding + rankle_sliding + rfoot_sliding) / 4.
+    rfoot_sliding_stats = np.abs(rfoot_disp * (2 - 2 ** (rfoot_pos[:-1, -1] / H_toe)))[
+        rfoot_subset
+    ]
+    rfoot_sliding = np.sum(rfoot_sliding_stats) / T * 1000
 
-    return sliding 
+    sliding = (lankle_sliding + lfoot_sliding + rankle_sliding + rfoot_sliding) / 4.0
 
-def compute_metrics_for_smpl(gt_global_quat, gt_global_jpos, gt_floor_height, pred_global_quat, pred_global_jpos, pred_floor_height):
+    return sliding
+
+
+def compute_metrics_for_smpl(
+    gt_global_quat,
+    gt_global_jpos,
+    gt_floor_height,
+    pred_global_quat,
+    pred_global_jpos,
+    pred_floor_height,
+):
     """Compute metrics for SMPL.
-    
+
     Parameters
     ----------
     gt_global_quat : tensor of shape (T, J, 4)
@@ -300,7 +327,7 @@ def compute_metrics_for_smpl(gt_global_quat, gt_global_jpos, gt_floor_height, pr
     pred_global_quat : tensor of shape (T, J, 4)
     pred_global_jpos : tensor of shape (T, J, 3)
     pred_floor_height : float
-    
+
     Returns
     -------
     dict : keys are listed as follows:
@@ -325,72 +352,119 @@ def compute_metrics_for_smpl(gt_global_quat, gt_global_jpos, gt_floor_height, pr
 
     root_idx = 0
     T, J, *_ = gt_global_quat.shape
-    
-    root_traj_pred = torch.cat((pred_global_jpos[:, root_idx, :], pred_global_quat[:, root_idx, :]), dim=-1).data.cpu().numpy() # T X 7 
-    root_traj_gt = torch.cat((gt_global_jpos[:, root_idx, :], gt_global_quat[:, root_idx, :]), dim=-1).data.cpu().numpy() # T X 7 
 
-    T_root_pred = qpose_to_T(root_traj_pred) # T x 3 x 4
-    T_root_pred = np.concatenate([T_root_pred, np.zeros((T, 1, 4))], axis=1) # T x 4 x 4
-    T_root_gt = qpose_to_T(root_traj_gt) # T x 3 x 4
-    T_root_gt = np.concatenate([T_root_gt, np.zeros((T, 1, 4))], axis=1) # T x 4 x 4
+    root_traj_pred = (
+        torch.cat(
+            (pred_global_jpos[:, root_idx, :], pred_global_quat[:, root_idx, :]), dim=-1
+        )
+        .data.cpu()
+        .numpy()
+    )  # T X 7
+    root_traj_gt = (
+        torch.cat(
+            (gt_global_jpos[:, root_idx, :], gt_global_quat[:, root_idx, :]), dim=-1
+        )
+        .data.cpu()
+        .numpy()
+    )  # T X 7
+
+    T_root_pred = qpose_to_T(root_traj_pred)  # T x 3 x 4
+    T_root_pred = np.concatenate(
+        [T_root_pred, np.zeros((T, 1, 4))], axis=1
+    )  # T x 4 x 4
+    T_root_gt = qpose_to_T(root_traj_gt)  # T x 3 x 4
+    T_root_gt = np.concatenate([T_root_gt, np.zeros((T, 1, 4))], axis=1)  # T x 4 x 4
 
     # compute frobenious norm for T_root_pred and T_root_gt
     root_dist = get_frobenious_norm(T_root_pred, T_root_gt)
     root_rot_dist = get_frobenious_norm_rot_only(T_root_pred, T_root_gt)
 
-    head_idx = SMPLH_HEAD_IDX 
-    head_traj_pred = torch.cat((pred_global_jpos[:, head_idx, :], pred_global_quat[:, head_idx, :]), dim=-1).data.cpu().numpy()
-    head_traj_gt = torch.cat((gt_global_jpos[:, head_idx, :], gt_global_quat[:, head_idx, :]), dim=-1).data.cpu().numpy()
+    head_idx = SMPLH_HEAD_IDX
+    head_traj_pred = (
+        torch.cat(
+            (pred_global_jpos[:, head_idx, :], pred_global_quat[:, head_idx, :]), dim=-1
+        )
+        .data.cpu()
+        .numpy()
+    )
+    head_traj_gt = (
+        torch.cat(
+            (gt_global_jpos[:, head_idx, :], gt_global_quat[:, head_idx, :]), dim=-1
+        )
+        .data.cpu()
+        .numpy()
+    )
 
-    T_head_pred = qpose_to_T(head_traj_pred) # T x 3 x 4
-    T_head_pred = np.concatenate([T_head_pred, np.zeros((T, 1, 4))], axis=1) # T x 4 x 4
-    T_head_gt = qpose_to_T(head_traj_gt) # T x 3 x 4
-    T_head_gt = np.concatenate([T_head_gt, np.zeros((T, 1, 4))], axis=1) # T x 4 x 4
+    T_head_pred = qpose_to_T(head_traj_pred)  # T x 3 x 4
+    T_head_pred = np.concatenate(
+        [T_head_pred, np.zeros((T, 1, 4))], axis=1
+    )  # T x 4 x 4
+    T_head_gt = qpose_to_T(head_traj_gt)  # T x 3 x 4
+    T_head_gt = np.concatenate([T_head_gt, np.zeros((T, 1, 4))], axis=1)  # T x 4 x 4
 
     # compute frobenious norm for T_head_pred and T_head_gt
-    head_dist = get_frobenious_norm(T_head_pred, T_head_gt) # scalar
-    head_rot_dist = get_frobenious_norm_rot_only(T_head_pred, T_head_gt) # scalar
+    head_dist = get_frobenious_norm(T_head_pred, T_head_gt)  # scalar
+    head_rot_dist = get_frobenious_norm_rot_only(T_head_pred, T_head_gt)  # scalar
 
-    # Compute accl and accl err. 
-    accels_pred = np.mean(compute_accel(pred_global_jpos.data.cpu().numpy())) * 1000 # scalar
-    accels_gt = np.mean(compute_accel(gt_global_jpos.data.cpu().numpy())) * 1000  # scalar
+    # Compute accl and accl err.
+    accels_pred = (
+        np.mean(compute_accel(pred_global_jpos.data.cpu().numpy())) * 1000
+    )  # scalar
+    accels_gt = (
+        np.mean(compute_accel(gt_global_jpos.data.cpu().numpy())) * 1000
+    )  # scalar
 
-    accel_dist = np.mean(compute_error_accel(pred_global_jpos.data.cpu().numpy(), gt_global_jpos.data.cpu().numpy())) * 1000 # scalar
+    accel_dist = (
+        np.mean(
+            compute_error_accel(
+                pred_global_jpos.data.cpu().numpy(), gt_global_jpos.data.cpu().numpy()
+            )
+        )
+        * 1000
+    )  # scalar
 
     # Compute foot sliding error
-    pred_fs_metric = compute_foot_sliding_for_smpl(pred_global_jpos.data.cpu().numpy().copy(), pred_floor_height)
-    gt_fs_metric = compute_foot_sliding_for_smpl(gt_global_jpos.data.cpu().numpy().copy(), gt_floor_height)
+    pred_fs_metric = compute_foot_sliding_for_smpl(
+        pred_global_jpos.data.cpu().numpy().copy(), pred_floor_height
+    )
+    gt_fs_metric = compute_foot_sliding_for_smpl(
+        gt_global_jpos.data.cpu().numpy().copy(), gt_floor_height
+    )
 
-    jpos_pred = pred_global_jpos - pred_global_jpos[:, 0:1] # T x J x 3 zero out root
-    jpos_gt =  gt_global_jpos - gt_global_jpos[:, 0:1] # T x J x 3
+    jpos_pred = pred_global_jpos - pred_global_jpos[:, 0:1]  # T x J x 3 zero out root
+    jpos_gt = gt_global_jpos - gt_global_jpos[:, 0:1]  # T x J x 3
     jpos_pred = jpos_pred.data.cpu().numpy()
     jpos_gt = jpos_gt.data.cpu().numpy()
-    mpjpe = np.linalg.norm(jpos_pred - jpos_gt, axis = 2).mean() * 1000
+    mpjpe = np.linalg.norm(jpos_pred - jpos_gt, axis=2).mean() * 1000
 
-    # Add jpe for each joint 
-    single_jpe = np.linalg.norm(jpos_pred - jpos_gt, axis = 2).mean(axis=0) * 1000 # J 
-    
-    # Remove joints 18, 19, 20, 21 
+    # Add jpe for each joint
+    single_jpe = np.linalg.norm(jpos_pred - jpos_gt, axis=2).mean(axis=0) * 1000  # J
+
+    # Remove joints 18, 19, 20, 21
     mpjpe_wo_hand = single_jpe[:18].mean()
 
-    # Jiaman: add root translation error 
-    pred_root_trans = root_traj_pred[:, :3] # T X 3
-    gt_root_trans = root_traj_gt[:, :3] # T X 3 
-    root_trans_err = np.linalg.norm(pred_root_trans - gt_root_trans, axis = 1).mean() * 1000
+    # Jiaman: add root translation error
+    pred_root_trans = root_traj_pred[:, :3]  # T X 3
+    gt_root_trans = root_traj_gt[:, :3]  # T X 3
+    root_trans_err = (
+        np.linalg.norm(pred_root_trans - gt_root_trans, axis=1).mean() * 1000
+    )
     res_dict["root_trans_dist"].append(root_trans_err)
 
-    # Add accl and accer 
-    res_dict['accel_pred'] = accels_pred 
-    res_dict['accel_gt'] = accels_gt 
-    res_dict['accel_err'] = accel_dist 
+    # Add accl and accer
+    res_dict["accel_pred"] = accels_pred
+    res_dict["accel_gt"] = accels_gt
+    res_dict["accel_err"] = accel_dist
 
-    # Add foot sliding metric 
-    res_dict['pred_fs'] = pred_fs_metric 
-    res_dict['gt_fs'] = gt_fs_metric  
+    # Add foot sliding metric
+    res_dict["pred_fs"] = pred_fs_metric
+    res_dict["gt_fs"] = gt_fs_metric
 
     pred_head_trans = head_traj_pred[:, :3]
-    gt_head_trans = head_traj_gt[:, :3] 
-    head_trans_err = np.linalg.norm(pred_head_trans - gt_head_trans, axis = 1).mean() * 1000
+    gt_head_trans = head_traj_gt[:, :3]
+    head_trans_err = (
+        np.linalg.norm(pred_head_trans - gt_head_trans, axis=1).mean() * 1000
+    )
     res_dict["head_trans_dist"].append(head_trans_err)
 
     res_dict["root_dist"].append(root_dist)
@@ -399,13 +473,13 @@ def compute_metrics_for_smpl(gt_global_quat, gt_global_jpos, gt_floor_height, pr
     res_dict["mpjpe_wo_hand"].append(mpjpe_wo_hand)
     res_dict["head_dist"].append(head_dist)
     res_dict["head_rot_dist"].append(head_rot_dist)
-   
-    res_dict['single_jpe'].append(single_jpe)
+
+    res_dict["single_jpe"].append(single_jpe)
     for tmp_idx in range(single_jpe.shape[0]):
-        res_dict['jpe_'+str(tmp_idx)].append(single_jpe[tmp_idx])
+        res_dict["jpe_" + str(tmp_idx)].append(single_jpe[tmp_idx])
 
     res_dict = {k: np.mean(v) for k, v in res_dict.items()}
-   
+
     return res_dict
 
 
@@ -415,16 +489,17 @@ def compute_foot_sliding(foot_data, traj_qpos):
     z_threshold = 0.65
     z = traj_qpos[1:, 2]
     foot = np.array(foot_data).copy()
-    foot[:, -1] = foot[:,-1] - np.mean(foot[:3, -1]) # Grounding it
-    foot_disp = np.linalg.norm(foot[1:, :2] - foot[:-1, :2], axis = 1)
+    foot[:, -1] = foot[:, -1] - np.mean(foot[:3, -1])  # Grounding it
+    foot_disp = np.linalg.norm(foot[1:, :2] - foot[:-1, :2], axis=1)
 
-    foot_avg = (foot[:-1, -1] + foot[1:, -1])/2
+    foot_avg = (foot[:-1, -1] + foot[1:, -1]) / 2
     subset = np.logical_and(foot_avg < H, z > z_threshold)
     # import pdb; pdb.set_trace()
 
-    sliding_stats = np.abs(foot_disp * (2 - 2 ** (foot_avg/H)))[subset]
-    sliding = np.sum(sliding_stats)/seq_len * 1000
+    sliding_stats = np.abs(foot_disp * (2 - 2 ** (foot_avg / H)))[subset]
+    sliding = np.sum(sliding_stats) / seq_len * 1000
     return sliding, sliding_stats
+
 
 def norm_qpos(qpos):
     qpos_norm = qpos.copy()
@@ -432,23 +507,24 @@ def norm_qpos(qpos):
 
     return qpos_norm
 
+
 def trans2velocity(root_trans):
-    # root_trans: T X 3 
+    # root_trans: T X 3
     root_velocity = root_trans[1:] - root_trans[:-1]
-    return root_velocity # (T-1) X 3  
+    return root_velocity  # (T-1) X 3
+
 
 def velocity2trans(init_root_trans, root_velocity):
     # init_root_trans: 3
     # root_velocity: (T-1) X 3
 
     timesteps = root_velocity.shape[0] + 1
-    absolute_pose_data = np.zeros((timesteps, 3)) # T X 3
-    absolute_pose_data[0, :] = init_root_trans.copy() 
+    absolute_pose_data = np.zeros((timesteps, 3))  # T X 3
+    absolute_pose_data[0, :] = init_root_trans.copy()
 
-    root_trans = init_root_trans[np.newaxis].copy() # 1 X 3
+    root_trans = init_root_trans[np.newaxis].copy()  # 1 X 3
     for t_idx in range(1, timesteps):
-        root_trans += root_velocity[t_idx-1:t_idx, :] # 1 X 3
-        absolute_pose_data[t_idx, :] = root_trans # 1 X 3  
+        root_trans += root_velocity[t_idx - 1 : t_idx, :]  # 1 X 3
+        absolute_pose_data[t_idx, :] = root_trans  # 1 X 3
 
-    return absolute_pose_data # T X 3
-
+    return absolute_pose_data  # T X 3

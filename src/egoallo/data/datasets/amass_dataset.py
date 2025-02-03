@@ -1,4 +1,3 @@
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Union, assert_never, cast
 
 import h5py
@@ -13,11 +12,11 @@ if TYPE_CHECKING:
 from egoallo.config import CONFIG_FILE, make_cfg
 
 from ..dataclass import EgoTrainingData
+from egoallo.utils.setup_logger import setup_logger
 
 local_config_file = CONFIG_FILE
 CFG = make_cfg(config_name="defaults", config_file=local_config_file, cli_args=[])
 
-from egoallo.utils.setup_logger import setup_logger
 
 logger = setup_logger(output=None, name=__name__)
 
@@ -232,7 +231,9 @@ class VanillaEgoAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
                     [
                         array,
                         np.repeat(
-                            array[-1:,], self._subseq_len - array.shape[0], axis=0
+                            array[-1:,],
+                            self._subseq_len - array.shape[0],
+                            axis=0,
                         ),
                     ],
                     axis=0,
@@ -266,13 +267,21 @@ class VanillaEgoAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         # Get original joints_wrt_world
         joints_wrt_world = kwargs["joints_wrt_world"]  # shape: [time, 22, 3]
         if self._slice_strategy != "full_sequence":
-            assert (
-                joints_wrt_world.shape == (self._subseq_len, num_joints, 3)
-            ), f"Expected shape: {(self._subseq_len, num_joints, 3)}, got: {joints_wrt_world.shape}"
+            assert joints_wrt_world.shape == (
+                self._subseq_len,
+                num_joints,
+                3,
+            ), (
+                f"Expected shape: {(self._subseq_len, num_joints, 3)}, got: {joints_wrt_world.shape}"
+            )
         else:
-            assert (
-                joints_wrt_world.shape == (total_t, num_joints, 3)
-            ), f"Expected shape: {(total_t, num_joints, 3)}, got: {joints_wrt_world.shape}"
+            assert joints_wrt_world.shape == (
+                total_t,
+                num_joints,
+                3,
+            ), (
+                f"Expected shape: {(total_t, num_joints, 3)}, got: {joints_wrt_world.shape}"
+            )
 
         # Create visible_joints tensor containing only unmasked joints
         # visible_joints = joints_wrt_world[visible_joints_mask].reshape(subseq_len, num_joints - num_masked, 3)
@@ -356,12 +365,12 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
             >= self.min_seq_len
         ]
 
-        assert (
-            len(groups) > 0
-        ), f"No valid groups found for splits: {self.config.splits}"
-        assert (
-            len(cast(h5py.Group, hdf5_file[groups[0]]).keys()) > 0
-        ), f"First group {groups[0]} has no keys"
+        assert len(groups) > 0, (
+            f"No valid groups found for splits: {self.config.splits}"
+        )
+        assert len(cast(h5py.Group, hdf5_file[groups[0]]).keys()) > 0, (
+            f"First group {groups[0]} has no keys"
+        )
 
         return groups
 
@@ -490,7 +499,11 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
                 array = np.concatenate(
                     [
                         array,
-                        np.repeat(array[-1:,], seq_len - array.shape[0], axis=0),
+                        np.repeat(
+                            array[-1:,],
+                            seq_len - array.shape[0],
+                            axis=0,
+                        ),
                     ],
                     axis=0,
                 )

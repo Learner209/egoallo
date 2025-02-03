@@ -1,43 +1,37 @@
 from __future__ import annotations
 
 import dataclasses
-import logging
 import time
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple, Union, TYPE_CHECKING
+from typing import Optional, Tuple, TYPE_CHECKING
 
 import torch
 import torch.utils.data
-import typeguard
-from jaxtyping import jaxtyped
-from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 if TYPE_CHECKING:
     from egoallo.types import DenoiseTrajType
 
-from egoallo import fncsmpl, fncsmpl_extensions
-from egoallo import transforms as tf
+from egoallo import fncsmpl
 from egoallo.config import CONFIG_FILE, make_cfg
 from egoallo.config.inference.inference_defaults import InferenceConfig
 from egoallo.data import make_batch_collator, build_dataset
-from egoallo.config.train.train_config import (
-    EgoAlloTrainConfig
-)
+from egoallo.config.train.train_config import EgoAlloTrainConfig
 from egoallo.joints2smpl.fit_seq import joints2smpl_fit_seq, Joints2SmplFittingConfig
 from egoallo.data.dataclass import EgoTrainingData
 from egoallo.evaluation.body_evaluator import BodyEvaluator
 from egoallo.evaluation.metrics import EgoAlloEvaluationMetrics
-from egoallo.guidance_optimizer_jax import GuidanceMode
 from egoallo.inference_utils import (
     load_denoiser,
     load_runtime_config,
 )
-from egoallo.network import EgoDenoiser, EgoDenoiserConfig, AbsoluteDenoiseTraj, JointsOnlyTraj, VelocityDenoiseTraj
+from egoallo.network import (
+    EgoDenoiser,
+    AbsoluteDenoiseTraj,
+    JointsOnlyTraj,
+    VelocityDenoiseTraj,
+)
 from egoallo.sampling import (
-    CosineNoiseScheduleConstants,
-    quadratic_ts,
     run_sampling_with_masked_data,
 )
 from egoallo.transforms import SE3, SO3
@@ -132,7 +126,9 @@ class TestRunner:
             self.inference_config.checkpoint_dir
         )
         self.runtime_config = runtime_config
-        self.denoiser, self.model_config = load_denoiser(self.inference_config.checkpoint_dir, runtime_config)
+        self.denoiser, self.model_config = load_denoiser(
+            self.inference_config.checkpoint_dir, runtime_config
+        )
         self.denoiser = self.denoiser.to(self.device)
 
         self.body_model = fncsmpl.SmplhModel.load(runtime_config.smplh_npz_path).to(
@@ -141,7 +137,11 @@ class TestRunner:
         # Override runtime config with inference config values
         for field in dataclasses.fields(type(self.inference_config)):
             if hasattr(runtime_config, field.name):
-                setattr(runtime_config, field.name, getattr(self.inference_config, field.name))
+                setattr(
+                    runtime_config,
+                    field.name,
+                    getattr(self.inference_config, field.name),
+                )
 
         # FIXME: this is a temporary fix to use ExtendedBatchCollator for testing.
         runtime_config.data_collate_fn = "TensorOnlyDataclassBatchCollator"
@@ -167,7 +167,7 @@ class TestRunner:
     def _save_sequence_data(
         self,
         gt_traj: DenoiseTrajType,
-        denoised_traj: DenoiseTrajType, 
+        denoised_traj: DenoiseTrajType,
         seq_idx: int,
         output_path: Path,
     ) -> None:
@@ -176,39 +176,45 @@ class TestRunner:
 
         if isinstance(gt_traj, (AbsoluteDenoiseTraj, VelocityDenoiseTraj)):
             # Convert rotation matrices to quaternions for saving
-            denoised_body_quats = SO3.from_matrix(denoised_traj.body_rotmats).wxyz # type: ignore
-            gt_body_quats = SO3.from_matrix(gt_traj.body_rotmats).wxyz # type: ignore
+            denoised_body_quats = SO3.from_matrix(denoised_traj.body_rotmats).wxyz  # type: ignore
+            gt_body_quats = SO3.from_matrix(gt_traj.body_rotmats).wxyz  # type: ignore
 
-            save_dict.update({
-                # Ground truth data
-                "groundtruth_betas": gt_traj.betas[seq_idx, :]
-                .mean(dim=0, keepdim=True)
-                .cpu(),
-                "groundtruth_T_world_root": SE3.from_rotation_and_translation(
-                    SO3.from_matrix(gt_traj.R_world_root[seq_idx]),
-                    gt_traj.t_world_root[seq_idx],
-                )
-                .parameters()
-                .cpu(),
-                "groundtruth_body_quats": gt_body_quats[seq_idx, ..., :21, :].cpu(),
-                # Denoised trajectory data
-                "sampled_betas": denoised_traj.betas.mean(dim=1, keepdim=True).cpu(),
-                "sampled_T_world_root": SE3.from_rotation_and_translation(
-                    SO3.from_matrix(denoised_traj.R_world_root),
-                    denoised_traj.t_world_root,
-                )
-                .parameters()
-                .cpu(),
-                "sampled_body_quats": denoised_body_quats[..., :21, :].cpu(),
-            })
+            save_dict.update(
+                {
+                    # Ground truth data
+                    "groundtruth_betas": gt_traj.betas[seq_idx, :]
+                    .mean(dim=0, keepdim=True)
+                    .cpu(),
+                    "groundtruth_T_world_root": SE3.from_rotation_and_translation(
+                        SO3.from_matrix(gt_traj.R_world_root[seq_idx]),
+                        gt_traj.t_world_root[seq_idx],
+                    )
+                    .parameters()
+                    .cpu(),
+                    "groundtruth_body_quats": gt_body_quats[seq_idx, ..., :21, :].cpu(),
+                    # Denoised trajectory data
+                    "sampled_betas": denoised_traj.betas.mean(
+                        dim=1, keepdim=True
+                    ).cpu(),
+                    "sampled_T_world_root": SE3.from_rotation_and_translation(
+                        SO3.from_matrix(denoised_traj.R_world_root),
+                        denoised_traj.t_world_root,
+                    )
+                    .parameters()
+                    .cpu(),
+                    "sampled_body_quats": denoised_body_quats[..., :21, :].cpu(),
+                }
+            )
 
         elif isinstance(gt_traj, JointsOnlyTraj):
-            save_dict.update({
-                # Ground truth data
-                "groundtruth_joints": gt_traj.joints[seq_idx].cpu(),
-                # Denoised trajectory data  
-                "sampled_joints": denoised_traj.joints.cpu(),
-            })
+            save_dict.update(
+                {
+                    # Ground truth data
+                    "groundtruth_joints": gt_traj.joints[seq_idx].cpu(),
+                    # Denoised trajectory data
+                    "sampled_joints": denoised_traj.joints.cpu(),
+                }
+            )
 
         torch.save(save_dict, output_path)
 
@@ -224,38 +230,62 @@ class TestRunner:
     ) -> Tuple[DenoiseTrajType, DenoiseTrajType]:
         """Process a batch of sequences."""
 
-        gt_trajs = None # shape: (batch_size, num_timesteps, ...)
-        denoised_trajs = None # shape: (num_samples==batch_size, num_timesteps, ...)
+        gt_trajs = None  # shape: (batch_size, num_timesteps, ...)
+        denoised_trajs = None  # shape: (num_samples==batch_size, num_timesteps, ...)
         for seq_idx in range(batch.T_world_cpf.shape[0]):
             # Process sequence to get denoised trajectory
             gt_traj, denoised_traj = processor.process_sequence(
-                batch, self.denoiser, self.runtime_config, self.inference_config, self.device
+                batch,
+                self.denoiser,
+                self.runtime_config,
+                self.inference_config,
+                self.device,
             )
 
             # breakpoint()
             if gt_trajs is None:
                 gt_trajs = gt_traj
             else:
-                gt_trajs = gt_trajs._dict_map(lambda key, value: torch.cat([value, getattr(gt_traj, key)], dim=0) if isinstance(value, torch.Tensor) else value)
+                gt_trajs = gt_trajs._dict_map(
+                    lambda key, value: torch.cat([value, getattr(gt_traj, key)], dim=0)
+                    if isinstance(value, torch.Tensor)
+                    else value
+                )
 
             if denoised_trajs is None:
                 denoised_trajs = denoised_traj
             else:
-                denoised_trajs = denoised_trajs._dict_map(lambda key, value: torch.cat([value, getattr(denoised_traj, key)], dim=0) if isinstance(value, torch.Tensor) else value)
-            
-            metrics = denoised_traj._compute_metrics(gt_traj, body_model=self.body_model, device=self.device)
+                denoised_trajs = denoised_trajs._dict_map(
+                    lambda key, value: torch.cat(
+                        [value, getattr(denoised_traj, key)], dim=0
+                    )
+                    if isinstance(value, torch.Tensor)
+                    else value
+                )
+
+            metrics = denoised_traj._compute_metrics(
+                gt_traj, body_model=self.body_model, device=self.device
+            )
             metrics = EgoAlloEvaluationMetrics(**metrics)
-        
+
             if self.runtime_config.denoising.denoising_mode == "joints_only":
                 # import ipdb; ipdb.set_trace()
                 denoised_traj = denoised_traj[seq_idx]
                 # joints2smpl_fit_seq(Joints2SmplFittingConfig(), self.body_model, denoised_traj.joints.shape[0], denoised_traj.joints.cpu(), output_dir)
                 # breakpoint()
-                fit_seq_data: "EgoTrainingData" = joints2smpl_fit_seq(Joints2SmplFittingConfig(), self.body_model, gt_traj.joints.shape[0], gt_traj.joints.cpu(), output_dir)
+                fit_seq_data: "EgoTrainingData" = joints2smpl_fit_seq(
+                    Joints2SmplFittingConfig(),
+                    self.body_model,
+                    gt_traj.joints.shape[0],
+                    gt_traj.joints.cpu(),
+                    output_dir,
+                )
                 # FIXME: this is a temporary fix to visualize the fit_seq_traj, set denoising mode to absolute to use from_ego_data function from `AbsoluteDenoiseTraj`.
                 _ = self.runtime_config.denoising.denoising_mode
                 self.runtime_config.denoising.denoising_mode = "absolute"
-                fit_seq_traj = self.runtime_config.denoising.from_ego_data(fit_seq_data, include_hands=True)
+                fit_seq_traj = self.runtime_config.denoising.from_ego_data(
+                    fit_seq_data, include_hands=True
+                )
                 self.runtime_config.denoising.denoising_mode = _
 
                 fit_seq_traj = fit_seq_traj.map(lambda x: x.to(self.device))
@@ -272,9 +302,12 @@ class TestRunner:
                 )
 
             # Save visualizations if requested
-            if self.inference_config.visualize_traj and self.runtime_config.denoising.denoising_mode != "joints_only":
+            if (
+                self.inference_config.visualize_traj
+                and self.runtime_config.denoising.denoising_mode != "joints_only"
+            ):
                 logger.info(f"this take name is: {batch.take_name}")
-                timestamp = time.strftime("%Y%m%d-%H%M%S")
+                time.strftime("%Y%m%d-%H%M%S")
 
                 gt_path, inferred_path = visualizer.save_visualization(
                     gt_traj[seq_idx],
@@ -354,7 +387,9 @@ class TestRunner:
 
                 batch = batch.to(self.device)
                 save_gt_vis = (
-                    False if self.inference_config.dataset_type == "EgoExoDataset" else True
+                    False
+                    if self.inference_config.dataset_type == "EgoExoDataset"
+                    else True
                 )
                 gt_traj, denoised_traj = self._process_batch(
                     batch,
@@ -369,14 +404,28 @@ class TestRunner:
                 if gt_trajs is None:
                     gt_trajs = gt_traj
                 else:
-                    gt_trajs = gt_trajs._dict_map(lambda key, value: torch.cat([value, getattr(gt_traj, key)], dim=1) if isinstance(value, torch.Tensor) else value)
+                    gt_trajs = gt_trajs._dict_map(
+                        lambda key, value: torch.cat(
+                            [value, getattr(gt_traj, key)], dim=1
+                        )
+                        if isinstance(value, torch.Tensor)
+                        else value
+                    )
 
                 if denoised_trajs is None:
                     denoised_trajs = denoised_traj
                 else:
-                    denoised_trajs = denoised_trajs._dict_map(lambda key, value: torch.cat([value, getattr(denoised_traj, key)], dim=1) if isinstance(value, torch.Tensor) else value)
+                    denoised_trajs = denoised_trajs._dict_map(
+                        lambda key, value: torch.cat(
+                            [value, getattr(denoised_traj, key)], dim=1
+                        )
+                        if isinstance(value, torch.Tensor)
+                        else value
+                    )
 
-            metrics = denoised_trajs._compute_metrics(gt_trajs, body_model=self.body_model, device=self.device)
+            metrics = denoised_trajs._compute_metrics(
+                gt_trajs, body_model=self.body_model, device=self.device
+            )
             metrics = EgoAlloEvaluationMetrics(**metrics)
             # breakpoint()
 

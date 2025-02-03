@@ -4,13 +4,11 @@ import os
 
 import cv2
 import numpy as np
-import pandas as pd
 from projectaria_tools.core import calibration
 from egoallo.egopose.handpose.data_preparation.utils.utils import (
     aria_landscape_to_portrait,
     cam_to_img,
     get_ego_pose_takes_from_splits,
-    get_interested_take,
     HAND_ORDER,
     pad_bbox_from_kpts,
     rand_bbox_from_kpts,
@@ -20,14 +18,16 @@ from egoallo.egopose.handpose.data_preparation.utils.utils import (
 )
 
 from egoallo.utils.smpl_mapping.mapping import EGOEXO4D_EGOPOSE_HANDPOSE_MAPPINGS
-HAND_JOINTS = EGOEXO4D_EGOPOSE_HANDPOSE_MAPPINGS
-NUM_OF_HAND_JOINTS = len(HAND_JOINTS) // 2
-
 from egoallo.egoexo import EGOEXO_UTILS_INST
 from egoallo.egoexo.egoexo_utils import EgoExoUtils
 from egoallo.utils.setup_logger import setup_logger
 
+HAND_JOINTS = EGOEXO4D_EGOPOSE_HANDPOSE_MAPPINGS
+NUM_OF_HAND_JOINTS = len(HAND_JOINTS) // 2
+
+
 logger = setup_logger(output=None, name=__name__)
+
 
 class hand_pose_anno_loader:
     """
@@ -58,9 +58,7 @@ class hand_pose_anno_loader:
         # Determine annotation and camera pose directory
         anno_type_dir_dict = {"manual": "annotation", "auto": "automatic"}
         self.hand_anno_dir = (
-            os.path.join(
-                self.dataset_root, "annotations/ego_pose/test/hand/annotation"
-            )
+            os.path.join(self.dataset_root, "annotations/ego_pose/test/hand/annotation")
             if self.split == "test"
             else os.path.join(
                 self.dataset_root,
@@ -81,10 +79,10 @@ class hand_pose_anno_loader:
         # Find all annotation takes from local direcctory by splits
         # Check test anno availability. No gt-anno will be generated for public.
         if not os.path.exists(self.hand_anno_dir):
-            assert (
-                self.split == "test"
-            ), f"No annotation found for {self.split} split at {self.hand_anno_dir}.\
+            assert self.split == "test", (
+                f"No annotation found for {self.split} split at {self.hand_anno_dir}.\
                 Make sure you follow step 0 to download data first."
+            )
             # return gt_db
         # Get all local annotation takes for train/val split
         if self.split == "test":
@@ -94,16 +92,14 @@ class hand_pose_anno_loader:
                 k.split(".")[0] for k in os.listdir(self.hand_anno_dir)
             ]
             # take to uid dict
-            take_to_uid = {
+            {
                 t["take_name"]: t["take_uid"]
                 for t in self.takes
                 if t["take_uid"] in split_all_local_takes
             }
             # uid_to_take = {uid: take for take, uid in take_to_uid.items()}
             # (0). Filter common takes
-            comm_local_take_uid = list(
-                set(split_all_local_takes)
-            )
+            comm_local_take_uid = list(set(split_all_local_takes))
 
         # Get all valid local take uids that are used in current split
         # 1. Filter takes based on split (train/val/test)
@@ -111,7 +107,7 @@ class hand_pose_anno_loader:
         # 2. Filter takes based on benchmark (ego_pose)
         ego_pose_uid = get_ego_pose_takes_from_splits(self.splits)
         curr_split_ego_pose_uid = list(set(curr_split_uid) & set(ego_pose_uid))
-       
+
         # 3. Filter takes with available camera pose file
         available_cam_pose_uid = [
             k.split(".")[0] for k in os.listdir(self.cam_pose_dir)
@@ -121,7 +117,9 @@ class hand_pose_anno_loader:
         if self.split == "test":
             comm_take_w_cam_pose = sorted(list(set(comm_take)))
         else:
-            comm_take_w_cam_pose = sorted(list(set(comm_take) & set(comm_local_take_uid)))
+            comm_take_w_cam_pose = sorted(
+                list(set(comm_take) & set(comm_local_take_uid))
+            )
 
         logger.info(
             f"Find {len(comm_take_w_cam_pose)} takes in {self.split} ({self.anno_type}) dataset. Start data processing..."
@@ -129,8 +127,12 @@ class hand_pose_anno_loader:
 
         # Iterate through all takes from annotation directory and check
         for curr_take_uid in tqdm(comm_take_w_cam_pose):
-            curr_take_name = EGOEXO_UTILS_INST.find_take_name_from_take_uid(curr_take_uid)
-            assert curr_take_name is not None, f"Take name not found for {curr_take_uid}."
+            curr_take_name = EGOEXO_UTILS_INST.find_take_name_from_take_uid(
+                curr_take_uid
+            )
+            assert curr_take_name is not None, (
+                f"Take name not found for {curr_take_uid}."
+            )
             # Load annotation, camera pose JSON and image directory
             curr_take_anno_path = os.path.join(
                 self.hand_anno_dir, f"{curr_take_uid}.json"
@@ -187,9 +189,9 @@ class hand_pose_anno_loader:
         ):
             return curr_take_db
         # Build camera projection matrix
-        curr_intri = np.array(
-            cam_pose[aria_cam_name]["camera_intrinsics"]
-        ).astype(np.float32)
+        curr_intri = np.array(cam_pose[aria_cam_name]["camera_intrinsics"]).astype(
+            np.float32
+        )
         for frame_idx in cam_pose[aria_cam_name]["camera_extrinsics"].keys():
             curr_frame_anno = {}
             curr_extri = np.array(
@@ -197,19 +199,11 @@ class hand_pose_anno_loader:
             ).astype(np.float32)
             # Compose current hand GT info in current frame
             for hand_idx, hand_name in enumerate(HAND_ORDER):
-                curr_frame_anno[
-                    f"{hand_name}_hand_3d_cam"
-                ] = None
-                curr_frame_anno[
-                    f"{hand_name}_hand_3d_world"
-                ] = None
-                curr_frame_anno[
-                    f"{hand_name}_hand_2d"
-                ] = None
+                curr_frame_anno[f"{hand_name}_hand_3d_cam"] = None
+                curr_frame_anno[f"{hand_name}_hand_3d_world"] = None
+                curr_frame_anno[f"{hand_name}_hand_2d"] = None
                 curr_frame_anno[f"{hand_name}_hand_bbox"] = None
-                curr_frame_anno[
-                    f"{hand_name}_hand_valid_3d"
-                ] = None
+                curr_frame_anno[f"{hand_name}_hand_valid_3d"] = None
 
             # Append current frame into GT JSON if at least one valid hand exists
             metadata = {
@@ -244,15 +238,20 @@ class hand_pose_anno_loader:
                 frame_idx, cam_pose, aria_cam_name
             )
             # Skip this frame if missing valid data
-            if curr_hand_3d_kpts is None or curr_ego_intr is None or curr_ego_extr is None:
+            if (
+                curr_hand_3d_kpts is None
+                or curr_ego_intr is None
+                or curr_ego_extr is None
+            ):
                 continue
             # Look at each hand in current frame
             curr_frame_anno = {}
             at_least_one_hands_valid = False
             for hand_idx, hand_name in enumerate(HAND_ORDER):
                 # Get current hand's 2D kpts and 3D world kpts
-                start_idx, end_idx = self.num_joints * hand_idx, self.num_joints * (
-                    hand_idx + 1
+                start_idx, end_idx = (
+                    self.num_joints * hand_idx,
+                    self.num_joints * (hand_idx + 1),
                 )
                 one_hand_2d_kpts = curr_hand_2d_kpts[start_idx:end_idx]
                 # Transform annotation 2d kpts if in portrait view
@@ -266,9 +265,13 @@ class hand_pose_anno_loader:
                     one_hand_3d_kpts_world[:, :] = None
 
                 # Hand biomechanical structure check
-                one_hand_3d_kpts_world = hand_jnts_dist_angle_check(one_hand_3d_kpts_world)
+                one_hand_3d_kpts_world = hand_jnts_dist_angle_check(
+                    one_hand_3d_kpts_world
+                )
                 # 3D world to camera
-                one_hand_3d_kpts_cam = world_to_cam(one_hand_3d_kpts_world, curr_ego_extr)
+                one_hand_3d_kpts_cam = world_to_cam(
+                    one_hand_3d_kpts_world, curr_ego_extr
+                )
                 # Camera to image plane
                 one_hand_proj_2d_kpts = cam_to_img(one_hand_3d_kpts_cam, curr_ego_intr)
                 # Transform projected 2d kpts if in portrait view
@@ -306,7 +309,9 @@ class hand_pose_anno_loader:
                     one_hand_filtered_3d_kpts_world = one_hand_3d_kpts_world.copy()
                     one_hand_filtered_3d_kpts_world[~valid_3d_kpts_flag] = None
                     one_hand_filtered_3d_kpts_world[0] = one_hand_3d_kpts_world[0]
-                    valid_3d_kpts_flag = ~np.isnan(np.mean(one_hand_filtered_3d_kpts_cam,axis=1))
+                    valid_3d_kpts_flag = ~np.isnan(
+                        np.mean(one_hand_filtered_3d_kpts_cam, axis=1)
+                    )
                     # Generate hand bbox based on 2D GT kpts
                     if self.split == "test":
                         one_hand_bbox = rand_bbox_from_kpts(
@@ -320,8 +325,16 @@ class hand_pose_anno_loader:
                             self.undist_img_dim,
                             self.bbox_padding,
                         )
-                    assert sum(np.isnan(np.mean(one_hand_filtered_3d_kpts_cam,axis=1))) == sum(~valid_3d_kpts_flag), f"Missing 3d kpts count mismatch: {sum(np.isnan(np.mean(one_hand_filtered_3d_kpts_cam,axis=1)))} vs {sum(~valid_3d_kpts_flag)}"
-                    assert sum(np.isnan(np.mean(one_hand_filtered_3d_kpts_world,axis=1))) == sum(~valid_3d_kpts_flag), f"Missing 3d kpts count mismatch: {sum(np.isnan(np.mean(one_hand_filtered_3d_kpts_world,axis=1)))} vs {sum(~valid_3d_kpts_flag)}"
+                    assert sum(
+                        np.isnan(np.mean(one_hand_filtered_3d_kpts_cam, axis=1))
+                    ) == sum(~valid_3d_kpts_flag), (
+                        f"Missing 3d kpts count mismatch: {sum(np.isnan(np.mean(one_hand_filtered_3d_kpts_cam, axis=1)))} vs {sum(~valid_3d_kpts_flag)}"
+                    )
+                    assert sum(
+                        np.isnan(np.mean(one_hand_filtered_3d_kpts_world, axis=1))
+                    ) == sum(~valid_3d_kpts_flag), (
+                        f"Missing 3d kpts count mismatch: {sum(np.isnan(np.mean(one_hand_filtered_3d_kpts_world, axis=1)))} vs {sum(~valid_3d_kpts_flag)}"
+                    )
                 # If no valid annotation for current hand, assign empty bbox, anno and valid flag
                 else:
                     one_hand_bbox = np.array([])
@@ -330,21 +343,20 @@ class hand_pose_anno_loader:
                     one_hand_filtered_anno_2d_kpts = np.array([])
                     valid_3d_kpts_flag = np.array([])
 
-
                 # Compose current hand GT info in current frame
-                curr_frame_anno[
-                    f"{hand_name}_hand_3d_cam"
-                ] = one_hand_filtered_3d_kpts_cam.tolist()
-                curr_frame_anno[
-                    f"{hand_name}_hand_3d_world"
-                ] = one_hand_filtered_3d_kpts_world.tolist()
-                curr_frame_anno[
-                    f"{hand_name}_hand_2d"
-                ] = one_hand_filtered_anno_2d_kpts.tolist()
+                curr_frame_anno[f"{hand_name}_hand_3d_cam"] = (
+                    one_hand_filtered_3d_kpts_cam.tolist()
+                )
+                curr_frame_anno[f"{hand_name}_hand_3d_world"] = (
+                    one_hand_filtered_3d_kpts_world.tolist()
+                )
+                curr_frame_anno[f"{hand_name}_hand_2d"] = (
+                    one_hand_filtered_anno_2d_kpts.tolist()
+                )
                 curr_frame_anno[f"{hand_name}_hand_bbox"] = one_hand_bbox.tolist()
-                curr_frame_anno[
-                    f"{hand_name}_hand_valid_3d"
-                ] = valid_3d_kpts_flag.tolist()
+                curr_frame_anno[f"{hand_name}_hand_valid_3d"] = (
+                    valid_3d_kpts_flag.tolist()
+                )
 
             # Append current frame into GT JSON if at least one valid hand exists
             if at_least_one_hands_valid:
@@ -360,7 +372,7 @@ class hand_pose_anno_loader:
                 curr_take_db[frame_idx] = curr_frame_anno
 
         return curr_take_db
-    
+
     def load_aria_calib(self, curr_take_name):
         # Find aria names
         take = [t for t in self.takes if t["take_name"] == curr_take_name]

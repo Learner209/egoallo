@@ -1,4 +1,4 @@
-from typing import Any, Callable, TYPE_CHECKING
+from typing import Callable, TYPE_CHECKING
 from .default_batch_collator import default_collate
 from .extended_batch_collator import extended_collate
 from .collate_dataclass import collate_dataclass, collate_tensor_only_dataclass

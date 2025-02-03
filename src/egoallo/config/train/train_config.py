@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Literal, Union
+from typing import Literal
 import dataclasses
 from egoallo import network, training_loss
 from egoallo.types import DatasetType, DatasetSliceStrategy, DatasetSplit, JointCondMode
@@ -36,7 +36,10 @@ class EgoAlloTrainConfig:
     """Only used if dataset_slice_strategy == 'random_variable_len'."""
     splits: tuple[DatasetSplit, ...] = ("train", "val")
     data_collate_fn: Literal[
-        "DefaultBatchCollator", "ExtendedBatchCollator", "EgoTrainingDataBatchCollator", "TensorOnlyDataclassBatchCollator"
+        "DefaultBatchCollator",
+        "ExtendedBatchCollator",
+        "EgoTrainingDataBatchCollator",
+        "TensorOnlyDataclassBatchCollator",
     ] = "EgoTrainingDataBatchCollator"
     dataset_type: DatasetType = "AdaptiveAmassHdf5Dataset"
     bodypose_anno_dir: Path | None = None

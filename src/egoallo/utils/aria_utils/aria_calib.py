@@ -1,27 +1,23 @@
 # project_aria.py
-import os
 import cv2
 import numpy as np
-import torch
-from PIL import Image
 from matplotlib import pyplot as plt
-from projectaria_tools.core import data_provider, calibration
+from projectaria_tools.core import calibration
 from projectaria_tools.core.image import InterpolationMethod
-from projectaria_tools.core.sensor_data import TimeDomain, TimeQueryOptions
-from projectaria_tools.core.stream_id import RecordableTypeId, StreamId
-from tqdm import tqdm
 from egoallo.utils.setup_logger import setup_logger
+
 logger = setup_logger(output=None, name=__name__)
 
 # # Calibration examples
 # Goal:
 # - Obtain camera extrinsics and intrinsics
 # - Learn to project a 3D point to camera frame
-# 
+#
 # Key learnings
 # - Get calibration for different sensors using sensor labels
 # - Learn how to use extrinsics/intrinsics to project a 3D points to a given camera
 # - Reference frame convention
+
 
 class CalibrationUtilities:
     def __init__(self, provider):
@@ -36,23 +32,25 @@ class CalibrationUtilities:
 
     def project_points_w_device_base_to_cam_frame(self):
         # ### Project a 3D point in the aria device base frame to camera frame specified by the camera_name/cam_label
-        # 
+        #
         # In this section we will learn how to retrieve calibration data and how to use it.
         # Aria calibration is defined by two objects: one defining the intrinsics (`rgb_calib.project` and `rgb_calib.unproject`) and one defining the extrinsics as a SE3 pose (`device_calib.get_transform_device_sensor(sensor_label`).
-        # 
+        #
         # Intrinsics can be used to project a 3d point to the image plane or un-project a 2d point as a bearing vector. Extrinsics are used to set the camera in world coordinates at a given rotation and position in space.
-        # 
+        #
         # ### Reference frame convention
-        # 
+        #
         # > `transform_sensor1_sensor3` = `transform_sensor1_sensor2` * `transform_sensor2_sensor3` \
         # > `point_in_sensor`: 3D point measured from sensor's reference frame \
         # > `point_in_sensor` = `transform_sensor1_sensor` * `point_in_sensor`
-        # 
+        #
         # Device Frame: `device_calib.get_origin_label() = camera-slam-left`\
         # Sensor extrinsics: `device_calib.get_transform_device_sensor(sensor_label)`
 
         camera_name = "camera-rgb"
-        transform_device_camera = self.device_calib.get_transform_device_sensor(camera_name).to_matrix()
+        transform_device_camera = self.device_calib.get_transform_device_sensor(
+            camera_name
+        ).to_matrix()
         transform_camera_device = np.linalg.inv(transform_device_camera)
         print(f"Device calibration origin label {self.device_calib.get_origin_label()}")
         print(f"{camera_name} has extrinsics of \n {transform_device_camera}")
@@ -62,8 +60,10 @@ class CalibrationUtilities:
             # project a 3D point in device frame [camera-slam-left] to rgb camera
             point_in_device = np.array([0, 0, 10])
             point_in_camera = (
-                np.matmul(transform_camera_device[0:3,0:3], point_in_device.transpose())
-                + transform_camera_device[0:3,3]
+                np.matmul(
+                    transform_camera_device[0:3, 0:3], point_in_device.transpose()
+                )
+                + transform_camera_device[0:3, 3]
             )
 
             maybe_pixel = rgb_calib.project(point_in_camera)
@@ -78,20 +78,26 @@ class CalibrationUtilities:
 
         et_calib = self.device_calib.get_aria_et_camera_calib()
         if et_calib is not None:
-            print(f"Camera {et_calib[0].get_label()} has image size {et_calib[0].get_image_size()}")
-            print(f"Camera {et_calib[1].get_label()} has image size {et_calib[1].get_image_size()}")
+            print(
+                f"Camera {et_calib[0].get_label()} has image size {et_calib[0].get_image_size()}"
+            )
+            print(
+                f"Camera {et_calib[1].get_label()} has image size {et_calib[1].get_image_size()}"
+            )
 
         imu_calib = self.device_calib.get_imu_calib("imu-left")
         if imu_calib is not None:
-            print(f"{imu_calib.get_label()} has extrinsics transform_Device_Imu:\n {imu_calib.get_transform_device_imu().to_matrix3x4()}")
+            print(
+                f"{imu_calib.get_label()} has extrinsics transform_Device_Imu:\n {imu_calib.get_transform_device_imu().to_matrix3x4()}"
+            )
 
     def undistort_aria_image(self):
         # ### Undistort an image
-        # You can remove distortions in an image in three steps. 
-        # 
+        # You can remove distortions in an image in three steps.
+        #
         # First, use the provider to access the image and the camera calibration of the stream.
-        # Then create a "linear" spherical camera model with `get_spherical_camera_calibration`. 
-        # The function allows you to specify the image size as well as focal length of the model, 
+        # Then create a "linear" spherical camera model with `get_spherical_camera_calibration`.
+        # The function allows you to specify the image size as well as focal length of the model,
         # assuming principal point is at the image center. Finally, apply `distort_by_calibration` function to distort the image.
 
         # input: retrieve image as a numpy array
@@ -108,29 +114,38 @@ class CalibrationUtilities:
         dst_calib = calibration.get_linear_camera_calibration(512, 512, 150, cam_name)
 
         # distort image
-        rectified_array = calibration.distort_by_calibration(image_array, dst_calib, src_calib, InterpolationMethod.BILINEAR)
+        rectified_array = calibration.distort_by_calibration(
+            image_array, dst_calib, src_calib, InterpolationMethod.BILINEAR
+        )
 
         # visualize input and results
         plt.figure()
         fig, axes = plt.subplots(1, 2, figsize=(12, 5))
-        fig.suptitle(f"Image undistortion (focal length = {dst_calib.get_focal_lengths()})")
+        fig.suptitle(
+            f"Image undistortion (focal length = {dst_calib.get_focal_lengths()})"
+        )
 
         axes[0].imshow(image_array, cmap="gray", vmin=0, vmax=255)
         axes[0].title.set_text(f"sensor image ({cam_name})")
-        axes[0].tick_params(left=False, right=False, labelleft=False, labelbottom=False, bottom=False)
+        axes[0].tick_params(
+            left=False, right=False, labelleft=False, labelbottom=False, bottom=False
+        )
         axes[1].imshow(rectified_array, cmap="gray", vmin=0, vmax=255)
         axes[1].title.set_text(f"undistorted image ({cam_name})")
-        axes[1].tick_params(left=False, right=False, labelleft=False, labelbottom=False, bottom=False)
+        axes[1].tick_params(
+            left=False, right=False, labelleft=False, labelbottom=False, bottom=False
+        )
         plt.show()
 
         # Note the rectified image shows a circular area of visible pixels. If you want the entire rectified image to be covered by pixels, you can increase the magnification.
 
-
     @staticmethod
-    def get_exo_cam_masks(take, exo_traj_df, portrait_view=False, dimension=(3840, 2160)):
+    def get_exo_cam_masks(
+        take, exo_traj_df, portrait_view=False, dimension=(3840, 2160)
+    ):
         """
         Generate masks for exo cameras in the undistorted aria view.
-         
+
         Parameters
         ----------
         take : dict
@@ -167,7 +182,9 @@ class CalibrationUtilities:
             D, I = CalibrationUtilities.get_distortion_and_intrinsics(calib_df)
             # Generate mask in undistorted aria view
             mask = np.full(dimension[::-1], 255, dtype=np.uint8)
-            undistorted_mask, new_K_latest = CalibrationUtilities.undistort_exocam(mask, I, D, dimension)
+            undistorted_mask, new_K_latest = CalibrationUtilities.undistort_exocam(
+                mask, I, D, dimension
+            )
             undistorted_mask = (
                 cv2.rotate(undistorted_mask, cv2.ROTATE_90_CLOCKWISE)
                 if portrait_view
@@ -175,13 +192,15 @@ class CalibrationUtilities:
             )
             undistorted_mask = undistorted_mask / 255
             exo_cam_masks[ego_exo_cam_name] = undistorted_mask
-        
+
         if len(exo_cam_masks) == 0:
-            logger.warning("No exo camera masks generated. Probably because there is a mismatch between take-file specified exo-cam_names and the goprocalibs.csv")
+            logger.warning(
+                "No exo camera masks generated. Probably because there is a mismatch between take-file specified exo-cam_names and the goprocalibs.csv"
+            )
 
         return exo_cam_masks, valid_exo_cam_names
 
-    @ staticmethod
+    @staticmethod
     def undistort_exocam(image, intrinsics, distortion_coeffs, dimension=(3840, 2160)):
         """
         Undistorts the input image using camera intrinsic and distortion parameters.
@@ -206,20 +225,18 @@ class CalibrationUtilities:
         dim2 = None
         dim3 = None
         balance = 0.8
-        # Load the distortion parameters
-        distortion_coeffs = distortion_coeffs
-        # Load the camera intrinsic parameters
-        intrinsics = intrinsics
 
-        dim1 = image.shape[:2][::-1]  # dim1 is the dimension of input image to un-distort
+        dim1 = image.shape[:2][
+            ::-1
+        ]  # dim1 is the dimension of input image to un-distort
 
         # Change the calibration dim dynamically (bouldering cam01 and cam04 are verticall for examples)
         if DIM[0] != dim1[0]:
             DIM = (DIM[1], DIM[0])
 
-        assert (
-            dim1[0] / dim1[1] == DIM[0] / DIM[1]
-        ), "Image to undistort needs to have same aspect ratio as the ones used in calibration"
+        assert dim1[0] / dim1[1] == DIM[0] / DIM[1], (
+            "Image to undistort needs to have same aspect ratio as the ones used in calibration"
+        )
         if not dim2:
             dim2 = dim1
         if not dim3:
@@ -246,8 +263,7 @@ class CalibrationUtilities:
 
         return undistorted_image, new_K
 
-
-    @ staticmethod
+    @staticmethod
     def get_distortion_and_intrinsics(_raw_camera):
         intrinsics = np.array(
             [
@@ -265,4 +281,3 @@ class CalibrationUtilities:
             ]
         )
         return distortion_coeffs, intrinsics
-

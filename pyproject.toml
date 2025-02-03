@@ -44,10 +44,16 @@ dependencies = [
     "git+https://github.com/brentyi/jaxls.git",
     "smplx",
     "joblib",
+    "pre-commit",
 ]
 
 [tool.setuptools.package-data]
 egoallo = ["py.typed"]
+
+[tool.ruff]
+exclude = [
+    "third_party",
+]
 
 [tool.ruff.lint]
 select = [

@@ -9,4 +9,3 @@ DATASET_MANIPULATORS = Registry()
 MODELS = Registry()
 DATASETS = Registry()
 CONFIGS = Registry()
-

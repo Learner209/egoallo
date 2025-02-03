@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Dict, List, Literal, Optional, Tuple, Union, TypeVar
+from typing import Dict, Literal, Tuple, Union
 from egoallo.network import AbsoluteDenoiseTraj, JointsOnlyTraj, VelocityDenoiseTraj
 
 import numpy as np
@@ -21,12 +21,7 @@ BoolArray = NDArray[np.bool_]
 ModelType = Literal["smplh", "mano", "smplx"]
 HandSide = Literal["left", "right"]
 GuidanceMode = Literal[
-    "hamer",
-    "no_hands",
-    "aria_wrist_only", 
-    "aria_hamer",
-    "hamer_wrist",
-    "hamer_reproj2"
+    "hamer", "no_hands", "aria_wrist_only", "aria_hamer", "hamer_wrist", "hamer_reproj2"
 ]
 
 # Tensor types
@@ -49,19 +44,24 @@ EvalMode = Union[Literal["hamer"], GuidanceMode]
 
 # Dataset type (for both training and inference)
 DatasetType = Literal[
-	"AdaptiveAmassHdf5Dataset",
-	"VanillaEgoAmassHdf5Dataset",
-	"EgoExoDataset",
+    "AdaptiveAmassHdf5Dataset",
+    "VanillaEgoAmassHdf5Dataset",
+    "EgoExoDataset",
 ]
 
 DatasetSliceStrategy = Literal[
-	"deterministic", "random_uniform_len", "random_variable_len", "full_sequence"
+    "deterministic", "random_uniform_len", "random_variable_len", "full_sequence"
 ]
 
 DatasetSplit = Literal["train", "val", "test", "just_humaneva"]
 
 JointCondMode = Literal[
-    "absolute", "absrel_jnts", "absrel", "absrel_global_deltas", "vel_acc", "joints_only"
+    "absolute",
+    "absrel_jnts",
+    "absrel",
+    "absrel_global_deltas",
+    "vel_acc",
+    "joints_only",
 ]
 
 LossWeights = Dict[str, float]

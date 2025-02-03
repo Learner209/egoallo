@@ -2,7 +2,6 @@
 
 import os
 
-from torch._dynamo import eval_frame
 
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
@@ -13,13 +12,9 @@ os.environ["NUMEXPR_NUM_THREADS"] = "1"
 import dataclasses
 import shutil
 from pathlib import Path
-from typing import Literal
 import time
 
 import sys
-import pytest
-from pathlib import Path
-import train_motion_prior
 from unittest.mock import patch
 
 import torch.optim.lr_scheduler
@@ -30,22 +25,18 @@ from accelerate import Accelerator, DataLoaderConfiguration
 from accelerate.utils import ProjectConfiguration
 from loguru import logger
 
-from jaxtyping import install_import_hook
 
 # Install hook before importing any modules you want to typecheck
 # with install_import_hook("egoallo", "typeguard.typechecked"):
 from egoallo import network, training_loss, training_utils
 from egoallo.data import make_batch_collator, build_dataset
 from egoallo.config.train.train_config import EgoAlloTrainConfig
-from egoallo.utils.utils import make_source_code_snapshot
-from egoallo.utils.setup_logger import setup_logger
 
 import wandb
 import datetime
 import tempfile
 from egoallo.config.inference.inference_defaults import InferenceConfig
 from egoallo.scripts.test import TestRunner
-import json
 import numpy as np
 
 

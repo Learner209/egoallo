@@ -25,9 +25,7 @@ from egoallo.inference_utils import InferenceTrajectoryPaths
 
 
 def main(
-    traj_root: Path,
-    output_dir: Path | None = None,
-    overwrite: bool = False
+    traj_root: Path, output_dir: Path | None = None, overwrite: bool = False
 ) -> None:
     """Run HaMeR for on trajectory.
 
@@ -44,10 +42,10 @@ def main(
     # Use output_dir if provided, otherwise use traj_root
     out_root = output_dir if output_dir is not None else traj_root
     out_root.mkdir(parents=True, exist_ok=True)
-    
+
     pickle_out = out_root / "hamer_outputs.pkl"
     hamer_render_out = out_root / "hamer_outputs_render"
-    
+
     run_hamer_and_save(vrs_path, pickle_out, hamer_render_out, overwrite)
 
 

@@ -5,23 +5,19 @@ from typing import (
     List,
     Optional,
     Tuple,
-    Union,
     assert_never,
-    cast,
     TYPE_CHECKING,
 )
 
-import h5py
 import numpy as np
 import torch
 import torch.utils.data
 from torch import Tensor
-from jaxtyping import Float, Bool, jaxtyped
+from jaxtyping import Float, Bool
 from egoallo.config import CONFIG_FILE, make_cfg
 from egoallo.data.dataclass import EgoTrainingData
 from egoallo.utils.setup_logger import setup_logger
 from egoallo.mapping import (
-    EGOEXO4D_EGOPOSE_BODYPOSE_MAPPINGS,
     EGOEXO4D_BODYPOSE_TO_SMPLH_INDICES,
 )
 import json
@@ -80,9 +76,9 @@ class EgoExoDataset(torch.utils.data.Dataset[EgoTrainingData]):
     def _initialize_groups(self) -> Dict[str, Any]:
         """Initialize dataset groups from annotation directory."""
         groups = {}
-        assert (
-            self._anno_dirs is not None
-        ), "Annotation directories are not set, please check your config."
+        assert self._anno_dirs is not None, (
+            "Annotation directories are not set, please check your config."
+        )
         for anno_dir in self._anno_dirs:
             for anno_path in anno_dir.rglob("*.json"):
                 # Load annotation to check validity
@@ -148,7 +144,9 @@ class EgoExoDataset(torch.utils.data.Dataset[EgoTrainingData]):
                 ]
 
                 if not all(field in frame_data for field in required_fields):
-                    assert False, f"Missing required fields in frame {frame_num} of take {take_uid}"
+                    assert False, (
+                        f"Missing required fields in frame {frame_num} of take {take_uid}"
+                    )
 
                 processed_data[take_uid][frame_num] = {
                     "body_3d_world": frame_data["body_3d_world"],
@@ -160,9 +158,9 @@ class EgoExoDataset(torch.utils.data.Dataset[EgoTrainingData]):
 
             # Ensure we have at least some valid frame data for this take
             if len(processed_data[take_uid]) <= 1:  # Only metadata
-                assert (
-                    False
-                ), f"No valid frame data found for take {take_uid} in {anno_path}"
+                assert False, (
+                    f"No valid frame data found for take {take_uid} in {anno_path}"
+                )
 
         return processed_data
 

@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Dict, Optional, Union
+from typing import Optional
 from jaxtyping import jaxtyped, Float
 from egoallo import fncsmpl
 import typeguard

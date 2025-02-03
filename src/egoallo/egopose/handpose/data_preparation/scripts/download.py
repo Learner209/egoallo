@@ -1,7 +1,5 @@
 import argparse
-import json
 import os
-import sys
 
 
 def create_arg_parse():
@@ -63,7 +61,8 @@ def find_annotated_takes(egoexo_data_dir, splits, anno_types, test_public_file_p
         # For test split, check existing takes with two options
         if split == "test":
             curr_split_cam_pose_dir = os.path.join(
-                egoexo_data_dir, f"annotations/ego_pose/{split}/camera_pose")
+                egoexo_data_dir, f"annotations/ego_pose/{split}/camera_pose"
+            )
             if os.path.exists(curr_split_cam_pose_dir):
                 curr_split_take_uids = [
                     k.split(".")[0] for k in os.listdir(curr_split_cam_pose_dir)
@@ -85,7 +84,11 @@ def find_annotated_takes(egoexo_data_dir, splits, anno_types, test_public_file_p
 
 
 def main(args):
-    all_local_take_uids = find_annotated_takes(args.egoexo_root_path, args.splits, args.anno_types, test_public_file_path=args.test_public_file_path
+    all_local_take_uids = find_annotated_takes(
+        args.egoexo_root_path,
+        args.splits,
+        args.anno_types,
+        test_public_file_path=args.test_public_file_path,
     )
     assert len(all_local_take_uids) > 0, "No takes find."
     cmd_uids = " ".join(all_local_take_uids)

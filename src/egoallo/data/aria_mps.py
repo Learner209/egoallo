@@ -4,7 +4,7 @@ from typing import Literal
 import numpy as np
 from projectaria_tools.core import mps
 from projectaria_tools.core.mps.utils import filter_points_from_confidence
-from typing import Optional, Tuple
+from typing import Tuple
 from egoallo.utils.setup_logger import setup_logger
 
 logger = setup_logger(output=None, name=__name__)
@@ -23,7 +23,9 @@ def load_point_cloud_and_find_ground(
         cache_files: Whether to cache filtered points to disk for faster future loading
     """
     filtered_points_npz_cache_path = points_path.parent / "_cached_filtered_points.npz"
-    less_filtered_points_npz_cache_path = points_path.parent / "_cached_less_filtered_points.npz"
+    less_filtered_points_npz_cache_path = (
+        points_path.parent / "_cached_less_filtered_points.npz"
+    )
 
     # Check if we should use cached files
     use_cache = cache_files and (
@@ -37,10 +39,16 @@ def load_point_cloud_and_find_ground(
         else:
             points_data = None
 
-        logger.debug("Loading pre-filtered points from %s", filtered_points_npz_cache_path)
+        logger.debug(
+            "Loading pre-filtered points from %s", filtered_points_npz_cache_path
+        )
         filtered_points_data = np.load(filtered_points_npz_cache_path)["points"]
-        logger.debug("Loading pre-filtered points from %s", less_filtered_points_npz_cache_path)
-        less_filtered_points_data = np.load(less_filtered_points_npz_cache_path)["points"]
+        logger.debug(
+            "Loading pre-filtered points from %s", less_filtered_points_npz_cache_path
+        )
+        less_filtered_points_data = np.load(less_filtered_points_npz_cache_path)[
+            "points"
+        ]
     else:
         points_data = mps.read_global_point_cloud(str(points_path))  # type: ignore
 
@@ -56,16 +64,26 @@ def load_point_cloud_and_find_ground(
             threshold_invdep=0.001,
             threshold_dep=0.05,
         )
-        filtered_points_data = np.array([x.position_world for x in filtered_points_data])  # type: ignore
-        less_filtered_points_data = np.array([x.position_world for x in less_filtered_points_data])
+        filtered_points_data = np.array(
+            [x.position_world for x in filtered_points_data]
+        )  # type: ignore
+        less_filtered_points_data = np.array(
+            [x.position_world for x in less_filtered_points_data]
+        )
 
         # Only save cache files if caching is enabled
         if cache_files:
             filtered_points_npz_cache_path.parent.mkdir(exist_ok=True, parents=True)
-            np.savez_compressed(filtered_points_npz_cache_path, points=filtered_points_data)
+            np.savez_compressed(
+                filtered_points_npz_cache_path, points=filtered_points_data
+            )
             logger.debug("Cached filtered points to %s", filtered_points_npz_cache_path)
-            np.savez_compressed(less_filtered_points_npz_cache_path, points=less_filtered_points_data)
-            logger.debug("Cached less filtered points to %s", less_filtered_points_npz_cache_path)
+            np.savez_compressed(
+                less_filtered_points_npz_cache_path, points=less_filtered_points_data
+            )
+            logger.debug(
+                "Cached less filtered points to %s", less_filtered_points_npz_cache_path
+            )
 
     assert filtered_points_data.shape == (filtered_points_data.shape[0], 3)
 

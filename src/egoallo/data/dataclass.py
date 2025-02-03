@@ -1,12 +1,10 @@
 from pathlib import Path
-from typing import Union, assert_never, TYPE_CHECKING
+from typing import TYPE_CHECKING
 import numpy as np
 import torch
 import torch.utils.data
 import typeguard
-from jaxtyping import Bool, Float, jaxtyped, Array
-from egoallo.transforms import SO3, SE3
-from egoallo import network
+from jaxtyping import Bool, Float, jaxtyped
 from torch import Tensor
 
 if TYPE_CHECKING:
@@ -15,15 +13,11 @@ if TYPE_CHECKING:
 from .. import fncsmpl, fncsmpl_extensions
 from .. import transforms as tf
 from ..tensor_dataclass import TensorDataclass
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..network import EgoDenoiserConfig
+    pass
 from ..viz.smpl_viewer import visualize_ego_training_data as viz_ego_data
-
-from jaxtyping import Float, jaxtyped
-from typeguard import typechecked
-from dataclasses import dataclass
 
 
 @jaxtyped(typechecker=typeguard.typechecked)

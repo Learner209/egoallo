@@ -96,19 +96,21 @@ class TensorDataclass:
             elif isinstance(val, TensorDataclass):
                 # raise NotImplementedError("Not implemented for TensorDataclass")
                 # TODO: only implement for the first level of recursion.
-                return type(val)(**{
-                    k: _map_impl(fn, v, f"{name}" if name else k)
-                    for k, v in vars(val).items()
-                })
+                return type(val)(
+                    **{
+                        k: _map_impl(fn, v, f"{name}" if name else k)
+                        for k, v in vars(val).items()
+                    }
+                )
             elif isinstance(val, (list, tuple)):
                 raise NotImplementedError("Not implemented for list or tuple")
-                return type(val)(_map_impl(fn, v, f"{name}[{i}]")
-                               for i, v in enumerate(val))
+                return type(val)(
+                    _map_impl(fn, v, f"{name}[{i}]") for i, v in enumerate(val)
+                )
             elif isinstance(val, dict):
                 raise NotImplementedError("Not implemented for dict")
                 assert type(val) is dict  # No subclass support.
-                return {k: _map_impl(fn, v, f"{name}[{k}]")
-                       for k, v in val.items()}  # type: ignore
+                return {k: _map_impl(fn, v, f"{name}[{k}]") for k, v in val.items()}  # type: ignore
             else:
                 return val
 

@@ -9,23 +9,19 @@
 #
 
 # from projectaria_tools.utils.vrs_to_mp4_utils import get_timestamp_from_mp4
-import json
-import os
-import os.path as osp
-import numpy as np
-from collections import defaultdict
 import numpy as np
 import plotly.graph_objs as go
-import pytorch3d.transforms as transforms
-import torch
 
 from egoallo.utils.setup_logger import setup_logger
 
 from egoallo.config import make_cfg, CONFIG_FILE
-from typing import Tuple, Dict, List, Any, Union, Optional, Type
+from typing import List
 
-from egoallo.utils.utils import NDArray, Tensor
-from egoallo.smpl.smplh_utils import SMPL_JOINT_NAMES, NUM_SMPL_JNTS, EGOEXO4D_EGOPOSE_BODYPOSE_MAPPINGS, NUM_EGOEXO4D_EGOPOSE_JNTS
+from egoallo.utils.utils import NDArray
+from egoallo.smpl.smplh_utils import (
+    SMPL_JOINT_NAMES,
+    EGOEXO4D_EGOPOSE_BODYPOSE_MAPPINGS,
+)
 
 local_config_file = CONFIG_FILE
 CFG = make_cfg(config_name="defaults", config_file=local_config_file, cli_args=[])
@@ -52,10 +48,16 @@ def build_cam_frustum_w_extr(T_world_cam):
     """
 
     points = (
-            np.array(
-                [[0, 0, 0, 1], [0.5, 0.5, 1, 1], [-0.5, 0.5, 1, 1], [-0.5, -0.5, 1, 1], [0.5, -0.5, 1, 1]]
-            )
-            * CFG.plotly.camera_frustum.scale
+        np.array(
+            [
+                [0, 0, 0, 1],
+                [0.5, 0.5, 1, 1],
+                [-0.5, 0.5, 1, 1],
+                [-0.5, -0.5, 1, 1],
+                [0.5, -0.5, 1, 1],
+            ]
+        )
+        * CFG.plotly.camera_frustum.scale
     )
     points_transformed = T_world_cam @ points.transpose()
 
@@ -73,6 +75,7 @@ def build_cam_frustum_w_extr(T_world_cam):
         opacity=1.0,
         hoverinfo="none",
     )
+
 
 def draw_coco_kinematic_tree(coco_kpts: NDArray, coco_cfg: None) -> List[go.Scatter3d]:
     """
@@ -97,14 +100,14 @@ def draw_coco_kinematic_tree(coco_kpts: NDArray, coco_cfg: None) -> List[go.Scat
         (5, 7),  # Left Shoulder to Left Elbow
         (7, 9),  # Left Elbow to Left Wrist
         (6, 8),  # Right Shoulder to Right Elbow
-        (8, 10), # Right Elbow to Right Wrist
-        (11, 12),# Left Hip to Right Hip
-        (5, 11), # Left Shoulder to Left Hip
-        (6, 12), # Right Shoulder to Right Hip
-        (11, 13),# Left Hip to Left Knee
-        (13, 15),# Left Knee to Left Ankle
-        (12, 14),# Right Hip to Right Knee
-        (14, 16) # Right Knee to Right Ankle
+        (8, 10),  # Right Elbow to Right Wrist
+        (11, 12),  # Left Hip to Right Hip
+        (5, 11),  # Left Shoulder to Left Hip
+        (6, 12),  # Right Shoulder to Right Hip
+        (11, 13),  # Left Hip to Left Knee
+        (13, 15),  # Left Knee to Left Ankle
+        (12, 14),  # Right Hip to Right Knee
+        (14, 16),  # Right Knee to Right Ankle
     ]
 
     traces = []
@@ -114,29 +117,31 @@ def draw_coco_kinematic_tree(coco_kpts: NDArray, coco_cfg: None) -> List[go.Scat
         z = [coco_kpts[p1][2], coco_kpts[p2][2]]
 
         if ind < 4:
-            marker_color =  coco_cfg.marker_color_for_head 
+            marker_color = coco_cfg.marker_color_for_head
             line_color = coco_cfg.line_color_for_head
         else:
-            marker_color =coco_cfg.marker_color_for_body
-            line_color =coco_cfg.line_color_for_body
+            marker_color = coco_cfg.marker_color_for_body
+            line_color = coco_cfg.line_color_for_body
         trace = go.Scatter3d(
-            x=x, y=y, z=z,
-            mode='lines+markers',
+            x=x,
+            y=y,
+            z=z,
+            mode="lines+markers",
             marker=dict(
                 size=coco_cfg.marker_size,
                 color=marker_color,
             ),
-            line=dict(
-                color=line_color,
-                width=coco_cfg.line_size
-            ),        
+            line=dict(color=line_color, width=coco_cfg.line_size),
             visible=False,
-            name=f'COCO: {EGOEXO4D_EGOPOSE_BODYPOSE_MAPPINGS[p1]} to {EGOEXO4D_EGOPOSE_BODYPOSE_MAPPINGS[p2]}',
+            name=f"COCO: {EGOEXO4D_EGOPOSE_BODYPOSE_MAPPINGS[p1]} to {EGOEXO4D_EGOPOSE_BODYPOSE_MAPPINGS[p2]}",
         )
         traces.append(trace)
 
     return traces
+
+
 # endregion
+
 
 def draw_smpl_kinematic_tree(smpl_kpts):
     """
@@ -160,21 +165,21 @@ def draw_smpl_kinematic_tree(smpl_kpts):
         (2, 5),  # Right Hip to Right Knee
         (4, 7),  # Left Knee to Left Ankle
         (5, 8),  # Right Knee to Right Ankle
-        (7, 10), # Left Ankle to Left Foot
-        (8, 11), # Right Ankle to Right Foot
+        (7, 10),  # Left Ankle to Left Foot
+        (8, 11),  # Right Ankle to Right Foot
         (0, 3),  # Pelvis to Spine1
         (3, 6),  # Spine1 to Spine2
         (6, 9),  # Spine2 to Spine3
-        (9, 12), # Spine3 to Neck
-        (12, 15),# Neck to Head
-        (12, 16),# Neck to Left Collar
-        (12, 17),# Neck to Right Collar
-        (16, 18),# Left Collar to Left Shoulder
-        (17, 19),# Right Collar to Right Shoulder
-        (18, 20),# Left Shoulder to Left Elbow
-        (19, 21),# Right Shoulder to Right Elbow
-        (20, 22),# Left Elbow to Left Wrist
-        (21, 23) # Right Elbow to Right Wrist
+        (9, 12),  # Spine3 to Neck
+        (12, 15),  # Neck to Head
+        (12, 16),  # Neck to Left Collar
+        (12, 17),  # Neck to Right Collar
+        (16, 18),  # Left Collar to Left Shoulder
+        (17, 19),  # Right Collar to Right Shoulder
+        (18, 20),  # Left Shoulder to Left Elbow
+        (19, 21),  # Right Shoulder to Right Elbow
+        (20, 22),  # Left Elbow to Left Wrist
+        (21, 23),  # Right Elbow to Right Wrist
     ]
 
     traces = []
@@ -184,31 +189,33 @@ def draw_smpl_kinematic_tree(smpl_kpts):
         z = [smpl_kpts[p1][2], smpl_kpts[p2][2]]
 
         if ind < 4:
-            marker_color =  CFG.plotly.smpl_kinematic_tree.marker_color_for_head 
+            marker_color = CFG.plotly.smpl_kinematic_tree.marker_color_for_head
             line_color = CFG.plotly.smpl_kinematic_tree.line_color_for_head
         else:
-            marker_color =CFG.plotly.smpl_kinematic_tree.marker_color_for_body
-            line_color =CFG.plotly.smpl_kinematic_tree.line_color_for_body
+            marker_color = CFG.plotly.smpl_kinematic_tree.marker_color_for_body
+            line_color = CFG.plotly.smpl_kinematic_tree.line_color_for_body
 
         trace = go.Scatter3d(
-            x=x, y=y, z=z,
-            mode='lines+markers',
+            x=x,
+            y=y,
+            z=z,
+            mode="lines+markers",
             marker=dict(
                 size=CFG.plotly.smpl_kinematic_tree.line_size,
                 color=marker_color,
             ),
-            line=dict(
-                color=line_color,
-                width=CFG.plotly.smpl_kinematic_tree.line_size
-            ),
+            line=dict(color=line_color, width=CFG.plotly.smpl_kinematic_tree.line_size),
             visible=False,
-            name=f'SMPL: {SMPL_JOINT_NAMES[p1]} to {SMPL_JOINT_NAMES[p2]}',
+            name=f"SMPL: {SMPL_JOINT_NAMES[p1]} to {SMPL_JOINT_NAMES[p2]}",
         )
         traces.append(trace)
 
     return traces
 
-def draw_camera_pose(T: NDArray, colors: List[str] =['red', 'green', 'blue']) -> List[go.Scatter3d]:
+
+def draw_camera_pose(
+    T: NDArray, colors: List[str] = ["red", "green", "blue"]
+) -> List[go.Scatter3d]:
     """
     Draw an RGB 3D coordinate system based on a 3x4 camera pose matrix.
 
@@ -221,8 +228,8 @@ def draw_camera_pose(T: NDArray, colors: List[str] =['red', 'green', 'blue']) ->
     -------
     Plotly figure
     """
-    R = T[:, :3] 
-    t = T[:, 3] 
+    R = T[:, :3]
+    t = T[:, 3]
 
     # Define unit vectors for x, y, z axes
     scale = 0.2
@@ -232,18 +239,20 @@ def draw_camera_pose(T: NDArray, colors: List[str] =['red', 'green', 'blue']) ->
 
     # Create traces for each axis
     axes = []
-    labels = ['x', 'y', 'z']
+    labels = ["x", "y", "z"]
     for axis, color, label in zip([x_axis, y_axis, z_axis], colors, labels):
-        axes.append(go.Scatter3d(
-            x=[t[0], t[0] + axis[0]],
-            y=[t[1], t[1] + axis[1]],
-            z=[t[2], t[2] + axis[2]],
-            mode='lines',
-            line=dict(
-                color=color,
-                width=CFG.plotly.camera_3d_coordinate.width,
-            ),
-            name=label,
-            visible=False,
-        ))
+        axes.append(
+            go.Scatter3d(
+                x=[t[0], t[0] + axis[0]],
+                y=[t[1], t[1] + axis[1]],
+                z=[t[2], t[2] + axis[2]],
+                mode="lines",
+                line=dict(
+                    color=color,
+                    width=CFG.plotly.camera_3d_coordinate.width,
+                ),
+                name=label,
+                visible=False,
+            )
+        )
     return axes

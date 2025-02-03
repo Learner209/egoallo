@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from typing import Literal, TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING
 import dataclasses
 from pathlib import Path
 from egoallo.types import DatasetType, DatasetSliceStrategy
 
-import torch
 
 if TYPE_CHECKING:
     from egoallo.config.inference.inference_defaults import InferenceConfig

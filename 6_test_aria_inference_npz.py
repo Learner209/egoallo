@@ -7,13 +7,15 @@ from pathlib import Path
 
 from egoallo import fncsmpl, network
 from egoallo.vis_helpers import visualize_traj_and_hand_detections
-from egoallo.transforms import SO3, SE3
+from egoallo.transforms import SO3
 import dataclasses
 
 
 @dataclasses.dataclass
 class Args:
-    npz_path: Path = Path("./egoallo_example_trajectories/coffeemachine/egoallo_outputs/20240929-011937_10-522.npz")
+    npz_path: Path = Path(
+        "./egoallo_example_trajectories/coffeemachine/egoallo_outputs/20240929-011937_10-522.npz"
+    )
     """Path to the input trajectory."""
     smplh_npz_path: Path = Path("./data/smplh/neutral/model.npz")
     """Path to the SMPLH model."""
@@ -30,27 +32,30 @@ def main(
     body_model = fncsmpl.SmplhModel.load(args.smplh_npz_path).to(device)
 
     # Load trajectory data from npz file
-    import ipdb; ipdb.set_trace()
+    import ipdb
 
-    Ts_world_cpf = torch.from_numpy(traj_data['Ts_world_cpf']).to(device)
-    body_quats = torch.from_numpy(traj_data['body_quats']).to(device)
-    left_hand_quats = torch.from_numpy(traj_data['left_hand_quats']).to(device)
-    right_hand_quats = torch.from_numpy(traj_data['right_hand_quats']).to(device)
-    contacts = torch.from_numpy(traj_data['contacts']).to(device)
-    betas = torch.from_numpy(traj_data['betas']).to(device)
+    ipdb.set_trace()
+
+    Ts_world_cpf = torch.from_numpy(traj_data["Ts_world_cpf"]).to(device)
+    body_quats = torch.from_numpy(traj_data["body_quats"]).to(device)
+    left_hand_quats = torch.from_numpy(traj_data["left_hand_quats"]).to(device)
+    right_hand_quats = torch.from_numpy(traj_data["right_hand_quats"]).to(device)
+    contacts = torch.from_numpy(traj_data["contacts"]).to(device)
+    betas = torch.from_numpy(traj_data["betas"]).to(device)
 
     # Convert quats to rotation matrices
     body_rotmats = SO3(body_quats).as_matrix()
-    hand_rotmats = SO3(torch.cat([left_hand_quats, right_hand_quats], dim=-2)).as_matrix()
+    hand_rotmats = SO3(
+        torch.cat([left_hand_quats, right_hand_quats], dim=-2)
+    ).as_matrix()
 
     # Create EgoDenoiseTraj instance
     traj = network.AbsoluteDenoiseTraj(
         betas=betas,
         body_rotmats=body_rotmats,
         contacts=contacts,
-        hand_rotmats=hand_rotmats
+        hand_rotmats=hand_rotmats,
     )
-
 
     # Visualize
     if args.visualize_traj:
@@ -73,4 +78,5 @@ def main(
 
 if __name__ == "__main__":
     import tyro
+
     main(tyro.cli(Args))

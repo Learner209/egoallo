@@ -7,37 +7,20 @@ import torch
 import os
 import os.path as osp
 import re
-from typing import TypeVar, Union, Callable, Type, Any
-import logging
 import sys
 import ipdb
 import shutil
-import pdb
 import argparse
 import glob
 import json
-from contextlib import redirect_stdout
-import numpy as np
-import torch
-import os
-import os.path as osp
-import re
-import sys
-import ipdb
-import shutil
-import pdb
-import argparse
-import glob
-from typing import Optional, Tuple
-from torch import Tensor
-from pathlib import Path
+from typing import Tuple
+from egoallo.config import make_cfg, CONFIG_FILE
 
 from yacs.config import CfgNode as CN
 from egoallo.utils.setup_logger import setup_logger
 
 local_logger = setup_logger(output=None, name=__name__)
 
-from egoallo.config import make_cfg, CONFIG_FILE
 
 local_config_file = CONFIG_FILE
 CFG = make_cfg(config_name="defaults", config_file=local_config_file, cli_args=[])
@@ -45,7 +28,6 @@ CFG = make_cfg(config_name="defaults", config_file=local_config_file, cli_args=[
 
 # type annotation type aliases
 NDArray = np.ndarray
-Tensor = torch.Tensor
 
 
 def find_numerical_key_in_dict(d):

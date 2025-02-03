@@ -42,7 +42,15 @@ class _ColorfulFormatter(logging.Formatter):
 
 # so that calling setup_logger multiple times won't add many handlers
 @functools.lru_cache()
-def setup_logger(output=None, distributed_rank=0, *, color=True, name="imagenet", abbrev_name=None, level=logging.DEBUG):
+def setup_logger(
+    output=None,
+    distributed_rank=0,
+    *,
+    color=True,
+    name="imagenet",
+    abbrev_name=None,
+    level=logging.DEBUG,
+):
     """
     Initialize the detectron2 logger and set its verbosity level.
 
@@ -71,7 +79,7 @@ def setup_logger(output=None, distributed_rank=0, *, color=True, name="imagenet"
 
         plain_formatter = logging.Formatter(
             "[%(asctime)s.%(msecs)03d] %(pathname)s:%(lineno)d: %(message)s",
-            datefmt="%m/%d %H:%M:%S"
+            datefmt="%m/%d %H:%M:%S",
         )
 
         # stdout logging: master only
@@ -80,7 +88,9 @@ def setup_logger(output=None, distributed_rank=0, *, color=True, name="imagenet"
             ch.setLevel(level)
             if color:
                 formatter = _ColorfulFormatter(
-                    "[%(asctime)s.%(msecs)03d]: " + "%(pathname)s:%(lineno)d: " + "%(message)s",
+                    "[%(asctime)s.%(msecs)03d]: "
+                    + "%(pathname)s:%(lineno)d: "
+                    + "%(message)s",
                     datefmt="%m/%d %H:%M:%S",
                     root_name=name,
                     abbrev_name=str(abbrev_name),

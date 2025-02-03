@@ -1,5 +1,5 @@
 import torch
-import torch.nn as nn
+from torch import nn
 
 
 """
@@ -18,8 +18,7 @@ import torch.nn as nn
 # remove/delete specified layer
 # --------------------------------------------
 def deleteLayer(model, layer_type=nn.BatchNorm2d):
-    ''' Kai Zhang, 11/Jan/2019.
-    '''
+    """Kai Zhang, 11/Jan/2019."""
     for k, m in list(model.named_children()):
         if isinstance(m, layer_type):
             del model._modules[k]
@@ -30,14 +29,17 @@ def deleteLayer(model, layer_type=nn.BatchNorm2d):
 # merge bn, "conv+bn" --> "conv"
 # --------------------------------------------
 def merge_bn(model):
-    ''' Kai Zhang, 11/Jan/2019.
+    """Kai Zhang, 11/Jan/2019.
     merge all 'Conv+BN' (or 'TConv+BN') into 'Conv' (or 'TConv')
     based on https://github.com/pytorch/pytorch/pull/901
-    '''
+    """
     prev_m = None
     for k, m in list(model.named_children()):
-        if (isinstance(m, nn.BatchNorm2d) or isinstance(m, nn.BatchNorm1d)) and (isinstance(prev_m, nn.Conv2d) or isinstance(prev_m, nn.Linear) or isinstance(prev_m, nn.ConvTranspose2d)):
-
+        if (isinstance(m, nn.BatchNorm2d) or isinstance(m, nn.BatchNorm1d)) and (
+            isinstance(prev_m, nn.Conv2d)
+            or isinstance(prev_m, nn.Linear)
+            or isinstance(prev_m, nn.ConvTranspose2d)
+        ):
             w = prev_m.weight.data
 
             if prev_m.bias is None:
@@ -67,10 +69,13 @@ def merge_bn(model):
 # add bn, "conv" --> "conv+bn"
 # --------------------------------------------
 def add_bn(model):
-    ''' Kai Zhang, 11/Jan/2019.
-    '''
+    """Kai Zhang, 11/Jan/2019."""
     for k, m in list(model.named_children()):
-        if (isinstance(m, nn.Conv2d) or isinstance(m, nn.Linear) or isinstance(m, nn.ConvTranspose2d)):
+        if (
+            isinstance(m, nn.Conv2d)
+            or isinstance(m, nn.Linear)
+            or isinstance(m, nn.ConvTranspose2d)
+        ):
             b = nn.BatchNorm2d(m.out_channels, momentum=0.1, affine=True)
             b.weight.data.fill_(1)
             new_m = nn.Sequential(model._modules[k], b)
@@ -82,8 +87,7 @@ def add_bn(model):
 # tidy model after removing bn
 # --------------------------------------------
 def tidy_sequential(model):
-    ''' Kai Zhang, 11/Jan/2019.
-    '''
+    """Kai Zhang, 11/Jan/2019."""
     for k, m in list(model.named_children()):
         if isinstance(m, nn.Sequential):
             if m.__len__() == 1:

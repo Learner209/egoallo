@@ -1,20 +1,27 @@
 # Standard library imports
-import copy
 import json
 import os
 import os.path as osp
 import pickle
-from collections import defaultdict
 from contextlib import redirect_stdout
 from pathlib import Path
 from typing import Any, Dict, List
 
 # Third-party imports
-import joblib
-import numpy as np
 import torch
-import tyro
 from yacs.config import CfgNode as CN
+from egoallo.config import CONFIG_FILE, make_cfg
+from egoallo.egopose.bodypose.bodypose_dataloader import body_pose_anno_loader
+from egoallo.egopose.handpose.data_preparation.utils.config import (
+    create_egopose_processing_argparse,
+)
+from egoallo.utils.utils import debug_on_error
+from egoallo.utils.setup_logger import setup_logger
+from egoallo.utils.smpl_mapping.mapping import (
+    EGOEXO4D_EGOPOSE_BODYPOSE_MAPPINGS,
+    EGOEXO4D_EGOPOSE_HANDPOSE_MAPPINGS,
+)
+
 
 # Set environment variables for threading
 os.environ["OMP_NUM_THREADS"] = "1"
@@ -27,26 +34,14 @@ os.environ["NUMEXPR_NUM_THREADS"] = "1"
 torch.multiprocessing.set_start_method("spawn", force=True)
 
 # Local imports
-from egoallo.config import CONFIG_FILE, make_cfg
-from egoallo.egopose.bodypose.bodypose_dataloader import body_pose_anno_loader
-from egoallo.egopose.handpose.data_preparation.utils.config import (
-    create_egopose_processing_argparse,
-)
-from egoallo.utils.utils import debug_on_error, deterministic
 
 local_config_file = CONFIG_FILE
 CFG = make_cfg(config_name="defaults", config_file=local_config_file, cli_args=[])
 
-from egoallo.utils.setup_logger import setup_logger
 
 logger = setup_logger(output=None, name=__name__)
 
 debug_on_error(debug=True, logger=logger)
-
-from egoallo.utils.smpl_mapping.mapping import (
-    EGOEXO4D_EGOPOSE_BODYPOSE_MAPPINGS,
-    EGOEXO4D_EGOPOSE_HANDPOSE_MAPPINGS,
-)
 
 BODY_JOINTS = EGOEXO4D_EGOPOSE_BODYPOSE_MAPPINGS
 HAND_JOINTS = EGOEXO4D_EGOPOSE_HANDPOSE_MAPPINGS
@@ -136,11 +131,11 @@ def log_analysis_results(
     logger.info("Overall Statistics:")
     logger.info(f"Total Takes Processed: {stats['total_takes']}")
     logger.info(
-        f"Valid Takes: {stats['valid_takes']} ({stats['valid_takes']/stats['total_takes']*100:.2f}%)"
+        f"Valid Takes: {stats['valid_takes']} ({stats['valid_takes'] / stats['total_takes'] * 100:.2f}%)"
     )
     logger.info(f"Total Frames: {stats['total_frames']}")
     logger.info(
-        f"Valid Frames: {stats['valid_frames']} ({stats['valid_frames']/stats['total_frames']*100:.2f}%)"
+        f"Valid Frames: {stats['valid_frames']} ({stats['valid_frames'] / stats['total_frames'] * 100:.2f}%)"
     )
 
     # Keypoint filtering breakdown
@@ -201,7 +196,7 @@ def create_body_gt_anno(args):
 
     # Add analysis
     analysis_output_path = os.path.join(gt_output_dir, "preprocessing_analysis.txt")
-    stats = analyze_preprocessing_pipeline(args, analysis_output_path)
+    analyze_preprocessing_pipeline(args, analysis_output_path)
 
 
 def print_saved_stats(
@@ -338,4 +333,3 @@ if __name__ == "__main__":
 
     main(preprocess_cfg)
     # tyro.cli(extract_ground_heights)
-

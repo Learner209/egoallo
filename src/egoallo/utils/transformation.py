@@ -29,22 +29,17 @@ Author: Christoph Gohlke
 Organization: Laboratory for Fluorescence Dynamics, University of California, Irvine
 """
 
-
 from __future__ import division, print_function
 
 import math
 
 import numpy
 import torch
-import torch.nn as nn
+from torch import nn
 
-import torchgeometry as tgm
-import cv2
 import numpy as np
-import random
 from pytorch3d import transforms as transforms
 
-from torch.nn import functional as F
 
 __all__ = [
     # functional api
@@ -56,8 +51,7 @@ __all__ = [
     "aa_to_rotMat",
     "rotMat_to_aa",
     "rotMat_to_quat",
-    "quat_to_aa",
-    "aa_to_quat",
+    "quat_to_aa_t",
     "rtvec_to_pose",
     # layer api
     "RadToDeg",
@@ -80,17 +74,35 @@ _NEXT_AXIS = [1, 2, 0, 1]
 
 # map axes strings to/from tuples of (inner axis, parity, repetition, frame)
 _AXES2TUPLE = {
-    'sxyz': (0, 0, 0, 0), 'sxyx': (0, 0, 1, 0), 'sxzy': (0, 1, 0, 0),
-    'sxzx': (0, 1, 1, 0), 'syzx': (1, 0, 0, 0), 'syzy': (1, 0, 1, 0),
-    'syxz': (1, 1, 0, 0), 'syxy': (1, 1, 1, 0), 'szxy': (2, 0, 0, 0),
-    'szxz': (2, 0, 1, 0), 'szyx': (2, 1, 0, 0), 'szyz': (2, 1, 1, 0),
-    'rzyx': (0, 0, 0, 1), 'rxyx': (0, 0, 1, 1), 'ryzx': (0, 1, 0, 1),
-    'rxzx': (0, 1, 1, 1), 'rxzy': (1, 0, 0, 1), 'ryzy': (1, 0, 1, 1),
-    'rzxy': (1, 1, 0, 1), 'ryxy': (1, 1, 1, 1), 'ryxz': (2, 0, 0, 1),
-    'rzxz': (2, 0, 1, 1), 'rxyz': (2, 1, 0, 1), 'rzyz': (2, 1, 1, 1)}
+    "sxyz": (0, 0, 0, 0),
+    "sxyx": (0, 0, 1, 0),
+    "sxzy": (0, 1, 0, 0),
+    "sxzx": (0, 1, 1, 0),
+    "syzx": (1, 0, 0, 0),
+    "syzy": (1, 0, 1, 0),
+    "syxz": (1, 1, 0, 0),
+    "syxy": (1, 1, 1, 0),
+    "szxy": (2, 0, 0, 0),
+    "szxz": (2, 0, 1, 0),
+    "szyx": (2, 1, 0, 0),
+    "szyz": (2, 1, 1, 0),
+    "rzyx": (0, 0, 0, 1),
+    "rxyx": (0, 0, 1, 1),
+    "ryzx": (0, 1, 0, 1),
+    "rxzx": (0, 1, 1, 1),
+    "rxzy": (1, 0, 0, 1),
+    "ryzy": (1, 0, 1, 1),
+    "rzxy": (1, 1, 0, 1),
+    "ryxy": (1, 1, 1, 1),
+    "ryxz": (2, 0, 0, 1),
+    "rzxz": (2, 0, 1, 1),
+    "rxyz": (2, 1, 0, 1),
+    "rzyz": (2, 1, 1, 1),
+}
 _TUPLE2AXES = dict((v, k) for k, v in _AXES2TUPLE.items())
 
 numpy.set_printoptions(suppress=True, precision=5)
+
 
 def length(x, axis=-1, keepdims=True):
     """
@@ -104,6 +116,7 @@ def length(x, axis=-1, keepdims=True):
     lgth = np.sqrt(np.sum(x * x, axis=axis, keepdims=keepdims))
     return lgth
 
+
 def length_t(x, dim=-1, keepdim=True):
     """
     Computes vector norm along a tensor axis(axes)
@@ -115,6 +128,7 @@ def length_t(x, dim=-1, keepdim=True):
     """
     lgth = torch.sqrt(torch.sum(x * x, dim=dim, keepdim=keepdim))
     return lgth
+
 
 def normalize(x, axis=-1, eps=1e-8):
     """
@@ -128,6 +142,7 @@ def normalize(x, axis=-1, eps=1e-8):
     res = x / (length(x, axis=axis) + eps)
     return res
 
+
 def normalize_t(x, dim=-1, eps=1e-8):
     """
     Normalizes a tensor over some dim (dims)
@@ -139,6 +154,7 @@ def normalize_t(x, dim=-1, eps=1e-8):
     """
     res = x / (length_t(x, dim=dim) + eps)
     return res
+
 
 def safe_acos(q):
     """
@@ -158,7 +174,7 @@ def safe_acos(q):
     --------
     >>> res = safe_acos(torch.rand(5,3,4))
     """
-    return torch.acos(torch.clamp(q, -1.0+1e-7, 1.0-1e-7))
+    return torch.acos(torch.clamp(q, -1.0 + 1e-7, 1.0 - 1e-7))
 
 
 def rad2deg(t):
@@ -175,10 +191,9 @@ def rad2deg(t):
         >>> output = rad2deg(input)
     """
     if not torch.is_tensor(t):
-        raise TypeError("Input type is not a torch.Tensor. Got {}"
-                        .format(type(t)))
+        raise TypeError("Input type is not a torch.Tensor. Got {}".format(type(t)))
 
-    return 180. * t / PI.to(t.device).type(t.dtype)
+    return 180.0 * t / PI.to(t.device).type(t.dtype)
 
 
 def deg2rad(tensor):
@@ -196,10 +211,9 @@ def deg2rad(tensor):
         >>> output = deg2rad(input)
     """
     if not torch.is_tensor(tensor):
-        raise TypeError("Input type is not a torch.Tensor. Got {}"
-                        .format(type(tensor)))
+        raise TypeError("Input type is not a torch.Tensor. Got {}".format(type(tensor)))
 
-    return tensor * PI.to(tensor.device).type(tensor.dtype) / 180.
+    return tensor * PI.to(tensor.device).type(tensor.dtype) / 180.0
 
 
 def convert_points_from_homogeneous(points):
@@ -215,11 +229,11 @@ def convert_points_from_homogeneous(points):
         >>> output = convert_points_from_homogeneous(input)  # BxNx2
     """
     if not torch.is_tensor(points):
-        raise TypeError("Input type is not a torch.Tensor. Got {}".format(
-            type(points)))
+        raise TypeError("Input type is not a torch.Tensor. Got {}".format(type(points)))
     if len(points.shape) < 2:
-        raise ValueError("Input must be at least a 2D tensor. Got {}".format(
-            points.shape))
+        raise ValueError(
+            "Input must be at least a 2D tensor. Got {}".format(points.shape)
+        )
     return points[..., :-1] / points[..., -1:]
 
 
@@ -234,11 +248,11 @@ def convert_points_to_homogeneous(points):
         >>> output = convert_points_to_homogeneous(input)  # BxNx4
     """
     if not torch.is_tensor(points):
-        raise TypeError("Input type is not a torch.Tensor. Got {}".format(
-            type(points)))
+        raise TypeError("Input type is not a torch.Tensor. Got {}".format(type(points)))
     if len(points.shape) < 2:
-        raise ValueError("Input must be at least a 2D tensor. Got {}".format(
-            points.shape))
+        raise ValueError(
+            "Input must be at least a 2D tensor. Got {}".format(points.shape)
+        )
     return nn.functional.pad(points, (0, 1), "constant", 1.0)
 
 
@@ -259,6 +273,7 @@ def aa_to_rotMat(aa):
     >>> input = torch.rand(10, 3)  # Nx3
     >>> output = aa_to_rotMat(input)  # Nx4x4
     """
+
     def _compute_rotMat(aa, theta2, eps=1e-6):
         # We want to be careful to only evaluate the square root if the
         # norm of the aa vector is greater than zero. Otherwise
@@ -280,14 +295,16 @@ def aa_to_rotMat(aa):
         r12 = -wx * sin_theta + wy * wz * (k_one - cos_theta)
         r22 = cos_theta + wz * wz * (k_one - cos_theta)
         rotation_matrix = torch.cat(
-            [r00, r01, r02, r10, r11, r12, r20, r21, r22], dim=1)
+            [r00, r01, r02, r10, r11, r12, r20, r21, r22], dim=1
+        )
         return rotation_matrix.view(-1, 3, 3)
 
     def _compute_rotMat_taylor(aa):
         rx, ry, rz = torch.chunk(aa, 3, dim=1)
         k_one = torch.ones_like(rx)
         rotation_matrix = torch.cat(
-            [k_one, -rz, ry, rz, k_one, -rx, -ry, rx, k_one], dim=1)
+            [k_one, -rz, ry, rz, k_one, -rx, -ry, rx, k_one], dim=1
+        )
         return rotation_matrix.view(-1, 3, 3)
 
     # stolen from ceres/rotation.h
@@ -311,8 +328,9 @@ def aa_to_rotMat(aa):
     rotMat = torch.eye(4).to(aa.device).type_as(aa)
     rotMat = rotMat.view(1, 4, 4).repeat(batch_size, 1, 1)
     # fill output matrix with masked values
-    rotMat[..., :3, :3] = \
+    rotMat[..., :3, :3] = (
         mask_pos * rotation_matrix_normal + mask_neg * rotation_matrix_taylor
+    )
     return rotMat  # Nx4x4
 
 
@@ -334,9 +352,9 @@ def rtvec_to_pose(rtvec):
         >>> input = torch.rand(3, 6)  # Nx6
         >>> output = rtvec_to_pose(input)  # Nx4x4
     """
-    assert rtvec.shape[-1] == 6, 'rtvec=[rx, ry, rz, tx, ty, tz]'
-    pose = aa_to_rotMat(rtvec[..., :3]) # N x 4 x 4
-    pose[..., :3, 3] = rtvec[..., 3:] # N x 4 x 4
+    assert rtvec.shape[-1] == 6, "rtvec=[rx, ry, rz, tx, ty, tz]"
+    pose = aa_to_rotMat(rtvec[..., :3])  # N x 4 x 4
+    pose[..., :3, 3] = rtvec[..., 3:]  # N x 4 x 4
     return pose
 
 
@@ -356,42 +374,49 @@ def orth6d_to_rotMat(ortho6d):
     >>> rotMats = orth6d_to_rotMat(ortho6d)
     """
 
-
-    def normalize_vector(v, return_mag =False):
-        batch=v.shape[0]
-        v_mag = torch.sqrt(v.pow(2).sum(1))# batch
-        v_mag = torch.max(v_mag, torch.autograd.Variable(torch.tensor([1e-8], dtype = v_mag.dtype).to(v.device)))
-        v_mag = v_mag.view(batch,1).expand(batch,v.shape[1])
-        v = v/v_mag
-        if(return_mag==True):
-            return v, v_mag[:,0]
+    def normalize_vector(v, return_mag=False):
+        batch = v.shape[0]
+        v_mag = torch.sqrt(v.pow(2).sum(1))  # batch
+        v_mag = torch.max(
+            v_mag,
+            torch.autograd.Variable(
+                torch.tensor([1e-8], dtype=v_mag.dtype).to(v.device)
+            ),
+        )
+        v_mag = v_mag.view(batch, 1).expand(batch, v.shape[1])
+        v = v / v_mag
+        if return_mag is True:
+            return v, v_mag[:, 0]
         else:
             return v
 
-    def cross_product( u, v):
+    def cross_product(u, v):
         batch = u.shape[0]
-        i = u[:,1]*v[:,2] - u[:,2]*v[:,1]
-        j = u[:,2]*v[:,0] - u[:,0]*v[:,2]
-        k = u[:,0]*v[:,1] - u[:,1]*v[:,0]
+        i = u[:, 1] * v[:, 2] - u[:, 2] * v[:, 1]
+        j = u[:, 2] * v[:, 0] - u[:, 0] * v[:, 2]
+        k = u[:, 0] * v[:, 1] - u[:, 1] * v[:, 0]
 
-        out = torch.cat((i.view(batch,1), j.view(batch,1), k.view(batch,1)),1) # BS x 3
+        out = torch.cat(
+            (i.view(batch, 1), j.view(batch, 1), k.view(batch, 1)), 1
+        )  # BS x 3
 
         return out
 
-    x_raw = ortho6d[:,0:3] # BS x 3
-    y_raw = ortho6d[:,3:6] # BS x 3
+    x_raw = ortho6d[:, 0:3]  # BS x 3
+    y_raw = ortho6d[:, 3:6]  # BS x 3
 
     x = normalize_vector(x_raw)  # BS x 3
-    z = cross_product(x,y_raw)  # BS x 3
-    z = normalize_vector(z) # BS x 3
-    y = cross_product(z,x) # BS x 3
+    z = cross_product(x, y_raw)  # BS x 3
+    z = normalize_vector(z)  # BS x 3
+    y = cross_product(z, x)  # BS x 3
 
-    x = x.view(-1,3,1)
-    y = y.view(-1,3,1)
-    z = z.view(-1,3,1)
-    zeros = torch.zeros(z.shape, dtype = z.dtype).to(ortho6d.device)
-    rotMats = torch.cat((x,y,z, zeros), dim=2)  # BS x 3 x 4
+    x = x.view(-1, 3, 1)
+    y = y.view(-1, 3, 1)
+    z = z.view(-1, 3, 1)
+    zeros = torch.zeros(z.shape, dtype=z.dtype).to(ortho6d.device)
+    rotMats = torch.cat((x, y, z, zeros), dim=2)  # BS x 3 x 4
     return rotMats
+
 
 def rotMat_to_orth6d(rotMats):
     """
@@ -408,8 +433,9 @@ def rotMat_to_orth6d(rotMats):
     >>> rotMats = torch.rand(2,3,4)
     >>> ortho6d = rotMat_to_orth6d(rotMats)
     """
-    orth6ds = rotMats[:,:,:2].transpose(1, 2).reshape(-1, 6)
+    orth6ds = rotMats[:, :, :2].transpose(1, 2).reshape(-1, 6)
     return orth6ds
+
 
 def rotMat_to_aa(rotation_matrix):
     """
@@ -431,10 +457,13 @@ def rotMat_to_aa(rotation_matrix):
     >>> input = torch.rand(2, 3, 4)  # Nx4x4
     >>> output = rotMat_to_aa(input)  # Nx3
     """
-    if rotation_matrix.shape[1:] == (3,3):
+    if rotation_matrix.shape[1:] == (3, 3):
         rot_mat = rotation_matrix.reshape(-1, 3, 3)
-        hom = torch.tensor([0, 0, 1], dtype=torch.float32,
-                           device=rotation_matrix.device).reshape(1, 3, 1).expand(rot_mat.shape[0], -1, -1)
+        hom = (
+            torch.tensor([0, 0, 1], dtype=torch.float32, device=rotation_matrix.device)
+            .reshape(1, 3, 1)
+            .expand(rot_mat.shape[0], -1, -1)
+        )
         rotation_matrix = torch.cat([rot_mat, hom], dim=-1)
 
     quat = rotMat_to_quat(rotation_matrix)
@@ -470,7 +499,7 @@ def aa_from_quat(_q, separate=False):
         angle = 2 * safe_acos(q[0])
     return (axis, angle) if separate else axis * angle
 
-    
+
 def aa_from_quat_batch(_q, separate=False):
     """
     q: size(Bx4)
@@ -483,16 +512,21 @@ def aa_from_quat_batch(_q, separate=False):
     B = q.size()[0]
     device = q.device
     dtype = q.dtype
-    zero_axis = torch.tensor([1.0, 0.0, 0.0]*B, dtype=dtype, device=device).view(B, 3)
-    zero_angle = torch.tensor([0.0]*B, dtype=dtype, device=device)
+    zero_axis = torch.tensor([1.0, 0.0, 0.0] * B, dtype=dtype, device=device).view(B, 3)
+    zero_angle = torch.tensor([0.0] * B, dtype=dtype, device=device)
 
-    #q = F.normalize(q,p=2, dim=1)
+    # q = F.normalize(q,p=2, dim=1)
 
     cond = torch.abs(torch.sin(safe_acos(q[:, 0]))) < 1e-5
-    axis = torch.where(cond.unsqueeze(1).repeat(1, 3), zero_axis, q[:, 1:4] / (torch.sin(safe_acos(q[:, 0]))).view(B, 1))
+    axis = torch.where(
+        cond.unsqueeze(1).repeat(1, 3),
+        zero_axis,
+        q[:, 1:4] / (torch.sin(safe_acos(q[:, 0]))).view(B, 1),
+    )
     angle = torch.where(cond, zero_angle, 2 * safe_acos(q[:, 0]))
     assert angle.size()[0] == axis.size()[0]
     return (axis, angle) if separate else axis * angle.view(B, 1)
+
 
 def aa_to_orth6d(aa_poses):
     """
@@ -510,11 +544,12 @@ def aa_to_orth6d(aa_poses):
     >>> ortho6d = aa_to_orth6d(poses)
     """
     curr_pose = aa_poses.to(aa_poses.device).float().reshape(-1, 3)
-    rot_mats = aa_to_rotMat(curr_pose) # N x 4 x 4
-    rot_mats = rot_mats[:,:3,:] # N x 3 x 4
-    orth6d = rotMat_to_orth6d(rot_mats) # N x 6
-    orth6d = orth6d.view(aa_poses.shape[0], -1, 6) # B x N x 6 
+    rot_mats = aa_to_rotMat(curr_pose)  # N x 4 x 4
+    rot_mats = rot_mats[:, :3, :]  # N x 3 x 4
+    orth6d = rotMat_to_orth6d(rot_mats)  # N x 6
+    orth6d = orth6d.view(aa_poses.shape[0], -1, 6)  # B x N x 6
     return orth6d
+
 
 def orth6d_to_aa(orth6d):
     """
@@ -532,14 +567,15 @@ def orth6d_to_aa(orth6d):
     >>> poseaa = orth6d_to_aa(orth6d)
     """
     orth6d_flat = orth6d.reshape(-1, 6)
-    rot_mat6d = orth6d_to_rotMat(orth6d_flat) # N x 3 x 4
-    pose_aa = rotMat_to_aa(rot_mat6d) # N x 3
+    rot_mat6d = orth6d_to_rotMat(orth6d_flat)  # N x 3 x 4
+    pose_aa = rotMat_to_aa(rot_mat6d)  # N x 3
 
     shape_curr = list(orth6d.shape)
     shape_curr[-1] /= 2
     shape_curr = tuple([int(i) for i in shape_curr])
-    pose_aa = pose_aa.reshape(shape_curr) # ... x 3
+    pose_aa = pose_aa.reshape(shape_curr)  # ... x 3
     return pose_aa
+
 
 def quat_to_orth6d(quats):
     """
@@ -557,8 +593,8 @@ def quat_to_orth6d(quats):
     >>> quat_6d = quat_to_orth6d(quats)
     """
     quat_flat = quats.reshape(-1, 4)
-    all_mats = quat_matrix_batch_t(quat_flat) # N x 3 x 3
-    quat_6d = rotMat_to_orth6d(all_mats) # N x 6
+    all_mats = quat_matrix_batch_t(quat_flat)  # N x 3 x 3
+    quat_6d = rotMat_to_orth6d(all_mats)  # N x 6
 
     shape_curr = list(quats.shape)
     shape_curr[-1] = 6
@@ -572,7 +608,7 @@ def orth6d_to_quat(orth6d):
     Parameters
     ----------
     orth6d : tensor of shape (..., 6)
-    
+
     Returns
     -------
     quats : tensor of shape (..., 4)
@@ -584,8 +620,8 @@ def orth6d_to_quat(orth6d):
     """
     orth6d_flat = orth6d.reshape(-1, 6)
 
-    rot_mat6d = orth6d_to_rotMat(orth6d_flat) # N x 3 x 3
-    quats = rotMat_to_quat(rot_mat6d) # N x 4
+    rot_mat6d = orth6d_to_rotMat(orth6d_flat)  # N x 3 x 3
+    quats = rotMat_to_quat(rot_mat6d)  # N x 4
 
     shape_curr = list(orth6d.shape)
     shape_curr[-1] = 4
@@ -595,7 +631,7 @@ def orth6d_to_quat(orth6d):
     return quats
 
 
-def canonicalize_smpl_root(aa_poses, root_vec = [PI, 0,0]):
+def canonicalize_smpl_root(aa_poses, root_vec=[PI, 0, 0]):
     """
     Canonicalize the rotation denoted by `aa_poses` to let its frist frame have the same rotation as `root_vec`.
 
@@ -616,17 +652,22 @@ def canonicalize_smpl_root(aa_poses, root_vec = [PI, 0,0]):
     """
     device = aa_poses.device
 
-    target_mat = aa_to_rotMat(torch.tensor([root_vec], dtype = aa_poses.dtype).to(device))[:,:3,:3].to(device) # 1 x 3 x 3
-    org_mats =  aa_to_rotMat(aa_poses[:, :3])[:,:3,:3].to(device) # N x 3 x 3
-    org_mat_inv = torch.inverse(org_mats[0]).to(device) # 3 x 3
-    apply_mat = torch.matmul(target_mat, org_mat_inv) # 1 x 3 x 3
-    res_root_mat = torch.matmul(apply_mat, org_mats) # N x 3 x 3
-    zeros = torch.zeros((res_root_mat.shape[0], res_root_mat.shape[1], 1), dtype=res_root_mat.dtype).to(device) # N x 3 x 1
-    res_root_mats_4 = torch.cat((res_root_mat, zeros), dim=2) # N x 3 x 4
-    res_root_aa = rotMat_to_aa(res_root_mats_4) # N x 3
+    target_mat = aa_to_rotMat(
+        torch.tensor([root_vec], dtype=aa_poses.dtype).to(device)
+    )[:, :3, :3].to(device)  # 1 x 3 x 3
+    org_mats = aa_to_rotMat(aa_poses[:, :3])[:, :3, :3].to(device)  # N x 3 x 3
+    org_mat_inv = torch.inverse(org_mats[0]).to(device)  # 3 x 3
+    apply_mat = torch.matmul(target_mat, org_mat_inv)  # 1 x 3 x 3
+    res_root_mat = torch.matmul(apply_mat, org_mats)  # N x 3 x 3
+    zeros = torch.zeros(
+        (res_root_mat.shape[0], res_root_mat.shape[1], 1), dtype=res_root_mat.dtype
+    ).to(device)  # N x 3 x 1
+    res_root_mats_4 = torch.cat((res_root_mat, zeros), dim=2)  # N x 3 x 4
+    res_root_aa = rotMat_to_aa(res_root_mats_4)  # N x 3
 
     aa_poses[:, :3] = res_root_aa
     return aa_poses
+
 
 def batch_rodrigues(aa):
     """
@@ -641,33 +682,33 @@ def batch_rodrigues(aa):
     See also
     --------
     This function is borrowed from https://github.com/MandyMo/pytorch_HMR/blob/master/src/util.py#L37
-    
+
     Examples
     --------
     >>> aa = torch.rand(10,3)
     >>> R = batch_rodrigues(aa)
     """
-    aa_norm = torch.norm(aa + 1e-8, p=2, dim=1) # N
-    angle = torch.unsqueeze(aa_norm, -1) # N x 1
-    aa_normed = torch.div(aa, angle) # N x 3
+    aa_norm = torch.norm(aa + 1e-8, p=2, dim=1)  # N
+    angle = torch.unsqueeze(aa_norm, -1)  # N x 1
+    aa_normed = torch.div(aa, angle)  # N x 3
     angle = angle * 0.5
     v_cos = torch.cos(angle)
     v_sin = torch.sin(angle)
-    quat = torch.cat([v_cos, v_sin * aa_normed], dim=1) # N x 4
-    rot_mat = quat_to_rotMat_t(quat) # N x 3 x 3
-    rot_mat = rot_mat.view(rot_mat.shape[0], 9) # N x 9
+    quat = torch.cat([v_cos, v_sin * aa_normed], dim=1)  # N x 4
+    rot_mat = quat_to_rotMat_t(quat)  # N x 3 x 3
+    rot_mat = rot_mat.view(rot_mat.shape[0], 9)  # N x 9
     return rot_mat
 
 
 def perspective_projection_cam(pred_joints, pred_camera):
     """
     *Use with care* as there are some empirical constants in the function.
-    
+
     Parameters
     ----------
     pred_joints : tensor of shape (N, 24, 3)
     pred_camera : tensor of shape (N, 3)
-    
+
     Returns
     -------
     pred_keypoints_2d : tensor of shape (N, 24, 2)
@@ -678,18 +719,25 @@ def perspective_projection_cam(pred_joints, pred_camera):
     >>> pred_camera = torch.rand(10,3)
     >>> pred_keypoints_2d = perspective_projection_cam(pred_joints, pred_camera)
     """
-    pred_cam_t = torch.stack([pred_camera[:, 1],
-                              pred_camera[:, 2],
-                              2 * 5000. / (224. * pred_camera[:, 0] + 1e-9)], dim=-1)
+    pred_cam_t = torch.stack(
+        [
+            pred_camera[:, 1],
+            pred_camera[:, 2],
+            2 * 5000.0 / (224.0 * pred_camera[:, 0] + 1e-9),
+        ],
+        dim=-1,
+    )
     BS = pred_joints.shape[0]
     camera_center = torch.zeros(BS, 2)
-    pred_keypoints_2d = perspective_projection(pred_joints,
-                                               rotation=torch.eye(3).unsqueeze(0).expand(BS, -1, -1).to(pred_joints.device),
-                                               translation=pred_cam_t,
-                                               focal_length=5000.,
-                                               camera_center=camera_center) # N x J x 2
+    pred_keypoints_2d = perspective_projection(
+        pred_joints,
+        rotation=torch.eye(3).unsqueeze(0).expand(BS, -1, -1).to(pred_joints.device),
+        translation=pred_cam_t,
+        focal_length=5000.0,
+        camera_center=camera_center,
+    )  # N x J x 2
     # Normalize keypoints to [-1,1]
-    pred_keypoints_2d = pred_keypoints_2d / (224. / 2.)
+    pred_keypoints_2d = pred_keypoints_2d / (224.0 / 2.0)
     return pred_keypoints_2d
 
 
@@ -704,7 +752,7 @@ def perspective_projection(points, rotation, translation, focal_length, camera_c
     translation : tensor of shape (BS, 3) indicating Camera translation
     focal_length : tensor of shape (BS,) or scalar indicating focal length
     camera_center : tensor of shape (BS, 2) indicating camera center
-    
+
     Returns
     -------
     projected_points : tensor of shape (BS, N, 2) indicating 2D points
@@ -720,28 +768,28 @@ def perspective_projection(points, rotation, translation, focal_length, camera_c
     """
 
     BS = points.shape[0]
-    K = torch.zeros([BS, 3, 3], device=points.device) # B x 3 x 3
-    K[:,0,0] = focal_length
-    K[:,1,1] = focal_length
-    K[:,2,2] = 1.
-    K[:,:-1, -1] = camera_center
+    K = torch.zeros([BS, 3, 3], device=points.device)  # B x 3 x 3
+    K[:, 0, 0] = focal_length
+    K[:, 1, 1] = focal_length
+    K[:, 2, 2] = 1.0
+    K[:, :-1, -1] = camera_center
 
     # Transform points
-    points = torch.einsum('bij,bkj->bki', rotation, points) #  B x N x 3
-    points = points + translation.unsqueeze(1) # B x N x 3
+    points = torch.einsum("bij,bkj->bki", rotation, points)  #  B x N x 3
+    points = points + translation.unsqueeze(1)  # B x N x 3
 
     # Apply perspective distortion
-    projected_points = points / points[:,:,-1].unsqueeze(-1) # B x N x 3
+    projected_points = points / points[:, :, -1].unsqueeze(-1)  # B x N x 3
 
     # Apply camera intrinsics
-    projected_points = torch.einsum('bij,bkj->bki', K, projected_points) # B x N x 3
+    projected_points = torch.einsum("bij,bkj->bki", K, projected_points)  # B x N x 3
 
-    return projected_points[:, :, :-1] # B x N x 2
+    return projected_points[:, :, :-1]  # B x N x 2
 
 
-def quat_smooth(quat, ratio = 0.3):
-    """ Converts quat to minimize Euclidean distance from previous quat (wxyz order) 
-    
+def quat_smooth(quat, ratio=0.3):
+    """Converts quat to minimize Euclidean distance from previous quat (wxyz order)
+
     Parameters
     ----------
     quat : np.ndarray of shape (N, 4)
@@ -749,15 +797,16 @@ def quat_smooth(quat, ratio = 0.3):
     Returns
     -------
     quat : np.ndarray of shape (N, 4)
-    
+
     Examples
     --------
     >>> quat = np.random.rand(10,4)
     >>> quat = quat_smooth(quat)
     """
     for _ in range(1, quat.shape[0]):
-        quat[_] = quat_slerp(quat[_-1], quat[_], ratio)
+        quat[_] = quat_slerp(quat[_ - 1], quat[_], ratio)
     return quat
+
 
 def quat_slerp(q0, q1, fraction, spin=0, shortestpath=True):
     """Return spherical linear interpolation between two quats.
@@ -766,7 +815,7 @@ def quat_slerp(q0, q1, fraction, spin=0, shortestpath=True):
     ----------
     q0 : np.ndarray of shape (4,)
     q1 : np.ndarray of shape (4,)
-    
+
     Returns
     -------
     q : np.ndarray of shape (4,)
@@ -810,6 +859,7 @@ def quat_slerp(q0, q1, fraction, spin=0, shortestpath=True):
     q0 += q1
     return q0
 
+
 def rotMat_to_quat(rotation_matrix, eps=1e-6):
     """Convert 3x4 rotation matrix to 4d quat vector
 
@@ -831,17 +881,22 @@ def rotMat_to_quat(rotation_matrix, eps=1e-6):
         >>> output = rotMat_to_quat(input)  # Nx4
     """
     if not torch.is_tensor(rotation_matrix):
-        raise TypeError("Input type is not a torch.Tensor. Got {}".format(
-            type(rotation_matrix)))
+        raise TypeError(
+            "Input type is not a torch.Tensor. Got {}".format(type(rotation_matrix))
+        )
 
     if len(rotation_matrix.shape) > 3:
         raise ValueError(
             "Input size must be a three dimensional tensor. Got {}".format(
-                rotation_matrix.shape))
+                rotation_matrix.shape
+            )
+        )
     if not rotation_matrix.shape[-2:] == (3, 4):
         raise ValueError(
             "Input size must be a N x 3 x 4  tensor. Got {}".format(
-                rotation_matrix.shape))
+                rotation_matrix.shape
+            )
+        )
 
     rmat_t = torch.transpose(rotation_matrix, 1, 2)
 
@@ -851,27 +906,51 @@ def rotMat_to_quat(rotation_matrix, eps=1e-6):
     mask_d0_nd1 = rmat_t[:, 0, 0] < -rmat_t[:, 1, 1]
 
     t0 = 1 + rmat_t[:, 0, 0] - rmat_t[:, 1, 1] - rmat_t[:, 2, 2]
-    q0 = torch.stack([rmat_t[:, 1, 2] - rmat_t[:, 2, 1],
-                      t0, rmat_t[:, 0, 1] + rmat_t[:, 1, 0],
-                      rmat_t[:, 2, 0] + rmat_t[:, 0, 2]], -1)
+    q0 = torch.stack(
+        [
+            rmat_t[:, 1, 2] - rmat_t[:, 2, 1],
+            t0,
+            rmat_t[:, 0, 1] + rmat_t[:, 1, 0],
+            rmat_t[:, 2, 0] + rmat_t[:, 0, 2],
+        ],
+        -1,
+    )
     t0_rep = t0.repeat(4, 1).t()
 
     t1 = 1 - rmat_t[:, 0, 0] + rmat_t[:, 1, 1] - rmat_t[:, 2, 2]
-    q1 = torch.stack([rmat_t[:, 2, 0] - rmat_t[:, 0, 2],
-                      rmat_t[:, 0, 1] + rmat_t[:, 1, 0],
-                      t1, rmat_t[:, 1, 2] + rmat_t[:, 2, 1]], -1)
+    q1 = torch.stack(
+        [
+            rmat_t[:, 2, 0] - rmat_t[:, 0, 2],
+            rmat_t[:, 0, 1] + rmat_t[:, 1, 0],
+            t1,
+            rmat_t[:, 1, 2] + rmat_t[:, 2, 1],
+        ],
+        -1,
+    )
     t1_rep = t1.repeat(4, 1).t()
 
     t2 = 1 - rmat_t[:, 0, 0] - rmat_t[:, 1, 1] + rmat_t[:, 2, 2]
-    q2 = torch.stack([rmat_t[:, 0, 1] - rmat_t[:, 1, 0],
-                      rmat_t[:, 2, 0] + rmat_t[:, 0, 2],
-                      rmat_t[:, 1, 2] + rmat_t[:, 2, 1], t2], -1)
+    q2 = torch.stack(
+        [
+            rmat_t[:, 0, 1] - rmat_t[:, 1, 0],
+            rmat_t[:, 2, 0] + rmat_t[:, 0, 2],
+            rmat_t[:, 1, 2] + rmat_t[:, 2, 1],
+            t2,
+        ],
+        -1,
+    )
     t2_rep = t2.repeat(4, 1).t()
 
     t3 = 1 + rmat_t[:, 0, 0] + rmat_t[:, 1, 1] + rmat_t[:, 2, 2]
-    q3 = torch.stack([t3, rmat_t[:, 1, 2] - rmat_t[:, 2, 1],
-                      rmat_t[:, 2, 0] - rmat_t[:, 0, 2],
-                      rmat_t[:, 0, 1] - rmat_t[:, 1, 0]], -1)
+    q3 = torch.stack(
+        [
+            t3,
+            rmat_t[:, 1, 2] - rmat_t[:, 2, 1],
+            rmat_t[:, 2, 0] - rmat_t[:, 0, 2],
+            rmat_t[:, 0, 1] - rmat_t[:, 1, 0],
+        ],
+        -1,
+    )
     t3_rep = t3.repeat(4, 1).t()
 
     mask_c0 = mask_d2 * mask_d0_d1
@@ -884,18 +963,22 @@ def rotMat_to_quat(rotation_matrix, eps=1e-6):
     mask_c3 = mask_c3.view(-1, 1).type_as(q3)
 
     q = q0 * mask_c0 + q1 * mask_c1 + q2 * mask_c2 + q3 * mask_c3
-    q /= torch.sqrt(t0_rep * mask_c0 + t1_rep * mask_c1 +  # noqa
-                    t2_rep * mask_c2 + t3_rep * mask_c3)  # noqa
+    q /= torch.sqrt(
+        t0_rep * mask_c0
+        + t1_rep * mask_c1
+        + t2_rep * mask_c2  # noqa
+        + t3_rep * mask_c3
+    )  # noqa
     q *= 0.5
     return q
 
 
-def quat_from_euler_t(ai, aj, ak, axes='sxyz'):
-    """"
+def quat_from_euler_t(ai, aj, ak, axes="sxyz"):
+    """ "
     Parameters
     ----------
     ai, aj, ak: tensor of shape B x 1
-    
+
     Returns
     -------
     quat: tensor of shape B x 4
@@ -920,8 +1003,8 @@ def quat_from_euler_t(ai, aj, ak, axes='sxyz'):
     dtype = ai.dtype
 
     i = firstaxis + 1
-    j = _NEXT_AXIS[i+parity-1] + 1
-    k = _NEXT_AXIS[i-parity] + 1
+    j = _NEXT_AXIS[i + parity - 1] + 1
+    k = _NEXT_AXIS[i - parity] + 1
 
     if frame:
         ai, ak = ak.clone(), ai.clone()
@@ -937,33 +1020,34 @@ def quat_from_euler_t(ai, aj, ak, axes='sxyz'):
     sj = torch.sin(aj)
     ck = torch.cos(ak)
     sk = torch.sin(ak)
-    cc = ci*ck
-    cs = ci*sk
-    sc = si*ck
-    ss = si*sk
+    cc = ci * ck
+    cs = ci * sk
+    sc = si * ck
+    ss = si * sk
 
-    q = torch.tensor([1.0, 0.0, 0.0, 0.0]*B, dtype=dtype, device=device).view(B, 4)
+    q = torch.tensor([1.0, 0.0, 0.0, 0.0] * B, dtype=dtype, device=device).view(B, 4)
     if repetition:
-        q[:, 0:1] = cj*(cc - ss)
-        q[:, i:i+1] = cj*(cs + sc)
-        q[:, j:j+1] = sj*(cc + ss)
-        q[:, k:k+1] = sj*(cs - sc)
+        q[:, 0:1] = cj * (cc - ss)
+        q[:, i : i + 1] = cj * (cs + sc)
+        q[:, j : j + 1] = sj * (cc + ss)
+        q[:, k : k + 1] = sj * (cs - sc)
     else:
-        q[:, 0:1] = cj*cc + sj*ss
-        q[:, i:i+1] = cj*sc - sj*cs
-        q[:, j:j+1] = cj*ss + sj*cc
-        q[:, k:k+1] = cj*cs - sj*sc
+        q[:, 0:1] = cj * cc + sj * ss
+        q[:, i : i + 1] = cj * sc - sj * cs
+        q[:, j : j + 1] = cj * ss + sj * cc
+        q[:, k : k + 1] = cj * cs - sj * sc
     if parity:
         q[:, j] *= -1.0
 
     return q
 
-def quat_from_euler(ai, aj, ak, axes='sxyz'):
-    """"
+
+def quat_from_euler(ai, aj, ak, axes="sxyz"):
+    """ "
     Parameters
     ----------
     ai, aj, ak: tensor of shape B x 1
-    
+
     Returns
     -------
     quat: tensor of shape B x 4
@@ -984,10 +1068,9 @@ def quat_from_euler(ai, aj, ak, axes='sxyz'):
     B = ai.shape[0]
     ai, aj, ak = ai.copy(), aj.copy(), ak.copy()
 
-
     i = firstaxis + 1
-    j = _NEXT_AXIS[i+parity-1] + 1
-    k = _NEXT_AXIS[i-parity] + 1
+    j = _NEXT_AXIS[i + parity - 1] + 1
+    k = _NEXT_AXIS[i - parity] + 1
 
     if frame:
         ai, ak = ak.copy(), ai.copy()
@@ -1003,26 +1086,27 @@ def quat_from_euler(ai, aj, ak, axes='sxyz'):
     sj = np.sin(aj)
     ck = np.cos(ak)
     sk = np.sin(ak)
-    cc = ci*ck
-    cs = ci*sk
-    sc = si*ck
-    ss = si*sk
+    cc = ci * ck
+    cs = ci * sk
+    sc = si * ck
+    ss = si * sk
 
-    q = np.array([1.0, 0.0, 0.0, 0.0]*B).reshape(B, 4)
+    q = np.array([1.0, 0.0, 0.0, 0.0] * B).reshape(B, 4)
     if repetition:
-        q[:, 0:1] = cj*(cc - ss)
-        q[:, i:i+1] = cj*(cs + sc)
-        q[:, j:j+1] = sj*(cc + ss)
-        q[:, k:k+1] = sj*(cs - sc)
+        q[:, 0:1] = cj * (cc - ss)
+        q[:, i : i + 1] = cj * (cs + sc)
+        q[:, j : j + 1] = sj * (cc + ss)
+        q[:, k : k + 1] = sj * (cs - sc)
     else:
-        q[:, 0:1] = cj*cc + sj*ss
-        q[:, i:i+1] = cj*sc - sj*cs
-        q[:, j:j+1] = cj*ss + sj*cc
-        q[:, k:k+1] = cj*cs - sj*sc
+        q[:, 0:1] = cj * cc + sj * ss
+        q[:, i : i + 1] = cj * sc - sj * cs
+        q[:, j : j + 1] = cj * ss + sj * cc
+        q[:, k : k + 1] = cj * cs - sj * sc
     if parity:
         q[:, j] *= -1.0
 
     return q
+
 
 def quat_normalize(x, eps=1e-8):
     """
@@ -1035,6 +1119,7 @@ def quat_normalize(x, eps=1e-8):
     res = normalize(x, eps=eps)
     return res
 
+
 def quat_normalize_t(x, eps=1e-8):
     """
     Normalizes a quat tensor
@@ -1045,6 +1130,7 @@ def quat_normalize_t(x, eps=1e-8):
     """
     res = normalize_t(x, eps=eps)
     return res
+
 
 def quat_inv(q):
     """
@@ -1064,6 +1150,7 @@ def quat_inv(q):
     res = np.asarray([1, -1, -1, -1], dtype=np.float32) * q
     return res
 
+
 def quat_inv_t(q):
     """
     Parameters
@@ -1081,6 +1168,7 @@ def quat_inv_t(q):
     """
     res = torch.FloatTensor([1, -1, -1, -1]) * q
     return res
+
 
 def quat_mul_t(q, q_):
     """
@@ -1104,6 +1192,7 @@ def quat_mul_t(q, q_):
     )
 
     return res
+
 
 def quat_mul(q, q_):
     """
@@ -1164,6 +1253,7 @@ def quat_between_t(x, y):
     res = torch.cat([w.unsqueeze(-1), xyz], dim=-1)
     return res
 
+
 def quat_to_rotMat_t(q):
     """
     Convert quat(`wxyz`) to rotMat.
@@ -1187,7 +1277,7 @@ def quat_to_rotMat_t(q):
     """
     norm_quat = q
     norm_quat = norm_quat / norm_quat.norm(p=2, dim=1, keepdim=True)
-    w, x, y, z = norm_quat[:, 0], norm_quat[:, 1], norm_quat[:,2], norm_quat[:,3]
+    w, x, y, z = norm_quat[:, 0], norm_quat[:, 1], norm_quat[:, 2], norm_quat[:, 3]
 
     batch_size = q.size(0)
 
@@ -1195,12 +1285,20 @@ def quat_to_rotMat_t(q):
     wx, wy, wz = w * x, w * y, w * z
     xy, xz, yz = x * y, x * z, y * z
 
-    rotMat = torch.stack([
-        w2 + x2 - y2 - z2, 2 * xy - 2 * wz, 2 * wy + 2 * xz, 2 * wz + 2 * xy,
-        w2 - x2 + y2 - z2, 2 * yz - 2 * wx, 2 * xz - 2 * wy, 2 * wx + 2 * yz,
-        w2 - x2 - y2 + z2
-    ],
-                         dim=1).view(batch_size, 3, 3)
+    rotMat = torch.stack(
+        [
+            w2 + x2 - y2 - z2,
+            2 * xy - 2 * wz,
+            2 * wy + 2 * xz,
+            2 * wz + 2 * xy,
+            w2 - x2 + y2 - z2,
+            2 * yz - 2 * wx,
+            2 * xz - 2 * wy,
+            2 * wx + 2 * yz,
+            w2 - x2 - y2 + z2,
+        ],
+        dim=1,
+    ).view(batch_size, 3, 3)
     return rotMat
 
 
@@ -1234,11 +1332,16 @@ def quat_to_rotMat(q):
         return np.identity(4)
     q_ *= math.sqrt(2.0 / n)
     q_ = np.outer(q_, q_)
-    return np.array([
-        [1.0-q_[2, 2]-q_[3, 3],     q_[1, 2]-q_[3, 0],     q_[1, 3]+q_[2, 0], 0.0],
-        [    q_[1, 2]+q_[3, 0], 1.0-q_[1, 1]-q_[3, 3],     q_[2, 3]-q_[1, 0], 0.0],
-        [    q_[1, 3]-q_[2, 0],     q_[2, 3]+q_[1, 0], 1.0-q_[1, 1]-q_[2, 2], 0.0],
-        [                0.0,                 0.0,                 0.0, 1.0]], dtype=np.float64)
+    return np.array(
+        [
+            [1.0 - q_[2, 2] - q_[3, 3], q_[1, 2] - q_[3, 0], q_[1, 3] + q_[2, 0], 0.0],
+            [q_[1, 2] + q_[3, 0], 1.0 - q_[1, 1] - q_[3, 3], q_[2, 3] - q_[1, 0], 0.0],
+            [q_[1, 3] - q_[2, 0], q_[2, 3] + q_[1, 0], 1.0 - q_[1, 1] - q_[2, 2], 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+        dtype=np.float64,
+    )
+
 
 def quat_conjugate(q):
     """Return conjugate of quat.
@@ -1265,10 +1368,9 @@ def quat_real(q):
 
 
 def quat_imag(q):
-    """Return imaginary part of quats.
-
-    """
+    """Return imaginary part of quats."""
     return numpy.array(q[1:4], dtype=numpy.float64, copy=True)
+
 
 def quat_to_bullet(q):
     return np.array([q[1], q[2], q[3], q[0]])
@@ -1295,13 +1397,14 @@ def quat_to_aa_t(quaternion: torch.Tensor) -> torch.Tensor:
         >>> angle_axis = tgm.quaternion_to_angle_axis(quaternion)  # Nx3
     """
     if not torch.is_tensor(quaternion):
-        raise TypeError("Input type is not a torch.Tensor. Got {}".format(
-            type(quaternion)))
+        raise TypeError(
+            "Input type is not a torch.Tensor. Got {}".format(type(quaternion))
+        )
 
     if not quaternion.shape[-1] == 4:
         raise ValueError(
-            "Input must be a tensor of shape Nx4 or 4. Got {}".format(
-                quaternion.shape))
+            "Input must be a tensor of shape Nx4 or 4. Got {}".format(quaternion.shape)
+        )
     # unpack input and compute conversion
     q1: torch.Tensor = quaternion[..., 1]
     q2: torch.Tensor = quaternion[..., 2]
@@ -1311,8 +1414,10 @@ def quat_to_aa_t(quaternion: torch.Tensor) -> torch.Tensor:
     sin_theta: torch.Tensor = torch.sqrt(sin_squared_theta)
     cos_theta: torch.Tensor = quaternion[..., 0]
     two_theta: torch.Tensor = 2.0 * torch.where(
-        cos_theta < 0.0, torch.atan2(-sin_theta, -cos_theta),
-        torch.atan2(sin_theta, cos_theta))
+        cos_theta < 0.0,
+        torch.atan2(-sin_theta, -cos_theta),
+        torch.atan2(sin_theta, cos_theta),
+    )
 
     k_pos: torch.Tensor = two_theta / sin_theta
     k_neg: torch.Tensor = 2.0 * torch.ones_like(sin_theta)
@@ -1338,6 +1443,7 @@ def quat_mul_vec(q, v):
 
     return res
 
+
 def quat_mul_vec_t(q, v):
     """
     Parameters
@@ -1348,6 +1454,7 @@ def quat_mul_vec_t(q, v):
     q_ = q.unsqueeze(0)
     v_ = v.unsqueeze(0)
     return quat_mul_vec_t_batch(q_, v_).squeeze(0)
+
 
 def quat_mul_vec_t_batch(q, v):
     """
@@ -1376,7 +1483,7 @@ def quat_multiply(_q1, _q0):
     ----------
     _q0 : tensor of shape (4,)
     _q1 : tensor of shape (4,)
-    
+
     Returns
     -------
     res : tensor of shape (4,)
@@ -1390,14 +1497,19 @@ def quat_multiply(_q1, _q0):
     q0 = _q0.clone()
     q1 = _q1.clone()
     device = q0.device
-    dtype= q0.dtype
+    dtype = q0.dtype
     w0, x0, y0, z0 = q0
     w1, x1, y1, z1 = q1
-    return torch.tensor([
-        -x1*x0 - y1*y0 - z1*z0 + w1*w0,
-        x1*w0 + y1*z0 - z1*y0 + w1*x0,
-        -x1*z0 + y1*w0 + z1*x0 + w1*y0,
-        x1*y0 - y1*x0 + z1*w0 + w1*z0], dtype=dtype, device=device)
+    return torch.tensor(
+        [
+            -x1 * x0 - y1 * y0 - z1 * z0 + w1 * w0,
+            x1 * w0 + y1 * z0 - z1 * y0 + w1 * x0,
+            -x1 * z0 + y1 * w0 + z1 * x0 + w1 * y0,
+            x1 * y0 - y1 * x0 + z1 * w0 + w1 * z0,
+        ],
+        dtype=dtype,
+        device=device,
+    )
 
 
 def quat_multiply_batch(q0, q1):
@@ -1408,7 +1520,7 @@ def quat_multiply_batch(q0, q1):
     ----------
     _q0 : tensor of shape (... , 4)
     _q1 : tensor of shape (... , 4)
-    
+
     Returns
     -------
     res : tensor of shape (... , 4)
@@ -1439,6 +1551,7 @@ def quat_multiply_batch(q0, q1):
     z = terms[:, 0, 3] - terms[:, 1, 2] + terms[:, 2, 1] + terms[:, 3, 0]
     return torch.stack((w, x, y, z), dim=1).reshape(original_shape)
 
+
 def quat_matrix_batch_t(_q):
     """
     Parameters
@@ -1456,26 +1569,30 @@ def quat_matrix_batch_t(_q):
     """
     # ZL: from YE, needs to be changed
     q = _q.clone()
-    q_norm = torch.norm(q, dim = 1).view(-1, 1)
+    q_norm = torch.norm(q, dim=1).view(-1, 1)
     q = q / q_norm
-    tx = q[...,1] * 2.0
-    ty = q[...,2] * 2.0
-    tz = q[...,3] * 2.0
-    twx = tx * q[...,0]
-    twy = ty * q[...,0]
-    twz = tz * q[...,0]
-    txx = tx * q[...,1]
-    txy = ty * q[...,1]
-    txz = tz * q[...,1]
-    tyy = ty * q[...,2]
-    tyz = tz * q[...,2]
-    tzz = tz * q[...,3]
-    res = torch.stack((torch.stack((1.0-(tyy+tzz), txy+twz, txz-twy), dim=1),
-                        torch.stack((txy-twz, 1.0-(txx+tzz), tyz+twx), dim=1),
-                        torch.stack((txz+twy, tyz-twx, 1.0-(txx+tyy)), dim=1)),
-                        dim=2)
-#     res = torch.zeros(res.shape).to(_q.device)
-    return  res
+    tx = q[..., 1] * 2.0
+    ty = q[..., 2] * 2.0
+    tz = q[..., 3] * 2.0
+    twx = tx * q[..., 0]
+    twy = ty * q[..., 0]
+    twz = tz * q[..., 0]
+    txx = tx * q[..., 1]
+    txy = ty * q[..., 1]
+    txz = tz * q[..., 1]
+    tyy = ty * q[..., 2]
+    tyz = tz * q[..., 2]
+    tzz = tz * q[..., 3]
+    res = torch.stack(
+        (
+            torch.stack((1.0 - (tyy + tzz), txy + twz, txz - twy), dim=1),
+            torch.stack((txy - twz, 1.0 - (txx + tzz), tyz + twx), dim=1),
+            torch.stack((txz + twy, tyz - twx, 1.0 - (txx + tyy)), dim=1),
+        ),
+        dim=2,
+    )
+    #     res = torch.zeros(res.shape).to(_q.device)
+    return res
 
 
 def quat_about_axis_t(angle, axis):
@@ -1484,7 +1601,7 @@ def quat_about_axis_t(angle, axis):
     ----------
     angle : tensor of shape (1,)
     axis : tensor of shape (3,)
-    
+
     Returns
     -------
     q : tensor of shape (4,)
@@ -1494,8 +1611,8 @@ def quat_about_axis_t(angle, axis):
     q = torch.tensor([0.0, axis[0], axis[1], axis[2]], dtype=dtype, device=device)
     qlen = torch.norm(q, p=2)
     if qlen > _EPS:
-        q = q * torch.sin(angle/2.0) / qlen
-    q[0] = torch.cos(angle/2.0)
+        q = q * torch.sin(angle / 2.0) / qlen
+    q[0] = torch.cos(angle / 2.0)
 
     return q
 
@@ -1505,7 +1622,7 @@ def quat_from_expmap_t(e):
     Parameters
     ----------
     e : tensor of shape (3,)
-    
+
     Returns
     -------
     q : tensor of shape (4,)
@@ -1520,6 +1637,7 @@ def quat_from_expmap_t(e):
         axis = e / angle
 
     return quat_about_axis_t(angle, axis)
+
 
 def quat_from_expmap(e):
     """
@@ -1538,17 +1656,18 @@ def quat_from_expmap(e):
         axis = e / angle
     return quat_about_axis_t(angle, axis)
 
+
 def quat_about_axis_batch(angle, axis):
     """
     Parameters
     ----------
     angle : tensor of shape (N, 1)
     axis : tensor of shape (N, 3)
-    
+
     Returns
     -------
     q : tensor of shape (N, 4)
-    
+
     """
     device = angle.device
     dtype = angle.dtype
@@ -1558,35 +1677,39 @@ def quat_about_axis_batch(angle, axis):
     q[:, 2] = axis[:, 1]
     q[:, 3] = axis[:, 2]
 
-    qlen = torch.norm(q, dim = 1, p=2)
-    q_change = q[qlen > _EPS, :] * torch.sin(angle[qlen > _EPS, :]/2.0) / qlen[qlen > _EPS].view(-1, 1)
+    qlen = torch.norm(q, dim=1, p=2)
+    q_change = (
+        q[qlen > _EPS, :]
+        * torch.sin(angle[qlen > _EPS, :] / 2.0)
+        / qlen[qlen > _EPS].view(-1, 1)
+    )
     q_res = q.clone()
     q_res[qlen > _EPS, :] = q_change
-    q_res[:, 0:1] = torch.cos(angle/2.0)
+    q_res[:, 0:1] = torch.cos(angle / 2.0)
     return q_res
+
 
 def quat_from_expmap_batch(e):
     """
     Parameters
     ----------
     e : ndarray of shape (... , 3)
-    
+
     Returns
     -------
     q : ndarray of shape (... , 4)
     """
     device = e.device
     dtype = e.dtype
-    angle = torch.norm(e, dim=1,p=2)
+    angle = torch.norm(e, dim=1, p=2)
     axis = torch.zeros(e.shape).to(device).type(dtype)
-
 
     axis[angle < 1e-8] = torch.tensor([1.0, 0.0, 0.0], dtype=dtype, device=device)
     axis[angle >= 1e-8] = e[angle >= 1e-8] / angle[angle >= 1e-8].view(-1, 1)
     return quat_about_axis_batch(angle.view(-1, 1), axis)
 
 
-def euler_matrix(ai, aj, ak, axes='sxyz'):
+def euler_matrix(ai, aj, ak, axes="sxyz"):
     """Return homogeneous rotation matrix from Euler angles and axis sequence.
 
     ai, aj, ak : Euler's roll, pitch and yaw angles
@@ -1612,8 +1735,8 @@ def euler_matrix(ai, aj, ak, axes='sxyz'):
         firstaxis, parity, repetition, frame = axes
 
     i = firstaxis
-    j = _NEXT_AXIS[i+parity]
-    k = _NEXT_AXIS[i-parity+1]
+    j = _NEXT_AXIS[i + parity]
+    k = _NEXT_AXIS[i - parity + 1]
 
     if frame:
         ai, ak = ak, ai
@@ -1622,34 +1745,34 @@ def euler_matrix(ai, aj, ak, axes='sxyz'):
 
     si, sj, sk = math.sin(ai), math.sin(aj), math.sin(ak)
     ci, cj, ck = math.cos(ai), math.cos(aj), math.cos(ak)
-    cc, cs = ci*ck, ci*sk
-    sc, ss = si*ck, si*sk
+    cc, cs = ci * ck, ci * sk
+    sc, ss = si * ck, si * sk
 
     M = numpy.identity(4)
     if repetition:
         M[i, i] = cj
-        M[i, j] = sj*si
-        M[i, k] = sj*ci
-        M[j, i] = sj*sk
-        M[j, j] = -cj*ss+cc
-        M[j, k] = -cj*cs-sc
-        M[k, i] = -sj*ck
-        M[k, j] = cj*sc+cs
-        M[k, k] = cj*cc-ss
+        M[i, j] = sj * si
+        M[i, k] = sj * ci
+        M[j, i] = sj * sk
+        M[j, j] = -cj * ss + cc
+        M[j, k] = -cj * cs - sc
+        M[k, i] = -sj * ck
+        M[k, j] = cj * sc + cs
+        M[k, k] = cj * cc - ss
     else:
-        M[i, i] = cj*ck
-        M[i, j] = sj*sc-cs
-        M[i, k] = sj*cc+ss
-        M[j, i] = cj*sk
-        M[j, j] = sj*ss+cc
-        M[j, k] = sj*cs-sc
+        M[i, i] = cj * ck
+        M[i, j] = sj * sc - cs
+        M[i, k] = sj * cc + ss
+        M[j, i] = cj * sk
+        M[j, j] = sj * ss + cc
+        M[j, k] = sj * cs - sc
         M[k, i] = -sj
-        M[k, j] = cj*si
-        M[k, k] = cj*ci
+        M[k, j] = cj * si
+        M[k, k] = cj * ci
     return M
 
 
-def euler_from_matrix(matrix, axes='sxyz'):
+def euler_from_matrix(matrix, axes="sxyz"):
     """Return Euler angles from rotation matrix for specified axis sequence.
 
     axes : One of 24 axis sequences as string or encoded tuple
@@ -1675,29 +1798,29 @@ def euler_from_matrix(matrix, axes='sxyz'):
         firstaxis, parity, repetition, frame = axes
 
     i = firstaxis
-    j = _NEXT_AXIS[i+parity]
-    k = _NEXT_AXIS[i-parity+1]
+    j = _NEXT_AXIS[i + parity]
+    k = _NEXT_AXIS[i - parity + 1]
 
     M = numpy.array(matrix, dtype=numpy.float64, copy=False)[:3, :3]
     if repetition:
-        sy = math.sqrt(M[i, j]*M[i, j] + M[i, k]*M[i, k])
+        sy = math.sqrt(M[i, j] * M[i, j] + M[i, k] * M[i, k])
         if sy > _EPS:
-            ax = math.atan2( M[i, j],  M[i, k])
-            ay = math.atan2( sy,       M[i, i])
-            az = math.atan2( M[j, i], -M[k, i])
+            ax = math.atan2(M[i, j], M[i, k])
+            ay = math.atan2(sy, M[i, i])
+            az = math.atan2(M[j, i], -M[k, i])
         else:
-            ax = math.atan2(-M[j, k],  M[j, j])
-            ay = math.atan2( sy,       M[i, i])
+            ax = math.atan2(-M[j, k], M[j, j])
+            ay = math.atan2(sy, M[i, i])
             az = 0.0
     else:
-        cy = math.sqrt(M[i, i]*M[i, i] + M[j, i]*M[j, i])
+        cy = math.sqrt(M[i, i] * M[i, i] + M[j, i] * M[j, i])
         if cy > _EPS:
-            ax = math.atan2( M[k, j],  M[k, k])
-            ay = math.atan2(-M[k, i],  cy)
-            az = math.atan2( M[j, i],  M[i, i])
+            ax = math.atan2(M[k, j], M[k, k])
+            ay = math.atan2(-M[k, i], cy)
+            az = math.atan2(M[j, i], M[i, i])
         else:
-            ax = math.atan2(-M[j, k],  M[j, j])
-            ay = math.atan2(-M[k, i],  cy)
+            ax = math.atan2(-M[j, k], M[j, j])
+            ay = math.atan2(-M[k, i], cy)
             az = 0.0
 
     if parity:
@@ -1707,7 +1830,7 @@ def euler_from_matrix(matrix, axes='sxyz'):
     return ax, ay, az
 
 
-def euler_from_quat(quat, axes='sxyz'):
+def euler_from_quat(quat, axes="sxyz"):
     """Return Euler angles from quat for specified axis sequence.
 
     >>> angles = euler_from_quat([0.99810947, 0.06146124, 0, 0])
@@ -1742,12 +1865,12 @@ def rand_quat(rand=None):
     pi2 = math.pi * 2.0
     t1 = pi2 * rand[1]
     t2 = pi2 * rand[2]
-    return np.array([np.cos(t2)*r2, np.sin(t1)*r1,
-                        np.cos(t1)*r1, np.sin(t2)*r2])
+    return np.array(
+        [np.cos(t2) * r2, np.sin(t1) * r1, np.cos(t1) * r1, np.sin(t2) * r2]
+    )
 
 
-
-def transform_vec_t(v, q, trans='root'):
+def transform_vec_t(v, q, trans="root"):
     """
     Parameters
     ----------
@@ -1765,10 +1888,9 @@ def transform_vec_t(v, q, trans='root'):
     >>> q = torch.rand(4)
     >>> v = transform_vec_t(v, q)
     """
-    device = q.device
-    if trans == 'root':
+    if trans == "root":
         rot = quat_to_rotMat_t(q[None])[0, :3, :3]
-    elif trans == 'heading':
+    elif trans == "heading":
         hq = q.clone()
         hq[1] = 0.0
         hq[2] = 0.0
@@ -1781,28 +1903,27 @@ def transform_vec_t(v, q, trans='root'):
     return v
 
 
-def transform_vec_batch_t(v, q, trans='root'):
+def transform_vec_batch_t(v, q, trans="root"):
     """
     Parameters
     ----------
     v : tensor of shape (... , 3)
     q : tensor
     trans : str, optional, default='root'
-    
+
     Returns
     -------
     v : tensor of shape (... , 3)
-    
+
     Examples
     --------
     >>> v = torch.rand(10, 3)
     >>> q = torch.rand(10, 4)
     >>> v = transform_vec_batch_t(v, q)
     """
-    device = q.device
-    if trans == 'root':
+    if trans == "root":
         rot = quat_matrix_batch_t(q)
-    elif trans == 'heading':
+    elif trans == "heading":
         hq = get_heading_q_batch(q)
         rot = quat_matrix_batch_t(hq)
     else:
@@ -1819,11 +1940,11 @@ def get_qvel_fd(cur_qpos, next_qpos, dt, transform=None):
     next_qpos : tensor of shape (7,)
     dt : float
     transform : str, optional, default=None
-    
+
     Returns
     -------
     qvel : tensor of shape (7,)
-    
+
     Examples
     --------
     >>> cur_qpos = torch.rand(7)
@@ -1834,13 +1955,13 @@ def get_qvel_fd(cur_qpos, next_qpos, dt, transform=None):
     v = (next_qpos[:3] - cur_qpos[:3]) / dt
     qrel = quat_multiply(next_qpos[3:7], quat_inv_t(cur_qpos[3:7]))
     axis, angle = aa_from_quat(qrel, True)
-    if angle > PI: # -180 < angle < 180
-        angle = angle - 2 * PI #
+    if angle > PI:  # -180 < angle < 180
+        angle = angle - 2 * PI
     elif angle < -PI:
         angle = angle + 2 * PI
     rv = (axis * angle) / dt
 
-    rv = transform_vec_t(rv, cur_qpos[3:7], 'root')
+    rv = transform_vec_t(rv, cur_qpos[3:7], "root")
     qvel = (next_qpos[7:] - cur_qpos[7:]) / dt
     qvel = torch.cat((v, rv, qvel))
     if transform is not None:
@@ -1858,11 +1979,11 @@ def get_qvel_fd_batch(cur_qpos, next_qpos, dt, transform=None):
     next_qpos : tensor of shape (N, 7)
     dt : float
     transform : str, optional, default=None
-    
+
     Returns
     -------
     qvel : tensor of shape (N, 7)
-    
+
     Examples
     --------
     >>> cur_qpos = torch.rand(10, 7)
@@ -1870,18 +1991,18 @@ def get_qvel_fd_batch(cur_qpos, next_qpos, dt, transform=None):
     >>> dt = 0.1
     >>> qvel = get_qvel_fd_batch(cur_qpos, next_qpos, dt)
     """
-    v = (next_qpos[:,:3] - cur_qpos[:, :3]) / dt
+    v = (next_qpos[:, :3] - cur_qpos[:, :3]) / dt
     qrel = quat_multiply_batch(next_qpos[:, 3:7], quat_inv_t(cur_qpos[:, 3:7]))
     axis, angle = aa_from_quat_batch(qrel, True)
 
-    angle[angle>PI] = angle[angle>PI] - 2 * PI
-    angle[angle<-PI] = angle[angle<-PI] + 2 * PI
+    angle[angle > PI] = angle[angle > PI] - 2 * PI
+    angle[angle < -PI] = angle[angle < -PI] + 2 * PI
 
     rv = (axis * angle.view(-1, 1)) / dt
 
-    rv = transform_vec_batch_t(rv, cur_qpos[:, 3:7], 'root')
+    rv = transform_vec_batch_t(rv, cur_qpos[:, 3:7], "root")
     qvel = (next_qpos[:, 7:] - cur_qpos[:, 7:]) / dt
-    qvel = torch.cat((v, rv, qvel), dim = 1)
+    qvel = torch.cat((v, rv, qvel), dim=1)
     if transform is not None:
         v = transform_vec_t(v, cur_qpos[3:7], transform)
         qvel[:3] = v
@@ -1893,17 +2014,17 @@ def get_heading_q(_q):
     Parameters
     ----------
     _q : tensor of shape (4,)
-    
+
     Returns
     -------
     q : tensor of shape (4,)
-    
+
     """
     q = _q.clone()
     q[1] = 0.0
     q[2] = 0.0
     q_norm = torch.norm(q, p=2)
-    return q/q_norm
+    return q / q_norm
 
 
 def get_heading_q_batch(_q):
@@ -1911,18 +2032,18 @@ def get_heading_q_batch(_q):
     Parameters
     ----------
     _q : tensor of shape (BS, 4)
-    
+
     Returns
     -------
     q : tensor of shape (BS, 4)
-    
+
     """
     q = _q.clone()
-    q[:,1] = 0.0
-    q[:,2] = 0.0
+    q[:, 1] = 0.0
+    q[:, 2] = 0.0
 
-    q_norm = torch.norm(q, dim = 1,  p=2).view(-1, 1)
-    return q/q_norm
+    q_norm = torch.norm(q, dim=1, p=2).view(-1, 1)
+    return q / q_norm
 
 
 def de_heading(q):
@@ -1930,7 +2051,7 @@ def de_heading(q):
     Parameters
     ----------
     q : tensor of shape (4,)
-    
+
     Returns
     -------
     q_deheaded : tensor of shape (4,)
@@ -1943,7 +2064,7 @@ def de_heading_batch(q):
     Parameters
     ----------
     q : tensor of shape (BS, 4)
-    
+
     Returns
     -------
     q_deheaded : tensor of shape (BS, 4)
@@ -1959,7 +2080,7 @@ def get_heading(q):
     Parameters
     ----------
     q : tensor of shape (4,)
-    
+
     Returns
     -------
     heading : tensor of shape (1,)
@@ -1974,6 +2095,7 @@ def get_heading(q):
     heading = torch.tensor([w], dtype=hq.dtype, device=hq.device)
     return heading
 
+
 def get_angvel_fd(prev_bquat, cur_bquat, dt):
     """
     Parameters
@@ -1981,7 +2103,7 @@ def get_angvel_fd(prev_bquat, cur_bquat, dt):
     prev_bquat : np.ndarray of shape (4,)
     cur_bquat : np.ndarray of shape (4,)
     dt : float
-    
+
     Returns
     -------
     body_angvel : np.ndarray of shape (3,)
@@ -1990,7 +2112,7 @@ def get_angvel_fd(prev_bquat, cur_bquat, dt):
     n_joint = q_diff.shape[0] // 4
     body_angvel = np.zeros(n_joint * 3)
     for i in range(n_joint):
-        body_angvel[3*i: 3*i + 3] = aa_from_quat(q_diff[4*i: 4*i + 4]) / dt
+        body_angvel[3 * i : 3 * i + 3] = aa_from_quat(q_diff[4 * i : 4 * i + 4]) / dt
     return body_angvel
 
 
@@ -2014,7 +2136,7 @@ def multi_quat_diff(nq1, nq0):
 
     nq_diff = np.zeros_like(nq0)
     for i in range(nq1.shape[0] // 4):
-        ind = slice(4*i, 4*i + 4)
+        ind = slice(4 * i, 4 * i + 4)
         q1 = nq1[ind]
         q0 = nq0[ind]
         nq_diff[ind] = quat_multiply(q1, quat_inv_t(q0))
@@ -2122,6 +2244,7 @@ def reflection_from_matrix(matrix):
     point /= point[3]
     return point, normal
 
+
 def rotation_matrix(angle, direction, point=None):
     """Return matrix to rotate about axis defined by point and direction.
 
@@ -2154,9 +2277,13 @@ def rotation_matrix(angle, direction, point=None):
     R = numpy.diag([cosa, cosa, cosa])
     R += numpy.outer(direction, direction) * (1.0 - cosa)
     direction *= sina
-    R += numpy.array([[ 0.0,         -direction[2],  direction[1]],
-                      [ direction[2], 0.0,          -direction[0]],
-                      [-direction[1], direction[0],  0.0]])
+    R += numpy.array(
+        [
+            [0.0, -direction[2], direction[1]],
+            [direction[2], 0.0, -direction[0]],
+            [-direction[1], direction[0], 0.0],
+        ]
+    )
     M = numpy.identity(4)
     M[:3, :3] = R
     if point is not None:
@@ -2164,6 +2291,7 @@ def rotation_matrix(angle, direction, point=None):
         point = numpy.array(point[:3], dtype=numpy.float64, copy=False)
         M[:3, 3] = point - numpy.dot(R, point)
     return M
+
 
 def scale_matrix(factor, origin=None, direction=None):
     """Return matrix to scale by factor around origin in direction.
@@ -2240,8 +2368,7 @@ def scale_from_matrix(matrix):
     return factor, origin, direction
 
 
-def projection_matrix(point, normal, direction=None,
-                      perspective=None, pseudo=False):
+def projection_matrix(point, normal, direction=None, perspective=None, pseudo=False):
     """Return matrix to project onto plane defined by point and normal.
 
     Using either perspective point, projection direction, or none of both.
@@ -2277,14 +2404,13 @@ def projection_matrix(point, normal, direction=None,
     normal = unit_vector(normal[:3])
     if perspective is not None:
         # perspective projection
-        perspective = numpy.array(perspective[:3], dtype=numpy.float64,
-                                  copy=False)
-        M[0, 0] = M[1, 1] = M[2, 2] = numpy.dot(perspective-point, normal)
+        perspective = numpy.array(perspective[:3], dtype=numpy.float64, copy=False)
+        M[0, 0] = M[1, 1] = M[2, 2] = numpy.dot(perspective - point, normal)
         M[:3, :3] -= numpy.outer(perspective, normal)
         if pseudo:
             # preserve relative depth
             M[:3, :3] -= numpy.outer(normal, normal)
-            M[:3, 3] = numpy.dot(point, normal) * (perspective+normal)
+            M[:3, 3] = numpy.dot(point, normal) * (perspective + normal)
         else:
             M[:3, 3] = numpy.dot(point, normal) * perspective
         M[3, :3] = -normal
@@ -2364,11 +2490,10 @@ def projection_from_matrix(matrix, pseudo=False):
         # perspective projection
         i = numpy.where(abs(numpy.real(w)) > 1e-8)[0]
         if not len(i):
-            raise ValueError(
-                "no eigenvector not corresponding to eigenvalue 0")
+            raise ValueError("no eigenvector not corresponding to eigenvalue 0")
         point = numpy.real(V[:, i[-1]]).squeeze()
         point /= point[3]
-        normal = - M[3, :3]
+        normal = -M[3, :3]
         perspective = M[:3, 3] / numpy.dot(point[:3], normal)
         if pseudo:
             perspective -= normal
@@ -2415,15 +2540,19 @@ def clip_matrix(left, right, bottom, top, near, far, perspective=False):
         if near <= _EPS:
             raise ValueError("invalid frustum: near <= 0")
         t = 2.0 * near
-        M = [[t/(left-right), 0.0, (right+left)/(right-left), 0.0],
-             [0.0, t/(bottom-top), (top+bottom)/(top-bottom), 0.0],
-             [0.0, 0.0, (far+near)/(near-far), t*far/(far-near)],
-             [0.0, 0.0, -1.0, 0.0]]
+        M = [
+            [t / (left - right), 0.0, (right + left) / (right - left), 0.0],
+            [0.0, t / (bottom - top), (top + bottom) / (top - bottom), 0.0],
+            [0.0, 0.0, (far + near) / (near - far), t * far / (far - near)],
+            [0.0, 0.0, -1.0, 0.0],
+        ]
     else:
-        M = [[2.0/(right-left), 0.0, 0.0, (right+left)/(left-right)],
-             [0.0, 2.0/(top-bottom), 0.0, (top+bottom)/(bottom-top)],
-             [0.0, 0.0, 2.0/(far-near), (far+near)/(near-far)],
-             [0.0, 0.0, 0.0, 1.0]]
+        M = [
+            [2.0 / (right - left), 0.0, 0.0, (right + left) / (left - right)],
+            [0.0, 2.0 / (top - bottom), 0.0, (top + bottom) / (bottom - top)],
+            [0.0, 0.0, 2.0 / (far - near), (far + near) / (near - far)],
+            [0.0, 0.0, 0.0, 1.0],
+        ]
     return numpy.array(M)
 
 
@@ -2543,7 +2672,7 @@ def decompose_matrix(matrix):
     if not numpy.linalg.det(P):
         raise ValueError("matrix is singular")
 
-    scale = numpy.zeros((3, ))
+    scale = numpy.zeros((3,))
     shear = [0.0, 0.0, 0.0]
     angles = [0.0, 0.0, 0.0]
 
@@ -2588,8 +2717,9 @@ def decompose_matrix(matrix):
     return scale, shear, angles, translate, perspective
 
 
-def compose_matrix(scale=None, shear=None, angles=None, translate=None,
-                   perspective=None):
+def compose_matrix(
+    scale=None, shear=None, angles=None, translate=None, perspective=None
+):
     """Return transformation matrix from sequence of transformations.
 
     This is the inverse of the decompose_matrix function.
@@ -2623,7 +2753,7 @@ def compose_matrix(scale=None, shear=None, angles=None, translate=None,
         T[:3, 3] = translate[:3]
         M = numpy.dot(M, T)
     if angles is not None:
-        R = euler_matrix(angles[0], angles[1], angles[2], 'sxyz')
+        R = euler_matrix(angles[0], angles[1], angles[2], "sxyz")
         M = numpy.dot(M, R)
     if shear is not None:
         Z = numpy.identity(4)
@@ -2661,11 +2791,14 @@ def orthogonalization_matrix(lengths, angles):
     sina, sinb, _ = numpy.sin(angles)
     cosa, cosb, cosg = numpy.cos(angles)
     co = (cosa * cosb - cosg) / (sina * sinb)
-    return numpy.array([
-        [ a*sinb*math.sqrt(1.0-co*co),  0.0,    0.0, 0.0],
-        [-a*sinb*co,                    b*sina, 0.0, 0.0],
-        [ a*cosb,                       b*cosa, c,   0.0],
-        [ 0.0,                          0.0,    0.0, 1.0]])
+    return numpy.array(
+        [
+            [a * sinb * math.sqrt(1.0 - co * co), 0.0, 0.0, 0.0],
+            [-a * sinb * co, b * sina, 0.0, 0.0],
+            [a * cosb, b * cosa, c, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ]
+    )
 
 
 def affine_matrix_from_points(v0, v1, shear=True, scale=True, usesvd=True):
@@ -2718,11 +2851,11 @@ def affine_matrix_from_points(v0, v1, shear=True, scale=True, usesvd=True):
 
     # move centroids to origin
     t0 = -numpy.mean(v0, axis=1)
-    M0 = numpy.identity(ndims+1)
+    M0 = numpy.identity(ndims + 1)
     M0[:ndims, ndims] = t0
     v0 += t0.reshape(ndims, 1)
     t1 = -numpy.mean(v1, axis=1)
-    M1 = numpy.identity(ndims+1)
+    M1 = numpy.identity(ndims + 1)
     M1[:ndims, ndims] = t1
     v1 += t1.reshape(ndims, 1)
 
@@ -2732,10 +2865,10 @@ def affine_matrix_from_points(v0, v1, shear=True, scale=True, usesvd=True):
         u, s, vh = numpy.linalg.svd(A.T)
         vh = vh[:ndims].T
         B = vh[:ndims]
-        C = vh[ndims:2*ndims]
+        C = vh[ndims : 2 * ndims]
         t = numpy.dot(C, numpy.linalg.pinv(B))
         t = numpy.concatenate((t, numpy.zeros((ndims, 1))), axis=1)
-        M = numpy.vstack((t, ((0.0,)*ndims) + (1.0,)))
+        M = numpy.vstack((t, ((0.0,) * ndims) + (1.0,)))
     elif usesvd or ndims != 3:
         # Rigid transformation via SVD of covariance matrix
         u, s, vh = numpy.linalg.svd(numpy.dot(v1, v0.T))
@@ -2743,10 +2876,10 @@ def affine_matrix_from_points(v0, v1, shear=True, scale=True, usesvd=True):
         R = numpy.dot(u, vh)
         if numpy.linalg.det(R) < 0.0:
             # R does not constitute right handed system
-            R -= numpy.outer(u[:, ndims-1], vh[ndims-1, :]*2.0)
+            R -= numpy.outer(u[:, ndims - 1], vh[ndims - 1, :] * 2.0)
             s[-1] *= -1.0
         # homogeneous transformation matrix
-        M = numpy.identity(ndims+1)
+        M = numpy.identity(ndims + 1)
         M[:ndims, :ndims] = R
     else:
         # Rigid transformation matrix via quat
@@ -2754,10 +2887,12 @@ def affine_matrix_from_points(v0, v1, shear=True, scale=True, usesvd=True):
         xx, yy, zz = numpy.sum(v0 * v1, axis=1)
         xy, yz, zx = numpy.sum(v0 * numpy.roll(v1, -1, axis=0), axis=1)
         xz, yx, zy = numpy.sum(v0 * numpy.roll(v1, -2, axis=0), axis=1)
-        N = [[xx+yy+zz, 0.0,      0.0,      0.0],
-             [yz-zy,    xx-yy-zz, 0.0,      0.0],
-             [zx-xz,    xy+yx,    yy-xx-zz, 0.0],
-             [xy-yx,    zx+xz,    yz+zy,    zz-xx-yy]]
+        N = [
+            [xx + yy + zz, 0.0, 0.0, 0.0],
+            [yz - zy, xx - yy - zz, 0.0, 0.0],
+            [zx - xz, xy + yx, yy - xx - zz, 0.0],
+            [xy - yx, zx + xz, yz + zy, zz - xx - yy],
+        ]
         # quat: eigenvector corresponding to most positive eigenvalue
         w, V = numpy.linalg.eigh(N)
         q = V[:, numpy.argmax(w)]
@@ -2824,8 +2959,7 @@ def superimposition_matrix(v0, v1, scale=False, usesvd=True):
     """
     v0 = numpy.array(v0, dtype=numpy.float64, copy=False)[:3]
     v1 = numpy.array(v1, dtype=numpy.float64, copy=False)[:3]
-    return affine_matrix_from_points(v0, v1, shear=False,
-                                     scale=scale, usesvd=usesvd)
+    return affine_matrix_from_points(v0, v1, shear=False, scale=scale, usesvd=usesvd)
 
 
 def random_rotation_matrix(rand=None):
@@ -2841,6 +2975,7 @@ def random_rotation_matrix(rand=None):
 
     """
     return quat_to_rotMat(rand_quat(rand))
+
 
 def vector_norm(data, axis=None, out=None):
     """Return length, i.e. Euclidean norm, of ndarray along axis.
@@ -2916,7 +3051,7 @@ def unit_vector(data, axis=None, out=None):
         if out is not data:
             out[:] = np.array(data, copy=False)
         data = out
-    length = np.atleast_1d(np.sum(data*data, axis))
+    length = np.atleast_1d(np.sum(data * data, axis))
     np.sqrt(length, length)
     if axis is not None:
         length = np.expand_dims(length, axis)
@@ -3024,7 +3159,6 @@ def concatenate_matrices(*matrices):
     return M
 
 
-
 def is_same_transform(matrix0, matrix1):
     """Return True if two matrices perform same transformation.
 
@@ -3077,10 +3211,14 @@ def T_to_qpose(T, take_inv=False):
     T_[:, :3, :4] = T
     if take_inv:
         T_ = np.linalg.inv(T_)
-    trans = T_[:, :3, 3] # T x 3
-    rot_mat = T_[:, :3, :3] # T x 3 x 3
-    quat_wxyz = transforms.matrix_to_quaternion(torch.from_numpy(rot_mat).float()).data.cpu().numpy() # T x 4
-    pose = np.concatenate([trans, quat_wxyz], axis=1) # T x 7
+    trans = T_[:, :3, 3]  # T x 3
+    rot_mat = T_[:, :3, :3]  # T x 3 x 3
+    quat_wxyz = (
+        transforms.matrix_to_quaternion(torch.from_numpy(rot_mat).float())
+        .data.cpu()
+        .numpy()
+    )  # T x 4
+    pose = np.concatenate([trans, quat_wxyz], axis=1)  # T x 7
     return pose
 
 
@@ -3106,18 +3244,21 @@ def qpose_to_T(pose):
     >>> T.shape
     (10, 3, 4)
 
-     """
+    """
     tt, *_ = pose.shape
-    trans, quat_wxyz = pose[:, :3], pose[:, 3:] # T x 3, T x 4
-    rot_mat = transforms.quaternion_to_matrix(torch.from_numpy(quat_wxyz).float()).data.cpu().numpy() # T x 3 x 3
+    trans, quat_wxyz = pose[:, :3], pose[:, 3:]  # T x 3, T x 4
+    rot_mat = (
+        transforms.quaternion_to_matrix(torch.from_numpy(quat_wxyz).float())
+        .data.cpu()
+        .numpy()
+    )  # T x 3 x 3
     T = np.tile(np.eye(4), (tt, 1, 1))
     T[:, :3, :3] = rot_mat
     T[:, :3, 3] = trans
     return T[:, :3, :4]
 
 
-
-def _import_module(name, package=None, warn=True, prefix='_py_', ignore='_'):
+def _import_module(name, package=None, warn=True, prefix="_py_", ignore="_"):
     """Try import all public attributes from module into global namespace.
 
     Existing attributes with name clashes are renamed with prefix.
@@ -3128,11 +3269,12 @@ def _import_module(name, package=None, warn=True, prefix='_py_', ignore='_'):
     """
     import warnings
     from importlib import import_module
+
     try:
         if not package:
             module = import_module(name)
         else:
-            module = import_module('.' + name, package=package)
+            module = import_module("." + name, package=package)
     except ImportError:
         if warn:
             warnings.warn("failed to import module %s" % name)
@@ -3147,7 +3289,6 @@ def _import_module(name, package=None, warn=True, prefix='_py_', ignore='_'):
                     warnings.warn("no Python implementation of " + attr)
             globals()[attr] = getattr(module, attr)
         return True
-
 
 
 class RadToDeg(nn.Module):
@@ -3192,6 +3333,7 @@ class DegToRad(nn.Module):
 
     def forward(self, input):
         return deg2rad(input)
+
 
 class ConvertPointsFromHomogeneous(nn.Module):
     r"""Creates a transformation that converts points from homogeneous to
@@ -3249,13 +3391,10 @@ class ConvertPointsToHomogeneous(nn.Module):
         return convert_points_to_homogeneous(input)
 
 
-
-
-_import_module('_transformations', warn=False)
+_import_module("_transformations", warn=False)
 
 if __name__ == "__main__":
     import doctest
-    import random  # noqa: used in doctests
+
     numpy.set_printoptions(suppress=True, precision=5)
     doctest.testmod()
-

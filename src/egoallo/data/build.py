@@ -1,4 +1,4 @@
-from typing import Any, assert_never
+from typing import assert_never
 
 import torch
 import torch.utils.data

@@ -1,15 +1,11 @@
 from __future__ import annotations
 
-import logging
 import sys
 from pathlib import Path
-from typing import Optional, Union, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING
 
 import numpy as np
-import PIL
 import torch
-import trimesh
-from torch import Tensor
 from tqdm import tqdm
 from videoio import VideoWriter
 
@@ -17,30 +13,23 @@ from egoallo.fncsmpl import (
     SE3,
     SO3,
     SmplhModel,
-    SmplhShaped,
-    SmplhShapedAndPosed,
-    SmplMesh,
 )
 from egoallo.fncsmpl_extensions import get_T_world_cpf
 
-from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from egoallo.data.dataclass import EgoTrainingData
     from egoallo.fncsmpl import SmplhModel
-    from egoallo.network import AbsoluteDenoiseTraj, VelocityDenoiseTraj, JointsOnlyTraj
     from egoallo.types import DenoiseTrajType
 
 # On some systems, EGL does not start properly if OpenGL was already initialized, that's why it's better
 # to keep EGLContext import on top
 from third_party.cloudrender.cloudrender.libegl import EGLContext
+from .utils import blend_with_background
+from dataclasses import dataclass
+from typing import Tuple
+from OpenGL import GL as gl
+from egoallo.utils.setup_logger import setup_logger
 
-sys.path.append(str(Path(__file__).parent.parent.parent.parent))
-
-
-import time
-
-from egoallo.fncsmpl import SmplhShapedAndPosed, SmplMesh
 
 VIZ_UTILS_IMPORT = True
 try:
@@ -52,9 +41,6 @@ try:
     )
     from third_party.cloudrender.cloudrender.scene import Scene
     from third_party.cloudrender.cloudrender.utils import trimesh_load_from_zip
-    from third_party.cloudrender.cloudrender.camera.trajectory import (
-        Trajectory,
-    )  # pragma:
     from third_party.cloudrender.cloudrender.render.smpl_legacy import (
         AnimatableSMPLModel,
     )
@@ -63,22 +49,8 @@ except ImportError:  # pragma: no cover
     VIZ_UTILS_IMPORT = False
 
 
-import json
-
-from .utils import blend_with_background
-
-logger = logging.getLogger(__name__)
-
-import logging
-from dataclasses import dataclass
-from typing import Tuple
-
-import numpy as np
-from OpenGL import GL as gl
-
-from egoallo.utils.setup_logger import setup_logger
-
 logger = setup_logger(output=None, name=__name__)
+sys.path.append(str(Path(__file__).parent.parent.parent.parent))
 
 
 @dataclass
@@ -108,7 +80,7 @@ class BaseRenderer:
             raise RuntimeError("Failed to initialize EGL context")
         # Test OpenGL context
 
-        version = gl.glGetString(gl.GL_VERSION)
+        gl.glGetString(gl.GL_VERSION)
         # logger.info(f"OpenGL version: {version}")
 
     def _setup_buffers(self):
@@ -254,9 +226,9 @@ class SMPLViewer(BaseRenderer):
         output_path: str = "output.mp4",
     ) -> None:
         """Render SMPL sequence to video using denoised trajectory data."""
-        assert (
-            denoised_traj.R_world_root.dim() == 3
-        ), "The batch size should be zero when visualizing."
+        assert denoised_traj.R_world_root.dim() == 3, (
+            "The batch size should be zero when visualizing."
+        )
         device = body_model.weights.device
 
         # Prepare SMPL sequence
@@ -353,7 +325,7 @@ class SMPLViewer(BaseRenderer):
         current_smpl_params = self.smpl_renderer.params_sequence[
             self.smpl_renderer.current_sequence_frame_ind
         ]
-        cur_smpl_trans, cur_smpl_shape, cur_smpl_pose = (
+        cur_smpl_trans, _cur_smpl_shape, _cur_smpl_pose = (
             current_smpl_params["translation"],
             current_smpl_params["shape"],
             current_smpl_params["pose"],

@@ -16,7 +16,13 @@ def create_egopose_processing_argparse():
         "--steps",
         type=str,
         nargs="+",
-        default=["aria_calib", "hand_gt_anno", "body_gt_anno", "raw_image", "undistorted_image"],
+        default=[
+            "aria_calib",
+            "hand_gt_anno",
+            "body_gt_anno",
+            "raw_image",
+            "undistorted_image",
+        ],
         help="""
             Determine which step should be executed in data preparation:
             - aria_calib: Generate aria calibration JSON file for easier loading

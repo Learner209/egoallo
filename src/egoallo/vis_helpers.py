@@ -13,7 +13,7 @@ from jaxtyping import Float, jaxtyped
 from plyfile import PlyData
 from torch import Tensor
 
-from . import fncsmpl, fncsmpl_extensions, network
+from . import fncsmpl, network
 from .hand_detection_structs import (
     CorrespondedAriaHandWristPoseDetections,
     CorrespondedHamerDetections,
@@ -186,7 +186,6 @@ def visualize_traj_and_hand_detections(
         assert betas.shape == (sample_count, timesteps, 16)
         body_quats = SO3.from_matrix(traj.body_rotmats).wxyz
         assert body_quats.shape == (sample_count, timesteps, 21, 4)
-        device = body_quats.device
 
         traj.hand_rotmats = None
         if traj.hand_rotmats is not None:

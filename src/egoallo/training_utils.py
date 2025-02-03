@@ -147,7 +147,7 @@ def loop_metric_generator(
     time_prev = time_start
 
     # Track timing for different training phases
-    phase_start = time.time()
+    time.time()
     forward_time = 0.0
     backward_time = 0.0
     optimizer_time = 0.0
@@ -184,7 +184,7 @@ def loop_metric_generator(
                             )
                         )
                     )
-                except:
+                except Exception as _:
                     gpu_util.append(0.0)
 
         # Calculate effective batch sizes
@@ -214,7 +214,6 @@ def loop_metric_generator(
 
         # Reset timing trackers
         time_prev = time_now
-        phase_start = time_now
         counter += 1
 
 

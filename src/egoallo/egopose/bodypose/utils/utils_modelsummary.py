@@ -1,8 +1,8 @@
-import torch.nn as nn
+from torch import nn
 import torch
 import numpy as np
 
-'''
+"""
 ---- 1) FLOPs: floating point operations
 ---- 2) #Activations: the number of elements of all ‘Conv2d’ outputs
 ---- 3) #Conv2d: the number of ‘Conv2d’ layers
@@ -15,19 +15,21 @@ https://github.com/sovrasov/flops-counter.pytorch.git
 
 # If you use this code, please consider the following citation:
 
-@inproceedings{zhang2020aim, % 
+@inproceedings{zhang2020aim, %
   title={AIM 2020 Challenge on Efficient Super-Resolution: Methods and Results},
   author={Kai Zhang and Martin Danelljan and Yawei Li and Radu Timofte and others},
   booktitle={European Conference on Computer Vision Workshops},
   year={2020}
 }
 # --------------------------------------------
-'''
+"""
 
-def get_model_flops(model, input_res, print_per_layer_stat=True,
-                              input_constructor=None):
-    assert type(input_res) is tuple, 'Please provide the size of the input image.'
-    assert len(input_res) >= 3, 'Input image should have 3 dimensions.'
+
+def get_model_flops(
+    model, input_res, print_per_layer_stat=True, input_constructor=None
+):
+    assert type(input_res) is tuple, "Please provide the size of the input image."
+    assert len(input_res) >= 3, "Input image should have 3 dimensions."
     flops_model = add_flops_counting_methods(model)
     flops_model.eval().start_flops_count()
     if input_constructor:
@@ -45,9 +47,10 @@ def get_model_flops(model, input_res, print_per_layer_stat=True,
 
     return flops_count
 
+
 def get_model_activation(model, input_res, input_constructor=None):
-    assert type(input_res) is tuple, 'Please provide the size of the input image.'
-    assert len(input_res) >= 3, 'Input image should have 3 dimensions.'
+    assert type(input_res) is tuple, "Please provide the size of the input image."
+    assert len(input_res) >= 3, "Input image should have 3 dimensions."
     activation_model = add_activation_counting_methods(model)
     activation_model.eval().start_activation_count()
     if input_constructor:
@@ -64,8 +67,9 @@ def get_model_activation(model, input_res, input_constructor=None):
     return activation_count, num_conv
 
 
-def get_model_complexity_info(model, input_res, print_per_layer_stat=True, as_strings=True,
-                              input_constructor=None):
+def get_model_complexity_info(
+    model, input_res, print_per_layer_stat=True, as_strings=True, input_constructor=None
+):
     assert type(input_res) is tuple
     assert len(input_res) >= 3
     flops_model = add_flops_counting_methods(model)
@@ -89,37 +93,37 @@ def get_model_complexity_info(model, input_res, print_per_layer_stat=True, as_st
     return flops_count, params_count
 
 
-def flops_to_string(flops, units='GMac', precision=2):
+def flops_to_string(flops, units="GMac", precision=2):
     if units is None:
         if flops // 10**9 > 0:
-            return str(round(flops / 10.**9, precision)) + ' GMac'
+            return str(round(flops / 10.0**9, precision)) + " GMac"
         elif flops // 10**6 > 0:
-            return str(round(flops / 10.**6, precision)) + ' MMac'
+            return str(round(flops / 10.0**6, precision)) + " MMac"
         elif flops // 10**3 > 0:
-            return str(round(flops / 10.**3, precision)) + ' KMac'
+            return str(round(flops / 10.0**3, precision)) + " KMac"
         else:
-            return str(flops) + ' Mac'
+            return str(flops) + " Mac"
     else:
-        if units == 'GMac':
-            return str(round(flops / 10.**9, precision)) + ' ' + units
-        elif units == 'MMac':
-            return str(round(flops / 10.**6, precision)) + ' ' + units
-        elif units == 'KMac':
-            return str(round(flops / 10.**3, precision)) + ' ' + units
+        if units == "GMac":
+            return str(round(flops / 10.0**9, precision)) + " " + units
+        elif units == "MMac":
+            return str(round(flops / 10.0**6, precision)) + " " + units
+        elif units == "KMac":
+            return str(round(flops / 10.0**3, precision)) + " " + units
         else:
-            return str(flops) + ' Mac'
+            return str(flops) + " Mac"
 
 
 def params_to_string(params_num):
-    if params_num // 10 ** 6 > 0:
-        return str(round(params_num / 10 ** 6, 2)) + ' M'
-    elif params_num // 10 ** 3:
-        return str(round(params_num / 10 ** 3, 2)) + ' k'
+    if params_num // 10**6 > 0:
+        return str(round(params_num / 10**6, 2)) + " M"
+    elif params_num // 10**3:
+        return str(round(params_num / 10**3, 2)) + " k"
     else:
         return str(params_num)
 
 
-def print_model_with_flops(model, units='GMac', precision=3):
+def print_model_with_flops(model, units="GMac", precision=3):
     total_flops = model.compute_average_flops_cost()
 
     def accumulate_flops(self):
@@ -133,9 +137,15 @@ def print_model_with_flops(model, units='GMac', precision=3):
 
     def flops_repr(self):
         accumulated_flops_cost = self.accumulate_flops()
-        return ', '.join([flops_to_string(accumulated_flops_cost, units=units, precision=precision),
-                          '{:.3%} MACs'.format(accumulated_flops_cost / total_flops),
-                          self.original_extra_repr()])
+        return ", ".join(
+            [
+                flops_to_string(
+                    accumulated_flops_cost, units=units, precision=precision
+                ),
+                "{:.3%} MACs".format(accumulated_flops_cost / total_flops),
+                self.original_extra_repr(),
+            ]
+        )
 
     def add_extra_repr(m):
         m.accumulate_flops = accumulate_flops.__get__(m)
@@ -146,10 +156,10 @@ def print_model_with_flops(model, units='GMac', precision=3):
             assert m.extra_repr != m.original_extra_repr
 
     def del_extra_repr(m):
-        if hasattr(m, 'original_extra_repr'):
+        if hasattr(m, "original_extra_repr"):
             m.extra_repr = m.original_extra_repr
             del m.original_extra_repr
-        if hasattr(m, 'accumulate_flops'):
+        if hasattr(m, "accumulate_flops"):
             del m.accumulate_flops
 
     model.apply(add_extra_repr)
@@ -169,7 +179,9 @@ def add_flops_counting_methods(net_main_module):
     net_main_module.start_flops_count = start_flops_count.__get__(net_main_module)
     net_main_module.stop_flops_count = stop_flops_count.__get__(net_main_module)
     net_main_module.reset_flops_count = reset_flops_count.__get__(net_main_module)
-    net_main_module.compute_average_flops_cost = compute_average_flops_cost.__get__(net_main_module)
+    net_main_module.compute_average_flops_cost = compute_average_flops_cost.__get__(
+        net_main_module
+    )
 
     net_main_module.reset_flops_count()
     return net_main_module
@@ -229,7 +241,7 @@ def reset_flops_count(self):
 
 def add_flops_counter_hook_function(module):
     if is_supported_instance(module):
-        if hasattr(module, '__flops_handle__'):
+        if hasattr(module, "__flops_handle__"):
             return
 
         if isinstance(module, (nn.Conv2d, nn.Conv3d, nn.ConvTranspose2d)):
@@ -247,7 +259,7 @@ def add_flops_counter_hook_function(module):
 
 def remove_flops_counter_hook_function(module):
     if is_supported_instance(module):
-        if hasattr(module, '__flops_handle__'):
+        if hasattr(module, "__flops_handle__"):
             module.__flops_handle__.remove()
             del module.__flops_handle__
 
@@ -259,13 +271,20 @@ def add_flops_counter_variable_or_reset(module):
 
 # ---- Internal functions
 def is_supported_instance(module):
-    if isinstance(module,
-                  (
-                          nn.Conv2d, nn.ConvTranspose2d,
-                          nn.BatchNorm2d,
-                          nn.Linear,
-                          nn.ReLU, nn.PReLU, nn.ELU, nn.LeakyReLU, nn.ReLU6,
-                  )):
+    if isinstance(
+        module,
+        (
+            nn.Conv2d,
+            nn.ConvTranspose2d,
+            nn.BatchNorm2d,
+            nn.Linear,
+            nn.ReLU,
+            nn.PReLU,
+            nn.ELU,
+            nn.LeakyReLU,
+            nn.ReLU6,
+        ),
+    ):
         return True
 
     return False
@@ -333,10 +352,18 @@ def add_activation_counting_methods(net_main_module):
     # adding additional methods to the existing module object,
     # this is done this way so that each function has access to self object
     # embed()
-    net_main_module.start_activation_count = start_activation_count.__get__(net_main_module)
-    net_main_module.stop_activation_count = stop_activation_count.__get__(net_main_module)
-    net_main_module.reset_activation_count = reset_activation_count.__get__(net_main_module)
-    net_main_module.compute_average_activation_cost = compute_average_activation_cost.__get__(net_main_module)
+    net_main_module.start_activation_count = start_activation_count.__get__(
+        net_main_module
+    )
+    net_main_module.stop_activation_count = stop_activation_count.__get__(
+        net_main_module
+    )
+    net_main_module.reset_activation_count = reset_activation_count.__get__(
+        net_main_module
+    )
+    net_main_module.compute_average_activation_cost = (
+        compute_average_activation_cost.__get__(net_main_module)
+    )
 
     net_main_module.reset_activation_count()
     return net_main_module
@@ -397,7 +424,7 @@ def reset_activation_count(self):
 
 def add_activation_counter_hook_function(module):
     if is_supported_instance_for_activation(module):
-        if hasattr(module, '__activation_handle__'):
+        if hasattr(module, "__activation_handle__"):
             return
 
         if isinstance(module, (nn.Conv2d, nn.ConvTranspose2d)):
@@ -407,7 +434,7 @@ def add_activation_counter_hook_function(module):
 
 def remove_activation_counter_hook_function(module):
     if is_supported_instance_for_activation(module):
-        if hasattr(module, '__activation_handle__'):
+        if hasattr(module, "__activation_handle__"):
             module.__activation_handle__.remove()
             del module.__activation_handle__
 
@@ -419,13 +446,17 @@ def add_activation_counter_variable_or_reset(module):
 
 
 def is_supported_instance_for_activation(module):
-    if isinstance(module,
-                  (
-                          nn.Conv2d, nn.ConvTranspose2d,
-                  )):
+    if isinstance(
+        module,
+        (
+            nn.Conv2d,
+            nn.ConvTranspose2d,
+        ),
+    ):
         return True
 
     return False
+
 
 def conv_activation_counter_hook(module, input, output):
     """
@@ -464,22 +495,29 @@ def dconv_flops_counter_hook(dconv_module, input, output):
     batch_size = input.shape[0]
     output_dims = list(output.shape[2:])
 
-    m_channels, in_channels, kernel_dim1, _, = dconv_module.weight.shape
-    out_channels, _, kernel_dim2, _, = dconv_module.projection.shape
+    (
+        m_channels,
+        in_channels,
+        kernel_dim1,
+        _,
+    ) = dconv_module.weight.shape
+    (
+        out_channels,
+        _,
+        kernel_dim2,
+        _,
+    ) = dconv_module.projection.shape
     # groups = dconv_module.groups
 
     # filters_per_channel = out_channels // groups
-    conv_per_position_flops1 = kernel_dim1 ** 2 * in_channels * m_channels
-    conv_per_position_flops2 = kernel_dim2 ** 2 * out_channels * m_channels
+    conv_per_position_flops1 = kernel_dim1**2 * in_channels * m_channels
+    conv_per_position_flops2 = kernel_dim2**2 * out_channels * m_channels
     active_elements_count = batch_size * np.prod(output_dims)
 
-    overall_conv_flops = (conv_per_position_flops1 + conv_per_position_flops2) * active_elements_count
+    overall_conv_flops = (
+        conv_per_position_flops1 + conv_per_position_flops2
+    ) * active_elements_count
     overall_flops = overall_conv_flops
 
     dconv_module.__flops__ += int(overall_flops)
     # dconv_module.__output_dims__ = output_dims
-
-
-
-
-

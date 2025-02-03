@@ -12,7 +12,7 @@ from jaxtyping import Float, jaxtyped
 import typeguard
 from egoallo.utils.setup_logger import setup_logger
 from egoallo.data.motion_processing import MotionProcessor
-from egoallo.fncsmpl import SmplhModel, SmplhShaped, SmplhShapedAndPosed
+from egoallo.fncsmpl import SmplhModel
 from egoallo.transforms import SE3, SO3
 import pickle
 from smplx import SMPLX
@@ -453,9 +453,9 @@ class RICHDataProcessor:
                 .cpu()
                 .numpy()
             )
-            assert joint_contacts.ndim == 1 and joint_contacts.shape[0] == (
-                52
-            ), f"joints contacts's shape is {joint_contacts.shape}"
+            assert joint_contacts.ndim == 1 and joint_contacts.shape[0] == (52), (
+                f"joints contacts's shape is {joint_contacts.shape}"
+            )
             all_contacts.append(joint_contacts)
 
         # Stack sequences
