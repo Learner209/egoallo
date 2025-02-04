@@ -1,9 +1,8 @@
 import pytest
+from egoallo.config import CONFIG_FILE
+from egoallo.config import make_cfg
 from egoallo.egoexo import EGOEXO_UTILS_INST
 from egoallo.egoexo.egoexo_utils import EgoExoUtils
-
-
-from egoallo.config import make_cfg, CONFIG_FILE
 
 local_config_file = CONFIG_FILE
 CFG = make_cfg(config_name="defaults", config_file=local_config_file, cli_args=[])
@@ -25,7 +24,9 @@ def test_egoexo_utils():
     "fixture1, cfg",
     [
         pytest.param(
-            pytest.lazy_fixture("setup_egoexo_utils"), CFG, id="test_egoexo_utils"
+            pytest.lazy_fixture("setup_egoexo_utils"),
+            CFG,
+            id="test_egoexo_utils",
         ),
     ],
 )
@@ -63,7 +64,8 @@ def test_egoexo_utils_examples(fixture1, cfg):
             egoexo_utils_inst.get_take_metadata_from_take_name(take_name)
             exported_mp4_path = cfg.io.egoexo.preprocessing.exported_mp4_path
             egoexo_utils_inst.get_exported_mp4_path_from_take_name(
-                take_name, exported_mp4_path
+                take_name,
+                exported_mp4_path,
             )
             EgoExoUtils.get_ego_aria_cam_name(take)
             EgoExoUtils.get_exo_cam_names(take)

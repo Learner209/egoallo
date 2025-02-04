@@ -1,6 +1,10 @@
-from dataclasses import dataclass, field
-from typing import Dict, Optional, Any, List
 from collections import defaultdict
+from dataclasses import dataclass
+from dataclasses import field
+from typing import Any
+from typing import Dict
+from typing import List
+from typing import Optional
 
 
 @dataclass
@@ -71,7 +75,7 @@ class TakeStats:
     """Statistics for a complete take"""
 
     frames: Dict[str, FrameStats] = field(
-        default_factory=lambda: defaultdict(FrameStats)
+        default_factory=lambda: defaultdict(FrameStats),
     )
     valid: bool = False
 

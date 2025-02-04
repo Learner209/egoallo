@@ -1,28 +1,27 @@
+import json
 from pathlib import Path
-from typing import (
-    Any,
-    Dict,
-    List,
-    Optional,
-    Tuple,
-    assert_never,
-    TYPE_CHECKING,
-)
+from typing import Any
+from typing import assert_never
+from typing import Dict
+from typing import List
+from typing import Optional
+from typing import Tuple
+from typing import TYPE_CHECKING
 
 import numpy as np
-import torch
+import polyscope as ps
 import torch.utils.data
-from torch import Tensor
-from jaxtyping import Float, Bool
-from egoallo.config import CONFIG_FILE, make_cfg
+from egoallo.config import CONFIG_FILE
+from egoallo.config import make_cfg
 from egoallo.data.dataclass import EgoTrainingData
-from egoallo.utils.setup_logger import setup_logger
 from egoallo.mapping import (
     EGOEXO4D_BODYPOSE_TO_SMPLH_INDICES,
 )
-import json
-import polyscope as ps
 from egoallo.utils.aria_utils.ps_vis import draw_coco_kinematic_tree
+from egoallo.utils.setup_logger import setup_logger
+from jaxtyping import Bool
+from jaxtyping import Float
+from torch import Tensor
 
 if TYPE_CHECKING:
     from egoallo.config.inference.inference_egoexo import EgoExoInferenceConfig
@@ -123,7 +122,7 @@ class EgoExoDataset(torch.utils.data.Dataset[EgoTrainingData]):
                     "take_uid": take_uid,
                     "take_name": metadata.get("take_name"),
                     **metadata,
-                }
+                },
             }
 
             # Process frame data
@@ -348,7 +347,7 @@ class EgoExoDataset(torch.utils.data.Dataset[EgoTrainingData]):
                         pose["tx"],
                         pose["ty"],
                         pose["tz"],
-                    ]
+                    ],
                 )
             else:
                 poses.append([1, 0, 0, 0, 0, 0, 0])  # Identity pose

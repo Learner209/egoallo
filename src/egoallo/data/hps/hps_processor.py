@@ -5,19 +5,22 @@ from __future__ import annotations
 import json
 import pickle
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
+from typing import Dict
+from typing import Optional
 
-from jaxtyping import Float, jaxtyped
-import typeguard
 import numpy as np
 import torch
-from torch import Tensor
-from numpy import ndarray as Array
-
-from egoallo.utils.setup_logger import setup_logger
+import typeguard
 from egoallo.data.motion_processing import MotionProcessor
 from egoallo.fncsmpl import SmplhModel
-from egoallo.transforms import SE3, SO3
+from egoallo.transforms import SE3
+from egoallo.transforms import SO3
+from egoallo.utils.setup_logger import setup_logger
+from jaxtyping import Float
+from jaxtyping import jaxtyped
+from numpy import ndarray as Array
+from torch import Tensor
 
 logger = setup_logger(output="logs/hps_processor", name=__name__)
 
@@ -66,7 +69,8 @@ class HPSProcessor:
         }
 
     def _load_camera_trajectory(
-        self, sequence_name: str
+        self,
+        sequence_name: str,
     ) -> tuple[list[dict[str, float]], float, float]:
         """Load camera trajectory from HPS format."""
         camera_path = (
@@ -101,7 +105,8 @@ class HPSProcessor:
         """Convert rotation representations."""
         # Convert root orientation and translation to SE(3)
         T_world_root = SE3.from_rotation_and_translation(
-            rotation=SO3.exp(root_orient), translation=trans
+            rotation=SO3.exp(root_orient),
+            translation=trans,
         ).parameters()  # (..., 7)
 
         # Convert body pose to quaternions (21 joints)
@@ -125,7 +130,9 @@ class HPSProcessor:
         return all(p.exists() for p in paths)
 
     def process_sequence(
-        self, sequence_name: str, min_frames: int = 30
+        self,
+        sequence_name: str,
+        min_frames: int = 30,
     ) -> Optional[Dict[str, Any]]:
         """Process a single HPS sequence."""
         if not self.validate_sequence(sequence_name):
@@ -148,8 +155,8 @@ class HPSProcessor:
                 np.array(
                     json.load(open(self.hps_dir / "hps_betas" / f"{subject}.json"))[
                         "betas"
-                    ]
-                )
+                    ],
+                ),
             )
             .float()
             .to(self.device)
@@ -174,7 +181,9 @@ class HPSProcessor:
 
         # Convert rotations to required format
         T_world_root, body_quats = self._convert_rotations(
-            root_orient, body_pose, trans
+            root_orient,
+            body_pose,
+            trans,
         )
 
         # Process through SMPL-H pipeline
@@ -214,7 +223,8 @@ class HPSProcessor:
         # )
         # breakpoint()
         floor_height, contacts = self.motion_processor.process_floor_and_contacts(
-            joints, self.joint_indices
+            joints,
+            self.joint_indices,
         )
         contacts: Float[Array, "*batch timesteps 22"] = contacts[..., :22]
 
@@ -231,7 +241,7 @@ class HPSProcessor:
             "trans": trans.cpu().numpy(),
             "betas": betas.cpu().numpy(),
             "contacts": contacts.astype(
-                np.float32
+                np.float32,
             ),  # contacts server as a boolean label, but for compatiblity with `load_from_npz` function, convert it to flaot32
             "gender": gender,
             "fps": self.fps,

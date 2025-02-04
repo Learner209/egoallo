@@ -1,10 +1,12 @@
-from typing import Callable, Type, TypeVar
+from typing import Callable
+from typing import Type
+from typing import TypeVar
 
 import torch
 
+from .._base import MatrixLieGroup
 # assert TYPE_CHECKING
 # if TYPE_CHECKING:
-from .._base import MatrixLieGroup
 
 
 T = TypeVar("T", bound=MatrixLieGroup)

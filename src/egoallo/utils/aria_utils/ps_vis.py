@@ -1,10 +1,11 @@
-import polyscope as ps
-import numpy as np
+from datetime import datetime
 from typing import List
 
-from egoallo.config import make_cfg, CONFIG_FILE
+import numpy as np
+import polyscope as ps
+from egoallo.config import CONFIG_FILE
+from egoallo.config import make_cfg
 from egoallo.utils.setup_logger import setup_logger
-from datetime import datetime
 
 local_config_file = CONFIG_FILE
 CFG = make_cfg(config_name="defaults", config_file=local_config_file, cli_args=[])
@@ -24,7 +25,7 @@ def build_cam_frustum_w_extr(T_world_cam, surface_mesh_id=None):
             [-0.5, 0.5, -1, 1],
             [-0.5, -0.5, -1, 1],
             [0.5, -0.5, -1, 1],
-        ]
+        ],
     )
     points[:, :-1] = (
         points[:, :-1] * CFG.plotly.camera_frustum.scale
@@ -90,7 +91,9 @@ def draw_coco_kinematic_tree(coco_kpts, coco_cfg, curve_network_id=None) -> None
 
 
 def draw_camera_pose(
-    T: np.ndarray, colors: List[str] = ["red", "green", "blue"], curve_network_id=None
+    T: np.ndarray,
+    colors: List[str] = ["red", "green", "blue"],
+    curve_network_id=None,
 ):
     """
     Draw an RGB 3D coordinate system based on a 3x4 camera pose matrix using Polyscope.

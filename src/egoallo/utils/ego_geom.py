@@ -11,29 +11,27 @@ OpenCV Camera follows the convention of X right, Y down, Z front.
 
 """
 
+import numpy as np
+import torch
+from egoallo.config import CONFIG_FILE
+from egoallo.config import make_cfg
+from egoallo.utils.setup_logger import setup_logger
+from egoallo.utils.transformation import aa_from_quat
+from egoallo.utils.transformation import get_heading_q
+from egoallo.utils.transformation import normalize_t
+from egoallo.utils.transformation import qpose_to_T
+from egoallo.utils.transformation import quat_between_t
+from egoallo.utils.transformation import quat_from_expmap_t
+from egoallo.utils.transformation import quat_inv_t
+from egoallo.utils.transformation import quat_mul_t
+from egoallo.utils.transformation import quat_mul_vec_t
+from egoallo.utils.transformation import quat_mul_vec_t_batch
+from egoallo.utils.transformation import quat_normalize_t
+from egoallo.utils.transformation import T_to_qpose
+from egoallo.utils.transformation import transform_vec_t
+from egoallo.utils.utils import NDArray
 from pytorch3d import transforms
 from scipy.spatial.transform import Rotation as sRot
-
-from egoallo.utils.transformation import (
-    aa_from_quat,
-    normalize_t,
-    quat_normalize_t,
-    quat_inv_t,
-    quat_mul_t,
-    quat_mul_vec_t,
-    quat_mul_vec_t_batch,
-    quat_between_t,
-    get_heading_q,
-    quat_from_expmap_t,
-    transform_vec_t,
-    T_to_qpose,
-    qpose_to_T,
-)
-import torch
-import numpy as np
-from egoallo.utils.setup_logger import setup_logger
-from egoallo.utils.utils import NDArray
-from egoallo.config import make_cfg, CONFIG_FILE
 
 logger = setup_logger(output=None, name=__name__)
 
@@ -112,7 +110,8 @@ def get_head_vel(head_pose, dt=1 / 30):
         v = transform_vec_t(v.data.cpu().numpy(), curr_qpos[3:7], "heading")
 
         qrel = transforms.quaternion_multiply(
-            next_qpos[3:7], transforms.quaternion_invert(curr_qpos[3:7])
+            next_qpos[3:7],
+            transforms.quaternion_invert(curr_qpos[3:7]),
         )
         axis, angle = rotation_from_quaternion_np(qrel, True)
 
@@ -127,7 +126,7 @@ def get_head_vel(head_pose, dt=1 / 30):
         head_vels.append(np.concatenate((v, rv)))
 
     head_vels.append(
-        head_vels[-1].copy()
+        head_vels[-1].copy(),
     )  # copy last one since there will be one less through finite difference
     head_vels = np.vstack(head_vels)
     return head_vels
@@ -167,7 +166,8 @@ def get_root_relative_head(root_poses, head_poses):
 
         root_quat = root_qpos[3:7].copy()
         root_quat_local = transforms.quaternion_multiply(
-            transforms.quaternion_invert(head_rot), root_quat
+            transforms.quaternion_invert(head_rot),
+            root_quat,
         )  # ???? Should it be flipped?
         axis, angle = aa_from_quat(root_quat_local, separate=True)
 
@@ -221,7 +221,8 @@ def root_from_relative_head(root_relative, head_poses):
         root_pos = quat_mul_vec_t(q_heading, root_pos_delta) + head_pos
         root_rot_delta = quat_mul_vec_t(head_rot, root_rot_delta)
         root_rot = transforms.quaternion_multiply(
-            head_rot, quat_from_expmap_t(root_rot_delta)
+            head_rot,
+            quat_from_expmap_t(root_rot_delta),
         )
         root_pose = np.hstack([root_pos, root_rot])
         root_poses.append(root_pose)
@@ -270,7 +271,8 @@ def get_obj_relative_pose(obj_poses, ref_poses, num_objs=1):
 
             obj_quat = obj_qpos[oidx * 7 + 3 : oidx * 7 + 7].copy()
             obj_quat_local = transforms.quaternion_multiply(
-                transforms.quaternion_invert(q_heading), obj_quat
+                transforms.quaternion_invert(q_heading),
+                obj_quat,
             )
             obj_pose = np.concatenate((diff_loc, obj_quat_local))
             obs.append(obj_pose)
@@ -318,12 +320,13 @@ def rotate_at_frame_smplh(root_pose, cano_t_idx=0):
     project_t = torch.FloatTensor([1, 1, 0])[None, None, None, :]
     world_forward = torch.FloatTensor([1, 0, 0])[None, None, None, :]
     loc_forward = project_t * quat_mul_vec_t_batch(
-        key_glob_Q, world_forward.repeat(BS, 1, 1, 1)
+        key_glob_Q,
+        world_forward.repeat(BS, 1, 1, 1),
     )  # BS x 1 x 1 x 3
 
     loc_forward = normalize_t(loc_forward)
     yrot = quat_normalize_t(
-        quat_between_t(world_forward, loc_forward)
+        quat_between_t(world_forward, loc_forward),
     )  # BS x 1 x 1 X 4
     new_glob_Q = quat_mul_t(quat_inv_t(yrot).expand(-1, -1, T, -1), global_q)
     new_glob_X = quat_mul_vec_t(quat_inv_t(yrot).expand(-1, -1, T, -1), global_x)
@@ -353,7 +356,7 @@ def batch_align_to_reference_pose(to_align_pose, reference_pose):
     - the convention of quat is `wxyz` since pytorch3d uses this convention.
     - `to_align2ref_rot_seq` is the rotation matrix that rotates the first frame of `to_align_pose` to the first frame of `reference_pose`
     - `move_to_ref_trans` is the translation that moves the first frame of `to_align_pose` to the first frame of `reference_pose`, applied by order:
-    .. math:: P_{\text{aligned}} = R_{to\_align2ref}P_{\text{to\_align}} - T_{move\_to\_ref\_}
+    .. math:: P_{\text{aligned}} = R_{to_align2ref}P_{\text{to_align}} - T_{move_to_ref_}
 
     Examples
     ------
@@ -385,27 +388,34 @@ def batch_align_to_reference_pose(to_align_pose, reference_pose):
     )
 
     to_align2ref_rot = np.matmul(
-        ref_rot_mat[0:1], to_align_rot_mat[:, 0].transpose(0, 2, 1)
+        ref_rot_mat[0:1],
+        to_align_rot_mat[:, 0].transpose(0, 2, 1),
     )  # B x 3 X 3
     seq_to_align_rot_mat = torch.from_numpy(to_align_rot_mat).float()  # B x T X 3 X 3
     to_align2ref_rot_seq = torch.from_numpy(to_align2ref_rot)[
-        :, np.newaxis, :, :
+        :,
+        np.newaxis,
+        :,
+        :,
     ].float()  # B x 1 X 3 X 3
     aligned_seq_rot_mat = torch.matmul(
-        to_align2ref_rot_seq, seq_to_align_rot_mat
+        to_align2ref_rot_seq,
+        seq_to_align_rot_mat,
     )  # B x T X 3 X 3
     aligned_seq_rot_quat_wxyz = transforms.matrix_to_quaternion(
-        aligned_seq_rot_mat
+        aligned_seq_rot_mat,
     )  # B x T X 4
 
     aligned_seq_rot_mat = aligned_seq_rot_mat.data.cpu().numpy()
     aligned_seq_rot_quat_wxyz = aligned_seq_rot_quat_wxyz.data.cpu().numpy()
 
     seq_to_align_trans = torch.from_numpy(to_align_trans).float()[
-        ..., None
+        ...,
+        None,
     ]  # B x T X 3 X 1
     aligned_seq_trans = torch.matmul(to_align2ref_rot_seq, seq_to_align_trans)[
-        ..., 0
+        ...,
+        0,
     ]  # B x T X 3
     aligned_seq_trans = aligned_seq_trans.data.cpu().numpy()
 
@@ -451,10 +461,13 @@ def align_to_reference_pose(to_align_pose, reference_pose):
     # print("pred2gt_rot:{0}".format(pred2gt_rot))
     seq_to_align_rot_mat = torch.from_numpy(to_align_rot_mat).float()  # T X 3 X 3
     to_align2ref_rot_seq = torch.from_numpy(to_align2ref_rot).float()[
-        None, :, :
+        None,
+        :,
+        :,
     ]  # 1 X 3 X 3
     aligned_seq_rot_mat = torch.matmul(
-        to_align2ref_rot_seq, seq_to_align_rot_mat
+        to_align2ref_rot_seq,
+        seq_to_align_rot_mat,
     )  # T X 3 X 3
     aligned_seq_rot_quat_wxyz = transforms.matrix_to_quaternion(aligned_seq_rot_mat)
 
@@ -462,10 +475,14 @@ def align_to_reference_pose(to_align_pose, reference_pose):
     aligned_seq_rot_quat_wxyz = aligned_seq_rot_quat_wxyz.data.cpu().numpy()
 
     seq_to_align_trans = torch.from_numpy(to_align_trans).float()[
-        :, :, None
+        :,
+        :,
+        None,
     ]  # T X 3 X 1
     aligned_seq_trans = torch.matmul(to_align2ref_rot_seq, seq_to_align_trans)[
-        :, :, 0
+        :,
+        :,
+        0,
     ]  # T X 3
     aligned_seq_trans = aligned_seq_trans.data.cpu().numpy()
 
@@ -780,7 +797,8 @@ def batch_ZupLookAT2smplorigin(batch_lookAt_direction, euler_order="xyz"):
     batch_R_world_cam_as_quat = batch_R_world_cam.as_quat()  # xyzw
     batch_R_world_cam_as_quat = batch_R_world_cam_as_quat[:, [3, 0, 1, 2]]  # wxyz
     batch_R_world_cam_as_euler = batch_R_world_cam.as_euler(
-        seq=euler_order, degrees=False
+        seq=euler_order,
+        degrees=False,
     )
     return batch_R_world_cam_as_quat, batch_R_world_cam_as_euler
 
@@ -823,7 +841,8 @@ def local2global_pose(local_pose, kintree):
         parent_id = kintree[jId]
         if parent_id >= 0:
             global_pose[:, jId] = torch.matmul(
-                global_pose[:, parent_id], global_pose[:, jId]
+                global_pose[:, parent_id],
+                global_pose[:, jId],
             )
 
     return global_pose
@@ -907,10 +926,10 @@ def quat_fk_torch(lrot_mat, lpos, kintree):
     for i in range(1, len(kintree)):
         gp.append(
             transforms.quaternion_apply(gr[kintree[i]], lpos[..., i : i + 1, :])
-            + gp[kintree[i]]
+            + gp[kintree[i]],
         )
         gr.append(
-            transforms.quaternion_multiply(gr[kintree[i]], lrot[..., i : i + 1, :])
+            transforms.quaternion_multiply(gr[kintree[i]], lrot[..., i : i + 1, :]),
         )
 
     res = torch.cat(gr, dim=-2), torch.cat(gp, dim=-2)

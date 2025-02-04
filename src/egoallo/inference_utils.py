@@ -10,23 +10,25 @@ import numpy as np
 import torch
 import typeguard
 import yaml
-from jaxtyping import Float, jaxtyped
+from egoallo.config import CONFIG_FILE
+from egoallo.config import make_cfg
+from egoallo.config.train.train_config import EgoAlloTrainConfig
+from egoallo.utils.setup_logger import setup_logger
+from jaxtyping import Float
+from jaxtyping import jaxtyped
 from projectaria_tools.core import mps  # type: ignore
 from projectaria_tools.core.data_provider import create_vrs_data_provider
 from safetensors import safe_open
 from torch import Tensor
 
-from egoallo.config.train.train_config import EgoAlloTrainConfig
-from egoallo.utils.setup_logger import setup_logger
-
 from . import fncsmpl
 from . import transforms as tf
 from .data.dataclass import EgoTrainingData
 from .mapping import SMPLH_BODY_JOINTS
-from .network import EgoDenoiser, EgoDenoiserConfig
+from .network import EgoDenoiser
+from .network import EgoDenoiserConfig
 from .tensor_dataclass import TensorDataclass
 from .transforms import SE3
-from egoallo.config import CONFIG_FILE, make_cfg
 
 logger = setup_logger(output=None, name=__name__, level=logging.INFO)
 
@@ -36,21 +38,23 @@ CFG = make_cfg(config_name="defaults", config_file=local_config_file, cli_args=[
 
 
 def load_denoiser(
-    checkpoint_dir: Path, runtime_config: EgoAlloTrainConfig
+    checkpoint_dir: Path,
+    runtime_config: EgoAlloTrainConfig,
 ) -> tuple[EgoDenoiser, EgoDenoiserConfig]:
     """Load a denoiser model."""
     checkpoint_dir = checkpoint_dir.absolute()
     experiment_dir = checkpoint_dir.parent
 
     model_config = yaml.load(
-        (experiment_dir / "model_config.yaml").read_text(), Loader=yaml.Loader
+        (experiment_dir / "model_config.yaml").read_text(),
+        Loader=yaml.Loader,
     )
     assert isinstance(model_config, EgoDenoiserConfig)
 
     model = EgoDenoiser(
         runtime_config.model,
         modality_dims=runtime_config.denoising.fetch_modality_dict(
-            runtime_config.model.include_hands
+            runtime_config.model.include_hands,
         ),
     )
     with safe_open(checkpoint_dir / "model.safetensors", framework="pt") as f:  # type: ignore
@@ -63,7 +67,8 @@ def load_denoiser(
 def load_runtime_config(checkpoint_dir: Path) -> EgoAlloTrainConfig:
     experiment_dir = checkpoint_dir.parent
     config = yaml.load(
-        (experiment_dir / "run_config.yaml").read_text(), Loader=yaml.Loader
+        (experiment_dir / "run_config.yaml").read_text(),
+        Loader=yaml.Loader,
     )
     assert isinstance(config, EgoAlloTrainConfig)
     return config
@@ -179,7 +184,7 @@ class InferenceInputTransforms(TensorDataclass):
             Ts_world_device.append(T_world_device)
             Ts_world_cpf.append(T_world_device @ T_device_cpf)
             out_timestamps_secs.append(
-                closed_loop_traj[i].tracking_timestamp.total_seconds()
+                closed_loop_traj[i].tracking_timestamp.total_seconds(),
             )
 
         return InferenceInputTransforms(
@@ -241,13 +246,16 @@ def create_masked_training_data(
     # Get joint positions in world frame
     root_pos = posed.T_world_root[..., 4:7].unsqueeze(-2)  # (*batch, timesteps, 1, 3)
     joints_wrt_world = torch.cat(
-        [root_pos, posed.Ts_world_joint[..., : num_joints - 1, 4:7]], dim=-2
+        [root_pos, posed.Ts_world_joint[..., : num_joints - 1, 4:7]],
+        dim=-2,
     )  # (*batch, timesteps, num_joints, 3)
 
     # Generate random mask for sequence
     num_masked = int(num_joints * mask_ratio)
     visible_joints_mask = torch.ones(
-        (batch_size, timesteps, num_joints), dtype=torch.bool, device=device
+        (batch_size, timesteps, num_joints),
+        dtype=torch.bool,
+        device=device,
     )
 
     # Randomly select joints to mask

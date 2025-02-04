@@ -1,8 +1,13 @@
+import dataclasses
 from pathlib import Path
 from typing import Literal
-import dataclasses
-from egoallo import network, training_loss
-from egoallo.types import DatasetType, DatasetSliceStrategy, DatasetSplit, JointCondMode
+
+from egoallo import network
+from egoallo import training_loss
+from egoallo.types import DatasetSliceStrategy
+from egoallo.types import DatasetSplit
+from egoallo.types import DatasetType
+from egoallo.types import JointCondMode
 
 
 @dataclasses.dataclass
@@ -23,7 +28,7 @@ class EgoAlloTrainConfig:
     model: network.EgoDenoiserConfig = dataclasses.field(init=False)
     denoising: network.DenoisingConfig = dataclasses.field(init=False)
     loss: training_loss.TrainingLossConfig = dataclasses.field(
-        default_factory=training_loss.TrainingLossConfig
+        default_factory=training_loss.TrainingLossConfig,
     )
 
     # Dataset arguments.

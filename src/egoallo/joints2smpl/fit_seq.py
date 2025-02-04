@@ -1,25 +1,29 @@
-from __future__ import print_function, division
-from tqdm import tqdm
-import torch
-import os
-import numpy as np
-import joblib
-import smplx
-import trimesh
-import h5py
-from jaxtyping import jaxtyped, Float
-from torch import Tensor
-import typeguard
-from egoallo.data.dataclass import EgoTrainingData
-from egoallo.joints2smpl import smplify
-from egoallo.joints2smpl import joints2smpl_config
-from egoallo import fncsmpl
+from __future__ import division
+from __future__ import print_function
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, assert_never
+from typing import assert_never
+from typing import Literal
+
+import h5py
+import joblib
+import numpy as np
+import smplx
+import torch
+import trimesh
+import typeguard
 import tyro
+from egoallo import fncsmpl
+from egoallo.data.dataclass import EgoTrainingData
+from egoallo.joints2smpl import joints2smpl_config
+from egoallo.joints2smpl import smplify
 from egoallo.utils.setup_logger import setup_logger
+from jaxtyping import Float
+from jaxtyping import jaxtyped
+from torch import Tensor
+from tqdm import tqdm
 
 logger = setup_logger(output=None, name=__name__)
 
@@ -285,7 +289,7 @@ def joints2smpl_fit_seq(
         "fps": 30,
         "joints": pred_joints.numpy(force=True),
         "contacts": np.ones(
-            (pred_joints.shape[0], 22)
+            (pred_joints.shape[0], 22),
         ),  # contacts server as a boolean label, but for compatiblity with `load_from_npz` function, convert it to flaot32
         "pose_hand": np.zeros((pred_joints.shape[0], 90)),
         "root_orient": pred_pose[:, :3].numpy(force=True),
@@ -296,7 +300,9 @@ def joints2smpl_fit_seq(
     np.savez_compressed(output_path, **sequence_data)
 
     return EgoTrainingData.load_from_npz(
-        body_model=body_model, path=output_path, include_hands=True
+        body_model=body_model,
+        path=output_path,
+        include_hands=True,
     )
 
 

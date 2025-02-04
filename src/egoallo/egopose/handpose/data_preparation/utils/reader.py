@@ -41,7 +41,7 @@ class StridedReader:
 
     def __len__(self):
         return int(
-            math.ceil((len(self.all_pts) - self.frame_window_size) / self.stride)
+            math.ceil((len(self.all_pts) - self.frame_window_size) / self.stride),
         )
 
 

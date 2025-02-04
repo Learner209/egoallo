@@ -22,19 +22,21 @@ In contrast to other SMPL wrappers:
 
 # TODO: this import may interfere with jaxtyping's runtime checking. comment out not.
 # from __future__ import annotations
-
+import pickle
 from pathlib import Path
 
 import numpy as np
 import torch
 import typeguard
 from einops import einsum
-from jaxtyping import Float, Int, jaxtyped
+from jaxtyping import Float
+from jaxtyping import Int
+from jaxtyping import jaxtyped
 from torch import Tensor
-import pickle
 
 from .tensor_dataclass import TensorDataclass
-from .transforms import SE3, SO3
+from .transforms import SE3
+from .transforms import SO3
 
 
 @jaxtyped(typechecker=typeguard.typechecked)
@@ -159,7 +161,8 @@ class SmplhModel(TensorDataclass):
         left_hand_pca: Float[Tensor, "*batch num_pca"] | None = None,
         right_hand_pca: Float[Tensor, "*batch num_pca"] | None = None,
     ) -> tuple[
-        Float[Tensor, "*batch 15 3"] | None, Float[Tensor, "*batch 15 3"] | None
+        Float[Tensor, "*batch 15 3"] | None,
+        Float[Tensor, "*batch 15 3"] | None,
     ]:
         """Convert both hand PCA coefficients to axis-angle format.
 
@@ -250,7 +253,8 @@ class SmplhShaped(TensorDataclass):
             right_hand_quats = body_quats.new_zeros((*batch_axes, 15, 4))
             right_hand_quats[..., 0] = 1.0
         local_quats = broadcasting_cat(
-            [body_quats, left_hand_quats, right_hand_quats], dim=-2
+            [body_quats, left_hand_quats, right_hand_quats],
+            dim=-2,
         )
         assert local_quats.shape[-2:] == (num_joints, 4)
         return self.with_pose(T_world_root, local_quats)
@@ -298,7 +302,8 @@ class SmplhShapedAndPosed(TensorDataclass):
 
     @jaxtyped(typechecker=typeguard.typechecked)
     def with_new_T_world_root(
-        self, T_world_root: Float[Tensor, "*batch 7"]
+        self,
+        T_world_root: Float[Tensor, "*batch 7"],
     ) -> "SmplhShapedAndPosed":
         return SmplhShapedAndPosed(
             shaped_model=self.shaped_model,
@@ -319,7 +324,9 @@ class SmplhShapedAndPosed(TensorDataclass):
             (
                 SO3(self.local_quats).as_matrix()
                 - torch.eye(
-                    3, dtype=self.local_quats.dtype, device=self.local_quats.device
+                    3,
+                    dtype=self.local_quats.dtype,
+                    device=self.local_quats.device,
                 )
             ).reshape((*self.local_quats.shape[:-2], num_joints * 9)),
             "... verts j joints_times_9, ... joints_times_9 -> ... verts j",
@@ -348,7 +355,7 @@ class SmplhShapedAndPosed(TensorDataclass):
                             *verts_with_blend.shape[:-1],
                             1 + self.shaped_model.joints_zero.shape[-2],
                             1,
-                        )
+                        ),
                     ),
                 ],
                 dim=-1,
@@ -367,7 +374,8 @@ class SmplhShapedAndPosed(TensorDataclass):
 
     @jaxtyped(typechecker=typeguard.typechecked)
     def compute_joint_contacts(
-        self, vertex_contacts: Float[Tensor, "*batch verts"]
+        self,
+        vertex_contacts: Float[Tensor, "*batch verts"],
     ) -> Float[Tensor, "*batch joints"]:
         """Convert per-vertex contact labels to per-joint contact labels using skinning weights.
 
@@ -455,7 +463,7 @@ def forward_kinematics(
         else:
             T_world_parent = list_Ts_world_joint[parent_indices[i]]
         list_Ts_world_joint.append(
-            (SE3(T_world_parent) @ SE3(Ts_parent_child[..., i, :])).wxyz_xyz
+            (SE3(T_world_parent) @ SE3(Ts_parent_child[..., i, :])).wxyz_xyz,
         )
 
     Ts_world_joint = torch.stack(list_Ts_world_joint, dim=-2)
@@ -476,7 +484,7 @@ def broadcasting_cat(tensors: list[Tensor], dim: int) -> Tensor:
             *(
                 tensor.shape[i] if i == dim % len(tensor.shape) else max_size
                 for i, max_size in enumerate(max_sizes)
-            )
+            ),
         )
         for tensor in tensors
     ]

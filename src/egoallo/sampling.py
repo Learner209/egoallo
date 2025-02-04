@@ -5,21 +5,20 @@ from typing import TYPE_CHECKING
 import numpy as np
 import torch
 import typeguard
-from jaxtyping import Float, jaxtyped
+from jaxtyping import Float
+from jaxtyping import jaxtyped
 from torch import Tensor
 from tqdm import tqdm
 
-from . import fncsmpl, network
-from .guidance_optimizer_jax import (
-    GuidanceMode,
-    do_guidance_optimization,
-)
-from .hand_detection_structs import (
-    CorrespondedAriaHandWristPoseDetections,
-    CorrespondedHamerDetections,
-)
+from . import fncsmpl
+from . import network
+from .guidance_optimizer_jax import do_guidance_optimization
+from .guidance_optimizer_jax import GuidanceMode
+from .hand_detection_structs import CorrespondedAriaHandWristPoseDetections
+from .hand_detection_structs import CorrespondedHamerDetections
 from .tensor_dataclass import TensorDataclass
-from .transforms import SE3, SO3
+from .transforms import SE3
+from .transforms import SO3
 
 if TYPE_CHECKING:
     from .data.dataclass import EgoTrainingData
@@ -71,7 +70,8 @@ class CosineNoiseScheduleConstants(TensorDataclass):
             dim=0,
         )
         return CosineNoiseScheduleConstants(
-            alpha_t=alpha_t, alpha_bar_t=alpha_cumprod_t
+            alpha_t=alpha_t,
+            alpha_bar_t=alpha_cumprod_t,
         )
 
 
@@ -265,7 +265,7 @@ def run_sampling_with_masked_data(
 ) -> network.AbsoluteDenoiseTraj:
     # FIXME: currently the batch-size dimension of `masked_data` is not supported, as the num_samples `param` would conflict with batch_size dim of `masked_data`.
     noise_constants = CosineNoiseScheduleConstants.compute(timesteps=1000).to(
-        device=device
+        device=device,
     )
     alpha_bar_t = noise_constants.alpha_bar_t
     alpha_t = noise_constants.alpha_t
@@ -280,8 +280,9 @@ def run_sampling_with_masked_data(
     )
     x_t_list = [
         runtime_config.denoising.unpack_traj(
-            x_t_packed, include_hands=runtime_config.model.include_hands
-        )
+            x_t_packed,
+            include_hands=runtime_config.model.include_hands,
+        ),
     ]
 
     ts = quadratic_ts(timesteps=1000)
@@ -317,7 +318,9 @@ def run_sampling_with_masked_data(
             for start_t in range(0, seq_len, window_size - overlap_size):
                 end_t = min(start_t + window_size, seq_len)
                 overlap_weights_slice = canonical_overlap_weights[
-                    None, : end_t - start_t, None
+                    None,
+                    : end_t - start_t,
+                    None,
                 ]
                 overlap_weights[:, start_t:end_t, :] += overlap_weights_slice
 
@@ -330,7 +333,9 @@ def run_sampling_with_masked_data(
                         t=torch.tensor([t], device=device).expand((num_samples,)),
                         joints=masked_data.joints_wrt_world[:, start_t:end_t, :],
                         visible_joints_mask=masked_data.visible_joints_mask[
-                            :, start_t:end_t, :
+                            :,
+                            start_t:end_t,
+                            :,
                         ],
                         project_output_rotmats=False,
                         mask=masked_data.mask[:, start_t:end_t],
@@ -349,7 +354,8 @@ def run_sampling_with_masked_data(
         if guidance_mode != "off" and guidance_inner:
             x_0_pred, _ = do_guidance_optimization(
                 T_world_root=SE3.from_rotation_and_translation(
-                    SO3.from_matrix(x_0_pred.R_world_root), x_0_pred.t_world_root
+                    SO3.from_matrix(x_0_pred.R_world_root),
+                    x_0_pred.t_world_root,
                 )
                 .parameters()
                 .squeeze(0),
@@ -368,10 +374,10 @@ def run_sampling_with_masked_data(
             [
                 torch.zeros((1,), device=device),
                 torch.sqrt(
-                    (1.0 - alpha_bar_t[:-1]) / (1 - alpha_bar_t[1:]) * (1 - alpha_t)
+                    (1.0 - alpha_bar_t[:-1]) / (1 - alpha_bar_t[1:]) * (1 - alpha_t),
                 )
                 * 0.8,
-            ]
+            ],
         )
         x_t_packed = (
             torch.sqrt(alpha_bar_t[t_next]) * x_0_packed_pred
@@ -387,7 +393,7 @@ def run_sampling_with_masked_data(
                 x_t_packed,
                 include_hands=runtime_config.model.include_hands,
                 project_rotmats=False,
-            )
+            ),
         )
 
     if guidance_mode != "off" and guidance_post:
@@ -433,7 +439,7 @@ def run_sampling_with_masked_data_ddpm(
     """
     # Initialize noise schedule - same as DDIM
     noise_constants = CosineNoiseScheduleConstants.compute(timesteps=1000).to(
-        device=device
+        device=device,
     )
     alpha_bar_t = noise_constants.alpha_bar_t
 
@@ -450,8 +456,9 @@ def run_sampling_with_masked_data_ddpm(
 
     x_t_list = [
         runtime_config.denoising.unpack_traj(
-            x_t_packed, include_hands=runtime_config.model.include_hands
-        )
+            x_t_packed,
+            include_hands=runtime_config.model.include_hands,
+        ),
     ]
     ts = linear_ts(timesteps=1000)
 
@@ -476,7 +483,10 @@ def run_sampling_with_masked_data_ddpm(
 
     # breakpoint()
     for i in tqdm(
-        range(len(ts) - 1), total=len(ts) - 1, desc="DDPM sampling", ascii=" >="
+        range(len(ts) - 1),
+        total=len(ts) - 1,
+        desc="DDPM sampling",
+        ascii=" >=",
     ):
         t = ts[i]
         t_next = ts[i + 1]
@@ -489,7 +499,9 @@ def run_sampling_with_masked_data_ddpm(
             for start_t in range(0, seq_len, window_size - overlap_size):
                 end_t = min(start_t + window_size, seq_len)
                 overlap_weights_slice = canonical_overlap_weights[
-                    None, : end_t - start_t, None
+                    None,
+                    : end_t - start_t,
+                    None,
                 ]
                 overlap_weights[:, start_t:end_t, :] += overlap_weights_slice
 
@@ -502,7 +514,9 @@ def run_sampling_with_masked_data_ddpm(
                         t=torch.tensor([t], device=device).expand((num_samples,)),
                         joints=masked_data.joints_wrt_world[:, start_t:end_t, :],
                         visible_joints_mask=masked_data.visible_joints_mask[
-                            :, start_t:end_t, :
+                            :,
+                            start_t:end_t,
+                            :,
                         ],
                         project_output_rotmats=False,
                         mask=masked_data.mask[:, start_t:end_t],
@@ -521,7 +535,8 @@ def run_sampling_with_masked_data_ddpm(
         if guidance_mode != "off" and guidance_inner:
             x_0_pred, _ = do_guidance_optimization(
                 T_world_root=SE3.from_rotation_and_translation(
-                    SO3.from_matrix(x_0_pred.R_world_root), x_0_pred.t_world_root
+                    SO3.from_matrix(x_0_pred.R_world_root),
+                    x_0_pred.t_world_root,
                 )
                 .parameters()
                 .squeeze(0),
@@ -540,7 +555,9 @@ def run_sampling_with_masked_data_ddpm(
         # DDPM update equation
         # x_t = sqrt(alpha_t) * x_0 + sqrt(1 - alpha_t) * noise
         noise = torch.randn(
-            x_0_packed_pred.shape, dtype=x_0_packed_pred.dtype, device=device
+            x_0_packed_pred.shape,
+            dtype=x_0_packed_pred.dtype,
+            device=device,
         )
         x_t_packed = (
             torch.sqrt(alpha_bar_t[t_next]) * x_0_packed_pred
@@ -552,7 +569,7 @@ def run_sampling_with_masked_data_ddpm(
                 x_t_packed,
                 include_hands=runtime_config.model.include_hands,
                 project_rotmats=False,
-            )
+            ),
         )
 
     # breakpoint()

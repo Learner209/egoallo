@@ -1,11 +1,3 @@
-# project_aria.py
-import numpy as np
-from PIL import Image
-from projectaria_tools.core import data_provider
-from projectaria_tools.core.sensor_data import TimeDomain, TimeQueryOptions
-from projectaria_tools.core.stream_id import RecordableTypeId, StreamId
-from tqdm import tqdm
-
 """
 Sensor 	Stream ID 	Recordable Type ID 	label
 ET camera 	211-1 	EyeCameraRecordableClass 	camera-et
@@ -21,6 +13,16 @@ IMU (1kHz) 	1202-1 	SlamImuData 	imu-right
 IMU (800Hz) 	1202-2 	SlamImuData 	imu-left
 Magnetometer 	1203-1 	SlamMagnetometerData 	mag
 """
+
+# project_aria.py
+import numpy as np
+from PIL import Image
+from projectaria_tools.core import data_provider
+from projectaria_tools.core.sensor_data import TimeDomain
+from projectaria_tools.core.sensor_data import TimeQueryOptions
+from projectaria_tools.core.stream_id import RecordableTypeId
+from projectaria_tools.core.stream_id import StreamId
+from tqdm import tqdm
 
 
 class AriaDataProvider:
@@ -43,7 +45,10 @@ class AriaDataProvider:
         option=TimeQueryOptions.CLOSEST,
     ):
         return self.provider.get_image_data_by_time_ns(
-            stream_id, time_ns, time_domain, option
+            stream_id,
+            time_ns,
+            time_domain,
+            option,
         )[0].to_numpy_array()
 
     def get_stream_id_from_label(self, label):
@@ -56,7 +61,10 @@ class AriaDataProvider:
         return self.provider.get_device_calibration()
 
     def summarize_vrs(
-        self, rgb_stream_id=StreamId("214-1"), num_thumbnails=10, resize_ratio=10
+        self,
+        rgb_stream_id=StreamId("214-1"),
+        num_thumbnails=10,
+        resize_ratio=10,
     ):
         # Retrieve image size for the RGB stream
         time_domain = TimeDomain.DEVICE_TIME  # query data based on host time
@@ -84,7 +92,10 @@ class AriaDataProvider:
         sample_timestamps = np.linspace(start_time, end_time, sample_count)
         for sample in tqdm(sample_timestamps):
             image_tuple = self.provider.get_image_data_by_time_ns(
-                rgb_stream_id, int(sample), time_domain, option
+                rgb_stream_id,
+                int(sample),
+                time_domain,
+                option,
             )
             image_array = image_tuple[0].to_numpy_array()
             image = Image.fromarray(image_array)
@@ -121,7 +132,7 @@ class AriaDataProvider:
         for index in range(0, num_data):
             image_data = self.provider.get_image_data_by_index(sensor_stream_id, index)
             print(
-                f"Get image: {index} with timestamp {image_data[1].capture_timestamp_ns}"
+                f"Get image: {index} with timestamp {image_data[1].capture_timestamp_ns}",
             )
 
     def get_sensor_data_by_time_ns(self):
@@ -146,10 +157,13 @@ class AriaDataProvider:
 
         for time in range(start_time, end_time, int(1e7)):
             image_data = self.provider.get_image_data_by_time_ns(
-                sensor_stream_id, time, time_domain, option
+                sensor_stream_id,
+                time,
+                time_domain,
+                option,
             )
             print(
-                f"query time {time} and get capture image time {image_data[1].capture_timestamp_ns} within range {start_time} {end_time}"
+                f"query time {time} and get capture image time {image_data[1].capture_timestamp_ns} within range {start_time} {end_time}",
             )
 
     @staticmethod
@@ -195,10 +209,10 @@ class AriaDataProvider:
         # * skip sensor data : `set_subsample_rate(stream_id, rate)`
 
         options.set_truncate_first_device_time_ns(
-            int(1e8)
+            int(1e8),
         )  # 0.1 secs after vrs first timestamp
         options.set_truncate_last_device_time_ns(
-            int(1e9)
+            int(1e9),
         )  # 1 sec before vrs last timestamp
 
         # deactivate all sensors
@@ -210,13 +224,15 @@ class AriaDataProvider:
         for stream_id in slam_stream_ids:
             options.activate_stream(stream_id)  # activate slam cameras
             options.set_subsample_rate(
-                stream_id, 1
+                stream_id,
+                1,
             )  # sample every data for each slam camera
 
         for stream_id in imu_stream_ids:
             options.activate_stream(stream_id)  # activate imus
             options.set_subsample_rate(
-                stream_id, 10
+                stream_id,
+                10,
             )  # sample every 10th data for each imu
 
         # ### Step 3: create iterator to deliver data
@@ -238,7 +254,7 @@ class AriaDataProvider:
                 f"""obtain data from {label} of type {sensor_type} with \n
 				DEVICE_TIME: {device_timestamp} nanoseconds \n
 				HOST_TIME: {host_timestamp} nanoseconds \n
-				"""
+				""",
             )
 
 

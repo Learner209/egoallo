@@ -6,7 +6,8 @@ Very little of it is specific to SMPL-H. This could very easily be adapted for o
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Sequence, cast
+from typing import cast
+from typing import Sequence
 
 import jax
 import jax_dataclasses as jdc
@@ -15,7 +16,8 @@ import numpy as onp
 from einops import einsum
 from jax import Array
 from jax import numpy as jnp
-from jaxtyping import Float, Int
+from jaxtyping import Float
+from jaxtyping import Int
 
 
 @jdc.pytree_dataclass
@@ -56,7 +58,8 @@ class SmplhModel:
         )
 
     def with_shape(
-        self, betas: Float[Array | onp.ndarray, "... n_betas"]
+        self,
+        betas: Float[Array | onp.ndarray, "... n_betas"],
     ) -> SmplhShaped:
         """Compute a new body model, with betas applied. betas vector should
         have shape up to (16,)."""
@@ -135,7 +138,8 @@ class SmplhShaped:
 
         # Get relative transforms.
         Ts_parent_child = broadcasting_cat(
-            [local_quats, self.t_parent_joint[..., :num_active_joints, :]], axis=-1
+            [local_quats, self.t_parent_joint[..., :num_active_joints, :]],
+            axis=-1,
         )
         assert Ts_parent_child.shape[-2:] == (num_active_joints, 7)
 
@@ -149,7 +153,7 @@ class SmplhShaped:
             return Ts_world_joint.at[..., i, :].set(
                 (
                     jaxlie.SE3(T_world_parent) @ jaxlie.SE3(Ts_parent_child[..., i, :])
-                ).wxyz_xyz
+                ).wxyz_xyz,
             )
 
         Ts_world_joint = jax.lax.fori_loop(
@@ -198,7 +202,8 @@ class SmplhShapedAndPosed:
     """Absolute transform for each joint. Does not include the root."""
 
     def with_new_T_world_root(
-        self, T_world_root: Float[Array, "*batch 7"]
+        self,
+        T_world_root: Float[Array, "*batch 7"],
     ) -> SmplhShapedAndPosed:
         return SmplhShapedAndPosed(
             shaped_model=self.shaped_model,

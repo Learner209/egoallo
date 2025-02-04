@@ -4,7 +4,7 @@ import os
 
 def create_arg_parse():
     parser = argparse.ArgumentParser(
-        "Download ego hand pose data for only annotated takes via EgoExo4D Downloader"
+        "Download ego hand pose data for only annotated takes via EgoExo4D Downloader",
     )
     parser.add_argument(
         "--egoexo_root_path",
@@ -61,7 +61,8 @@ def find_annotated_takes(egoexo_data_dir, splits, anno_types, test_public_file_p
         # For test split, check existing takes with two options
         if split == "test":
             curr_split_cam_pose_dir = os.path.join(
-                egoexo_data_dir, f"annotations/ego_pose/{split}/camera_pose"
+                egoexo_data_dir,
+                f"annotations/ego_pose/{split}/camera_pose",
             )
             if os.path.exists(curr_split_cam_pose_dir):
                 curr_split_take_uids = [
@@ -73,7 +74,9 @@ def find_annotated_takes(egoexo_data_dir, splits, anno_types, test_public_file_p
             for anno_type_ in anno_types:
                 anno_type = anno_type_dir_dict[anno_type_]
                 curr_split_cam_pose_dir = os.path.join(
-                    egoexo_data_dir, f"annotations/ego_pose/{split}/body", anno_type
+                    egoexo_data_dir,
+                    f"annotations/ego_pose/{split}/body",
+                    anno_type,
                 )
                 if os.path.exists(curr_split_cam_pose_dir):
                     curr_split_take_uids = [

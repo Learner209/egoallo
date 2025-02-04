@@ -1,5 +1,5 @@
-from yacs.config import CfgNode as CN
 from egoallo.utils.setup_logger import setup_logger
+from yacs.config import CfgNode as CN
 
 logger = setup_logger(output=None, name=__name__)
 
@@ -31,7 +31,8 @@ def define_Dataset(dataset_opt: CN, opt: CN):
         dataset = D(dataset_opt)
     logger.info(
         "Dataset [{:s} - {:s}] is created.".format(
-            dataset.__class__.__name__, dataset_opt["phase"]
-        )
+            dataset.__class__.__name__,
+            dataset_opt["phase"],
+        ),
     )
     return dataset

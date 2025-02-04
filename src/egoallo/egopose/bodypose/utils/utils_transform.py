@@ -1,9 +1,7 @@
+import torch
 from torch.nn import functional as F
-
 # from human_body_prior.tools import tgm_conversion as tgm
 # from human_body_prior.tools.rotation_tools import aa2matrot,local2global_pose,matrot2aa
-
-import torch
 
 
 def bgs(d6s):
@@ -70,7 +68,8 @@ def sixd2quat(pose_6d):
     """
     pose_mat = sixd2matrot(pose_6d)
     pose_mat_34 = torch.cat(
-        (pose_mat, torch.zeros(pose_mat.size(0), pose_mat.size(1), 1)), dim=-1
+        (pose_mat, torch.zeros(pose_mat.size(0), pose_mat.size(1), 1)),
+        dim=-1,
     )
     pose_quaternion = tgm.rotation_matrix_to_quaternion(pose_mat_34)
     return pose_quaternion

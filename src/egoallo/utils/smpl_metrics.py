@@ -3,22 +3,18 @@ from collections import defaultdict
 
 import numpy as np
 import torch
-
-from egoallo.config import CONFIG_FILE, make_cfg
-from egoallo.smpl.smplh_utils import (
-    SMPLH_HEAD_IDX,
-    SMPLH_LEFT_ANKLE_IDX,
-    SMPLH_LEFT_FOOT_IDX,
-    SMPLH_RIGHT_ANKLE_IDX,
-    SMPLH_RIGHT_FOOT_IDX,
-)
+from egoallo.config import CONFIG_FILE
+from egoallo.config import make_cfg
+from egoallo.smpl.smplh_utils import SMPLH_HEAD_IDX
+from egoallo.smpl.smplh_utils import SMPLH_LEFT_ANKLE_IDX
+from egoallo.smpl.smplh_utils import SMPLH_LEFT_FOOT_IDX
+from egoallo.smpl.smplh_utils import SMPLH_RIGHT_ANKLE_IDX
+from egoallo.smpl.smplh_utils import SMPLH_RIGHT_FOOT_IDX
 from egoallo.utils.setup_logger import setup_logger
-from egoallo.utils.transformation import (
-    euler_from_quat,
-    get_qvel_fd,
-    qpose_to_T,
-    quat_to_rotMat_t,
-)
+from egoallo.utils.transformation import euler_from_quat
+from egoallo.utils.transformation import get_qvel_fd
+from egoallo.utils.transformation import qpose_to_T
+from egoallo.utils.transformation import quat_to_rotMat_t
 
 warnings.simplefilter(action="ignore", category=FutureWarning)
 logger = setup_logger(output=None, name=__name__)
@@ -158,7 +154,7 @@ def compute_accel(joints):
 def compute_error_accel(joints_gt, joints_pred, vis=None):
     """
     Computes acceleration error:
-        1/(n-2) \sum_{i=1}^{n-1} X_{i-1} - 2X_i + X_{i+1}
+        .. math:: 1/(n-2) \\sum_{i=1}^{n-1} X_{i-1} - 2X_i + X_{i+1}
     Note that for each frame that is not visible, three entries in the
     acceleration error should be zero'd out.
 
@@ -271,11 +267,13 @@ def compute_foot_sliding_for_smpl(pred_global_jpos, floor_height):
     H_toe = CFG.empirical_val.metric.foot_sliding.toe_height_threshold
 
     lankle_disp = np.linalg.norm(
-        lankle_pos[1:, :2] - lankle_pos[:-1, :2], axis=1
+        lankle_pos[1:, :2] - lankle_pos[:-1, :2],
+        axis=1,
     )  # T-1
     lfoot_disp = np.linalg.norm(lfoot_pos[1:, :2] - lfoot_pos[:-1, :2], axis=1)  # T-1
     rankle_disp = np.linalg.norm(
-        rankle_pos[1:, :2] - rankle_pos[:-1, :2], axis=1
+        rankle_pos[1:, :2] - rankle_pos[:-1, :2],
+        axis=1,
     )  # T-1
     rfoot_disp = np.linalg.norm(rfoot_pos[1:, :2] - rfoot_pos[:-1, :2], axis=1)  # T-1
 
@@ -285,7 +283,7 @@ def compute_foot_sliding_for_smpl(pred_global_jpos, floor_height):
     rfoot_subset = rfoot_pos[:-1, -1] < H_toe
 
     lankle_sliding_stats = np.abs(
-        lankle_disp * (2 - 2 ** (lankle_pos[:-1, -1] / H_ankle))
+        lankle_disp * (2 - 2 ** (lankle_pos[:-1, -1] / H_ankle)),
     )[lankle_subset]
     lankle_sliding = np.sum(lankle_sliding_stats) / T * 1000
 
@@ -295,7 +293,7 @@ def compute_foot_sliding_for_smpl(pred_global_jpos, floor_height):
     lfoot_sliding = np.sum(lfoot_sliding_stats) / T * 1000
 
     rankle_sliding_stats = np.abs(
-        rankle_disp * (2 - 2 ** (rankle_pos[:-1, -1] / H_ankle))
+        rankle_disp * (2 - 2 ** (rankle_pos[:-1, -1] / H_ankle)),
     )[rankle_subset]
     rankle_sliding = np.sum(rankle_sliding_stats) / T * 1000
 
@@ -355,14 +353,16 @@ def compute_metrics_for_smpl(
 
     root_traj_pred = (
         torch.cat(
-            (pred_global_jpos[:, root_idx, :], pred_global_quat[:, root_idx, :]), dim=-1
+            (pred_global_jpos[:, root_idx, :], pred_global_quat[:, root_idx, :]),
+            dim=-1,
         )
         .data.cpu()
         .numpy()
     )  # T X 7
     root_traj_gt = (
         torch.cat(
-            (gt_global_jpos[:, root_idx, :], gt_global_quat[:, root_idx, :]), dim=-1
+            (gt_global_jpos[:, root_idx, :], gt_global_quat[:, root_idx, :]),
+            dim=-1,
         )
         .data.cpu()
         .numpy()
@@ -370,7 +370,8 @@ def compute_metrics_for_smpl(
 
     T_root_pred = qpose_to_T(root_traj_pred)  # T x 3 x 4
     T_root_pred = np.concatenate(
-        [T_root_pred, np.zeros((T, 1, 4))], axis=1
+        [T_root_pred, np.zeros((T, 1, 4))],
+        axis=1,
     )  # T x 4 x 4
     T_root_gt = qpose_to_T(root_traj_gt)  # T x 3 x 4
     T_root_gt = np.concatenate([T_root_gt, np.zeros((T, 1, 4))], axis=1)  # T x 4 x 4
@@ -382,14 +383,16 @@ def compute_metrics_for_smpl(
     head_idx = SMPLH_HEAD_IDX
     head_traj_pred = (
         torch.cat(
-            (pred_global_jpos[:, head_idx, :], pred_global_quat[:, head_idx, :]), dim=-1
+            (pred_global_jpos[:, head_idx, :], pred_global_quat[:, head_idx, :]),
+            dim=-1,
         )
         .data.cpu()
         .numpy()
     )
     head_traj_gt = (
         torch.cat(
-            (gt_global_jpos[:, head_idx, :], gt_global_quat[:, head_idx, :]), dim=-1
+            (gt_global_jpos[:, head_idx, :], gt_global_quat[:, head_idx, :]),
+            dim=-1,
         )
         .data.cpu()
         .numpy()
@@ -397,7 +400,8 @@ def compute_metrics_for_smpl(
 
     T_head_pred = qpose_to_T(head_traj_pred)  # T x 3 x 4
     T_head_pred = np.concatenate(
-        [T_head_pred, np.zeros((T, 1, 4))], axis=1
+        [T_head_pred, np.zeros((T, 1, 4))],
+        axis=1,
     )  # T x 4 x 4
     T_head_gt = qpose_to_T(head_traj_gt)  # T x 3 x 4
     T_head_gt = np.concatenate([T_head_gt, np.zeros((T, 1, 4))], axis=1)  # T x 4 x 4
@@ -417,18 +421,21 @@ def compute_metrics_for_smpl(
     accel_dist = (
         np.mean(
             compute_error_accel(
-                pred_global_jpos.data.cpu().numpy(), gt_global_jpos.data.cpu().numpy()
-            )
+                pred_global_jpos.data.cpu().numpy(),
+                gt_global_jpos.data.cpu().numpy(),
+            ),
         )
         * 1000
     )  # scalar
 
     # Compute foot sliding error
     pred_fs_metric = compute_foot_sliding_for_smpl(
-        pred_global_jpos.data.cpu().numpy().copy(), pred_floor_height
+        pred_global_jpos.data.cpu().numpy().copy(),
+        pred_floor_height,
     )
     gt_fs_metric = compute_foot_sliding_for_smpl(
-        gt_global_jpos.data.cpu().numpy().copy(), gt_floor_height
+        gt_global_jpos.data.cpu().numpy().copy(),
+        gt_floor_height,
     )
 
     jpos_pred = pred_global_jpos - pred_global_jpos[:, 0:1]  # T x J x 3 zero out root
@@ -494,7 +501,6 @@ def compute_foot_sliding(foot_data, traj_qpos):
 
     foot_avg = (foot[:-1, -1] + foot[1:, -1]) / 2
     subset = np.logical_and(foot_avg < H, z > z_threshold)
-    # import pdb; pdb.set_trace()
 
     sliding_stats = np.abs(foot_disp * (2 - 2 ** (foot_avg / H)))[subset]
     sliding = np.sum(sliding_stats) / seq_len * 1000

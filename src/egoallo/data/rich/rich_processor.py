@@ -1,21 +1,26 @@
 from __future__ import annotations
 
 import json
+import pickle
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any
+from typing import Dict
+from typing import Optional
+from typing import Tuple
+from typing import Union
 
 import numpy as np
 import torch
-from torch import Tensor
-
-from jaxtyping import Float, jaxtyped
 import typeguard
-from egoallo.utils.setup_logger import setup_logger
 from egoallo.data.motion_processing import MotionProcessor
 from egoallo.fncsmpl import SmplhModel
-from egoallo.transforms import SE3, SO3
-import pickle
+from egoallo.transforms import SE3
+from egoallo.transforms import SO3
+from egoallo.utils.setup_logger import setup_logger
+from jaxtyping import Float
+from jaxtyping import jaxtyped
 from smplx import SMPLX
+from torch import Tensor
 
 logger = setup_logger(output="logs/rich_processor", name=__name__)
 
@@ -55,7 +60,7 @@ class RICHDataProcessor:
             model_path = self.smplh_model_dir / f"SMPLH_{gender.upper()}.pkl"
             # the rich data left/right hand annotations has 12 components.
             self.body_models[gender] = SmplhModel.load(model_path, num_pca_comps=12).to(
-                self.device
+                self.device,
             )
 
         # Initialize SMPLX models for each gender
@@ -91,7 +96,9 @@ class RICHDataProcessor:
         self.camera_transforms = {}
 
     def _load_camera_transform(
-        self, scene_name: str, seq_name: str = None
+        self,
+        scene_name: str,
+        seq_name: str = None,
     ) -> Dict[str, torch.Tensor]:
         """Load camera-to-world transform parameters.
 
@@ -126,7 +133,7 @@ class RICHDataProcessor:
                     scene_name = "LectureHall_yoga"
                 else:
                     raise ValueError(
-                        f"Unknown LectureHall scene type for sequence {seq_name}"
+                        f"Unknown LectureHall scene type for sequence {seq_name}",
                     )
 
             transform_path = (
@@ -139,7 +146,7 @@ class RICHDataProcessor:
 
             # Convert parameters to tensors
             R_cam_world = SO3.from_matrix(
-                torch.from_numpy(np.array(cam2scan["R"])).float().to(self.device)
+                torch.from_numpy(np.array(cam2scan["R"])).float().to(self.device),
             )
             t_cam_world = (
                 torch.from_numpy(np.array(cam2scan["t"])).float().to(self.device)
@@ -217,7 +224,9 @@ class RICHDataProcessor:
         scene_name: str = None,
         sub_id: str = None,
     ) -> Tuple[
-        Dict[str, Union[np.ndarray, torch.Tensor]], Optional[np.ndarray], Dict[str, Any]
+        Dict[str, Union[np.ndarray, torch.Tensor]],
+        Optional[np.ndarray],
+        Dict[str, Any],
     ]:
         """Process frame data using SMPLX for reference joints and transform to world coordinates.
 
@@ -297,7 +306,9 @@ class RICHDataProcessor:
                 torch.from_numpy(hsc_params["s2m_dist_id"]).float().to(self.device)
             )
             world_displacement = self._transform_to_world(
-                displacement, scene_name, seq_name
+                displacement,
+                scene_name,
+                seq_name,
             )
             hsc_params["s2m_dist_id"] = world_displacement.cpu().numpy()
 
@@ -326,7 +337,8 @@ class RICHDataProcessor:
         """Convert rotation representations."""
         # Convert global orientation and translation to SE(3)
         T_world_root = SE3.from_rotation_and_translation(
-            rotation=SO3.exp(global_orient), translation=transl
+            rotation=SO3.exp(global_orient),
+            translation=transl,
         ).parameters()  # (..., 7)
 
         # Convert body pose to quaternions (21 joints)
@@ -342,7 +354,10 @@ class RICHDataProcessor:
         return T_world_root, body_quats, left_hand_quats, right_hand_quats
 
     def process_sequence(
-        self, split: str, seq_name: str, output_path: Path
+        self,
+        split: str,
+        seq_name: str,
+        output_path: Path,
     ) -> Optional[Dict[str, Any]]:
         """Process a complete sequence with world coordinates."""
         if output_path.exists():
@@ -384,7 +399,11 @@ class RICHDataProcessor:
 
         for frame_id in frame_ids:
             body_params, _, contact_data = self.process_frame_data(
-                split, seq_name, frame_id, scene_name, sub_id
+                split,
+                seq_name,
+                frame_id,
+                scene_name,
+                sub_id,
             )
 
             # Convert hand PCA to axis-angle
@@ -447,7 +466,7 @@ class RICHDataProcessor:
                     torch.from_numpy(contact_data["vertex_contacts"])
                     .float()
                     .to(self.device)
-                    .unsqueeze(0)
+                    .unsqueeze(0),
                 )
                 .squeeze(0)
                 .cpu()
@@ -467,7 +486,8 @@ class RICHDataProcessor:
         # Detect and adjust floor height
         # import ipdb; ipdb.set_trace()
         floor_height = self.motion_processor.detect_floor_height(
-            joints, list(self.joint_indices.values())
+            joints,
+            list(self.joint_indices.values()),
         )
 
         trans[:, 2] -= floor_height
@@ -485,7 +505,8 @@ class RICHDataProcessor:
             ),
             "trans": self.motion_processor.compute_joint_velocity(trans),
             "root_orient": self.motion_processor.compute_angular_velocity(
-                SO3.exp(torch.from_numpy(poses[:, :3])).as_matrix().numpy(), dt
+                SO3.exp(torch.from_numpy(poses[:, :3])).as_matrix().numpy(),
+                dt,
             ),
         }
 
@@ -507,7 +528,7 @@ class RICHDataProcessor:
             "fps": self.fps,
             "joints": joints,  # (N, 22, 3)
             "contacts": contacts.astype(
-                np.float32
+                np.float32,
             ),  # contacts server as a boolean label, but for compatiblity with `load_from_npz` function, convert it to flaot32
             "pose_hand": poses[:, 66:],  # (N, 90)
             "root_orient": poses[:, :3],  # (N, 3)

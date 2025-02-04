@@ -1,21 +1,23 @@
+import json
 import math
-import torch
-import wandb
-import random
 import os.path
+import random
+import warnings
+
 import numpy as np
-from utils import utils_option as option
-from data.select_dataset import define_Dataset
-from egoallo.utils.utils import deterministic
-from egoallo.utils.utils import debug_on_error
-from models.select_model import define_Model
-from models.model_egoexo import ModelEgoExo4D
+import torch
+from egoallo.egopose.bodypose.utils.utils_option import parse as parse_opt
 from egoallo.utils.setup_logger import setup_logger
 from egoallo.utils.utils import convert_to_dict
-from egoallo.egopose.bodypose.utils.utils_option import parse as parse_opt
-import warnings
+from egoallo.utils.utils import debug_on_error
+from egoallo.utils.utils import deterministic
+from models.model_egoexo import ModelEgoExo4D
+from models.select_model import define_Model
 from tqdm import tqdm
-import json
+from utils import utils_option as option
+
+import wandb
+from data.select_dataset import define_Dataset
 
 
 os.environ["OMP_NUM_THREADS"] = "1"
@@ -64,7 +66,12 @@ def inference(test_loader, model: ModelEgoExo4D, dry_run=False):
 
 
 def test(
-    test_loader, model: ModelEgoExo4D, epoch, current_step, test_step, dry_run=False
+    test_loader,
+    model: ModelEgoExo4D,
+    epoch,
+    current_step,
+    test_step,
+    dry_run=False,
 ):
     pos_error = []
     vel_error = []
@@ -104,7 +111,7 @@ def test(
         pred_vel = pred_vel[vel_visible]
 
         data_vel = torch.mean(
-            torch.sqrt(torch.sum(torch.square(gt_vel - pred_vel), axis=-1))
+            torch.sqrt(torch.sum(torch.square(gt_vel - pred_vel), axis=-1)),
         )
         vel_error_ = data_vel.sum() / (data_vel != 0).sum()
 
@@ -154,7 +161,7 @@ def test(
                     len(task_ids),
                     (pos_.mean()) * 100,
                     (vel_.mean()),
-                )
+                ),
             )
 
     pos_error = sum(pos_error) / len(pos_error)
@@ -163,8 +170,11 @@ def test(
     # testing log
     logger.info(
         "<epoch:{:3d}, iter:{:8,d}, Average positional error [cm]: {:<.5f}, Average velocity error [m/s]: {:<.5f}\n".format(
-            epoch, current_step, pos_error * 100, vel_error
-        )
+            epoch,
+            current_step,
+            pos_error * 100,
+            vel_error,
+        ),
     )
     return inference_dict, gt_dict
 
@@ -205,7 +215,8 @@ def main(opt):
     # -->-->-->-->-->-->-->-->-->-->-->-->-->-
 
     init_iter, init_path_G = option.find_last_checkpoint(
-        egopose_opt["path"]["models"], net_type="G"
+        egopose_opt["path"]["models"],
+        net_type="G",
     )
     if init_path_G is not None:
         egopose_opt["path"]["pretrained_netG"] = init_path_G
@@ -261,12 +272,13 @@ def main(opt):
         if phase == "train":
             train_set = define_Dataset(dataset_opt, opt)
             train_size = int(
-                math.ceil(len(train_set) / dataset_opt["dataloader_batch_size"])
+                math.ceil(len(train_set) / dataset_opt["dataloader_batch_size"]),
             )
             logger.info(
                 "Number of train datum: {:,d}, iters: {:,d}".format(
-                    len(train_set), train_size
-                )
+                    len(train_set),
+                    train_size,
+                ),
             )
             train_loader = MultiEpochsDataLoader(
                 train_set,
@@ -370,7 +382,9 @@ def main(opt):
                 if current_step % egopose_opt["train"]["checkpoint_print"] == 0:
                     logs = model.current_log()  # such as loss
                     message = "<epoch:{:3d}, iter:{:8,d}, lr:{:.3e}> ".format(
-                        epoch, current_step, model.current_learning_rate()
+                        epoch,
+                        current_step,
+                        model.current_learning_rate(),
                     )
                     for k, v in logs.items():  # merge log information into message
                         message += "{:s}: {:.3e} ".format(k, v)
@@ -403,14 +417,20 @@ def main(opt):
         epoch = init_iter
         test_step = init_iter
         inference_dict, gt_dict = test(
-            test_loader, model, epoch, current_step, test_step
+            test_loader,
+            model,
+            epoch,
+            current_step,
+            test_step,
         )
         dataset_opt = egopose_opt["datasets"]["test"]
         pred_path = os.path.join(
-            egopose_opt["path"]["images"], dataset_opt["split"] + "_pred.json"
+            egopose_opt["path"]["images"],
+            dataset_opt["split"] + "_pred.json",
         )
         gt_path = os.path.join(
-            egopose_opt["path"]["images"], dataset_opt["split"] + "_gt.json"
+            egopose_opt["path"]["images"],
+            dataset_opt["split"] + "_gt.json",
         )
 
         with open(pred_path, "w") as fp:
@@ -426,7 +446,8 @@ def main(opt):
     inference_dict = inference(test_loader, model)
     dataset_opt = egopose_opt["datasets"]["inference"]
     pred_path = os.path.join(
-        egopose_opt["path"]["images"], dataset_opt["split"] + "_pred.json"
+        egopose_opt["path"]["images"],
+        dataset_opt["split"] + "_pred.json",
     )
 
     with open(pred_path, "w") as fp:

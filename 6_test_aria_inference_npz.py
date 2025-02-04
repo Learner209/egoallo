@@ -1,20 +1,21 @@
 from __future__ import annotations
 
-import numpy as np
-import viser
-import torch
+import dataclasses
 from pathlib import Path
 
-from egoallo import fncsmpl, network
-from egoallo.vis_helpers import visualize_traj_and_hand_detections
+import numpy as np
+import torch
+import viser
+from egoallo import fncsmpl
+from egoallo import network
 from egoallo.transforms import SO3
-import dataclasses
+from egoallo.vis_helpers import visualize_traj_and_hand_detections
 
 
 @dataclasses.dataclass
 class Args:
     npz_path: Path = Path(
-        "./egoallo_example_trajectories/coffeemachine/egoallo_outputs/20240929-011937_10-522.npz"
+        "./egoallo_example_trajectories/coffeemachine/egoallo_outputs/20240929-011937_10-522.npz",
     )
     """Path to the input trajectory."""
     smplh_npz_path: Path = Path("./data/smplh/neutral/model.npz")
@@ -31,11 +32,6 @@ def main(
     traj_data = np.load(args.npz_path)
     body_model = fncsmpl.SmplhModel.load(args.smplh_npz_path).to(device)
 
-    # Load trajectory data from npz file
-    import ipdb
-
-    ipdb.set_trace()
-
     Ts_world_cpf = torch.from_numpy(traj_data["Ts_world_cpf"]).to(device)
     body_quats = torch.from_numpy(traj_data["body_quats"]).to(device)
     left_hand_quats = torch.from_numpy(traj_data["left_hand_quats"]).to(device)
@@ -46,7 +42,7 @@ def main(
     # Convert quats to rotation matrices
     body_rotmats = SO3(body_quats).as_matrix()
     hand_rotmats = SO3(
-        torch.cat([left_hand_quats, right_hand_quats], dim=-2)
+        torch.cat([left_hand_quats, right_hand_quats], dim=-2),
     ).as_matrix()
 
     # Create EgoDenoiseTraj instance

@@ -1,36 +1,36 @@
 """Network definitions."""
 
 import dataclasses
+from abc import ABC
+from abc import abstractmethod
 from dataclasses import dataclass
-from abc import ABC, abstractmethod
-from functools import cached_property, cache
-from typing import (
-    Any,
-    Generic,
-    Literal,
-    TypeVar,
-    Union,
-    assert_never,
-    Dict,
-    Optional,
-    TYPE_CHECKING,
-)
-
-import torch
-from torch import nn
-import torch.nn.functional as F
-from jaxtyping import Bool, Float, Int
-from torch import Tensor
-
+from functools import cache
+from functools import cached_property
 from pathlib import Path
+from typing import Any
+from typing import assert_never
+from typing import Dict
+from typing import Generic
+from typing import Literal
+from typing import Optional
+from typing import TYPE_CHECKING
+from typing import TypeVar
+from typing import Union
 
 import numpy as np
+import torch
+import torch.nn.functional as F
 import typeguard
+from egoallo.config import CONFIG_FILE
+from egoallo.config import make_cfg
 from einops import rearrange
+from jaxtyping import Bool
+from jaxtyping import Float
+from jaxtyping import Int
 from jaxtyping import jaxtyped
 from rotary_embedding_torch import RotaryEmbedding
-
-from egoallo.config import CONFIG_FILE, make_cfg
+from torch import nn
+from torch import Tensor
 
 if TYPE_CHECKING:
     from egoallo.types import DenoiseTrajType, JointCondMode
@@ -194,7 +194,10 @@ class DenoisingConfig:
 
     @classmethod
     def from_joint_cond_mode(
-        cls, joint_cond_mode: "JointCondMode", include_hands: bool, **kwargs
+        cls,
+        joint_cond_mode: "JointCondMode",
+        include_hands: bool,
+        **kwargs,
     ) -> "DenoisingConfig":
         """Create config from joint conditioning mode.
 
@@ -231,10 +234,14 @@ class DenoisingConfig:
             return JointsOnlyTraj.unpack(x)
         elif self.is_velocity_mode():
             return VelocityDenoiseTraj.unpack(
-                x, include_hands=include_hands, project_rotmats=project_rotmats
+                x,
+                include_hands=include_hands,
+                project_rotmats=project_rotmats,
             )
         return AbsoluteDenoiseTraj.unpack(
-            x, include_hands=include_hands, project_rotmats=project_rotmats
+            x,
+            include_hands=include_hands,
+            project_rotmats=project_rotmats,
         )
 
     def fetch_modality_dict(self, include_hands: bool = False) -> dict[str, int]:
@@ -264,7 +271,7 @@ class DenoisingConfig:
                 {
                     "R_world_root_tm1_t": 9,  # 3x3 rotation matrix
                     "t_world_root_tm1_t": 3,  # 3D translation vector
-                }
+                },
             )
         else:
             # Absolute mode uses direct positions
@@ -272,7 +279,7 @@ class DenoisingConfig:
                 {
                     "R_world_root": 9,  # 3x3 rotation matrix
                     "t_world_root": 3,  # 3D translation vector
-                }
+                },
             )
 
         return modality_dims
@@ -375,7 +382,7 @@ class BaseDenoiseTraj(TensorDataclass, ABC, Generic[T]):
                     torch.mean(loss_per_step, dim=-1) * bt_mask,
                     dim=-1,
                 )
-                * weight_t
+                * weight_t,
             )
             / bt_mask_sum
         )
@@ -435,7 +442,7 @@ class JointsOnlyTraj(BaseDenoiseTraj):
             **kwargs: Additional arguments that will be ignored
         """
         raise DeprecationWarning(
-            "JointsOnlyTraj is deprecated. Use AbsoluteDenoiseTraj instead."
+            "JointsOnlyTraj is deprecated. Use AbsoluteDenoiseTraj instead.",
         )
         self.joints = joints
 
@@ -496,7 +503,7 @@ class JointsOnlyTraj(BaseDenoiseTraj):
         the necessary parameters to fully pose the SMPL-H model.
         """
         raise NotImplementedError(
-            "JointsOnlyTraj does not support applying to SMPL-H body model"
+            "JointsOnlyTraj does not support applying to SMPL-H body model",
         )
 
     def encode(
@@ -531,7 +538,7 @@ class JointsOnlyTraj(BaseDenoiseTraj):
                 pred_joint_pos=self.joints[..., 1:22, :],  # [batch, T, 21, 3]
                 per_frame_procrustes_align=False,
                 device=device,
-            ).mean()
+            ).mean(),
         )
 
         metrics["pampjpe"] = float(
@@ -542,7 +549,7 @@ class JointsOnlyTraj(BaseDenoiseTraj):
                 pred_joint_pos=self.joints[..., 1:22, :],  # [batch, T, 21, 3]
                 per_frame_procrustes_align=True,
                 device=device,
-            ).mean()
+            ).mean(),
         )
 
         return metrics
@@ -582,7 +589,9 @@ class AbsoluteDenoiseTraj(BaseDenoiseTraj):
 
         loss_terms = {
             "betas": self._weight_and_mask_loss(
-                (self.betas - other.betas) ** 2, mask, weight_t
+                (self.betas - other.betas) ** 2,
+                mask,
+                weight_t,
             ),
             "body_rotmats": self._weight_and_mask_loss(
                 (self.body_rotmats - other.body_rotmats).reshape(batch, time, -1) ** 2,
@@ -595,7 +604,9 @@ class AbsoluteDenoiseTraj(BaseDenoiseTraj):
                 weight_t,
             ),
             "t_world_root": self._weight_and_mask_loss(
-                (self.t_world_root - other.t_world_root) ** 2, mask, weight_t
+                (self.t_world_root - other.t_world_root) ** 2,
+                mask,
+                weight_t,
             ),
         }
 
@@ -630,7 +641,7 @@ class AbsoluteDenoiseTraj(BaseDenoiseTraj):
         # assert self.hand_rotmats is not None
 
         shaped = body_model.with_shape(
-            self.betas
+            self.betas,
         )  # betas averges across timestep dimensions.
         T_world_root = SE3.from_rotation_and_translation(
             SO3.from_matrix(self.R_world_root),
@@ -708,7 +719,7 @@ class AbsoluteDenoiseTraj(BaseDenoiseTraj):
                 dim=-1,
             )
             body_rotmats = body_rotmats_flat.reshape(
-                (*batch, time, (CFG.smplh.num_joints - 1), 3, 3)
+                (*batch, time, (CFG.smplh.num_joints - 1), 3, 3),
             )
             hand_rotmats = hand_rotmats_flat.reshape((*batch, time, 30, 3, 3))
         else:
@@ -724,7 +735,7 @@ class AbsoluteDenoiseTraj(BaseDenoiseTraj):
                 dim=-1,
             )
             body_rotmats = body_rotmats_flat.reshape(
-                (*batch, time, (CFG.smplh.num_joints - 1), 3, 3)
+                (*batch, time, (CFG.smplh.num_joints - 1), 3, 3),
             )
             hand_rotmats = None
 
@@ -744,7 +755,10 @@ class AbsoluteDenoiseTraj(BaseDenoiseTraj):
         )
 
     def encode(
-        self, encoders: nn.ModuleDict, batch: int, time: int
+        self,
+        encoders: nn.ModuleDict,
+        batch: int,
+        time: int,
     ) -> Float[Tensor, "batch time d_latent"]:
         """Encode absolute trajectory into latent space."""
         encoded = (
@@ -756,7 +770,7 @@ class AbsoluteDenoiseTraj(BaseDenoiseTraj):
         )
         if self.hand_rotmats is not None:
             encoded = encoded + encoders["hand_rotmats"](
-                self.hand_rotmats.reshape((batch, time, -1))
+                self.hand_rotmats.reshape((batch, time, -1)),
             )
         return encoded
 
@@ -805,33 +819,37 @@ class AbsoluteDenoiseTraj(BaseDenoiseTraj):
                 gt=other.betas.reshape(*other.betas.shape[:-1], -1),  # N, T, 16
                 pred=self.betas.reshape(*self.betas.shape[:-1], -1),  # N, T, 16
                 device=device,
-            )
+            ),
         )
 
         # Body rotation error
         metrics["body_rotmats_error"] = float(
             BodyEvaluator.compute_masked_error(
                 gt=other.body_rotmats.reshape(
-                    *other.body_rotmats.shape[:-3], -1
+                    *other.body_rotmats.shape[:-3],
+                    -1,
                 ),  # N, T, 207
                 pred=self.body_rotmats.reshape(
-                    *self.body_rotmats.shape[:-3], -1
+                    *self.body_rotmats.shape[:-3],
+                    -1,
                 ),  # N, T, 207
                 device=device,
-            )
+            ),
         )
 
         # Root transform errors
         metrics["R_world_root_error"] = float(
             BodyEvaluator.compute_masked_error(
                 gt=other.R_world_root.reshape(
-                    *other.R_world_root.shape[:-2], -1
+                    *other.R_world_root.shape[:-2],
+                    -1,
                 ),  # N, T, 9
                 pred=self.R_world_root.reshape(
-                    *self.R_world_root.shape[:-2], -1
+                    *self.R_world_root.shape[:-2],
+                    -1,
                 ),  # N, T, 9
                 device=device,
-            )
+            ),
         )
 
         metrics["t_world_root_error"] = float(
@@ -839,7 +857,7 @@ class AbsoluteDenoiseTraj(BaseDenoiseTraj):
                 gt=other.t_world_root.reshape(*other.t_world_root.shape[:-1], -1),
                 pred=self.t_world_root.reshape(*self.t_world_root.shape[:-1], -1),
                 device=device,
-            )
+            ),
         )
 
         # Foot metrics
@@ -847,86 +865,106 @@ class AbsoluteDenoiseTraj(BaseDenoiseTraj):
             BodyEvaluator.compute_foot_skate(
                 pred_Ts_world_joint=pred_posed.Ts_world_joint[..., :21, :],
                 device=device,
-            ).mean()
+            ).mean(),
         )
 
         metrics["foot_contact"] = float(
             BodyEvaluator.compute_foot_contact(
                 pred_Ts_world_joint=pred_posed.Ts_world_joint[..., :21, :],
                 device=device,
-            ).mean()
+            ).mean(),
         )
 
         metrics["mpjpe"] = float(
             BodyEvaluator.compute_mpjpe(
                 label_root_pos=gt_posed.T_world_root[..., :3],  # [batch, T, 3]
                 label_joint_pos=gt_posed.Ts_world_joint[
-                    ..., :21, 4:
+                    ...,
+                    :21,
+                    4:,
                 ],  # [batch, T, 21, 3]
                 pred_root_pos=pred_posed.T_world_root[..., :3],  # [batch, T, 3]
                 pred_joint_pos=pred_posed.Ts_world_joint[
-                    ..., :21, 4:
+                    ...,
+                    :21,
+                    4:,
                 ],  # [batch, T, 21, 3]
                 per_frame_procrustes_align=False,
                 device=device,
-            ).mean()
+            ).mean(),
         )
 
         metrics["pampjpe"] = float(
             BodyEvaluator.compute_mpjpe(
                 label_root_pos=gt_posed.T_world_root[..., :3],  # [batch, T, 3]
                 label_joint_pos=gt_posed.Ts_world_joint[
-                    ..., :21, 4:
+                    ...,
+                    :21,
+                    4:,
                 ],  # [batch, T, 21, 3]
                 pred_root_pos=pred_posed.T_world_root[..., :3],  # [batch, T, 3]
                 pred_joint_pos=pred_posed.Ts_world_joint[
-                    ..., :21, 4:
+                    ...,
+                    :21,
+                    4:,
                 ],  # [batch, T, 21, 3]
                 per_frame_procrustes_align=True,
                 device=device,
-            ).mean()
+            ).mean(),
         )
 
         metrics["head_ori"] = float(
             BodyEvaluator.compute_head_ori(
                 label_Ts_world_joint=gt_posed.Ts_world_joint[
-                    ..., :21, :
+                    ...,
+                    :21,
+                    :,
                 ],  # [batch, T, 21, 7]
                 pred_Ts_world_joint=pred_posed.Ts_world_joint[
-                    ..., :21, :
+                    ...,
+                    :21,
+                    :,
                 ],  # [batch, T, 21, 7]
                 device=device,
-            ).mean()
+            ).mean(),
         )
 
         metrics["head_trans"] = float(
             BodyEvaluator.compute_head_trans(
                 label_Ts_world_joint=gt_posed.Ts_world_joint[
-                    ..., :21, :
+                    ...,
+                    :21,
+                    :,
                 ],  # [batch, T, 21, 7]
                 pred_Ts_world_joint=pred_posed.Ts_world_joint[
-                    ..., :21, :
+                    ...,
+                    :21,
+                    :,
                 ],  # [batch, T, 21, 7]
                 device=device,
-            ).mean()
+            ).mean(),
         )
 
         metrics["foot_skate"] = float(
             BodyEvaluator.compute_foot_skate(
                 pred_Ts_world_joint=pred_posed.Ts_world_joint[
-                    ..., :21, :
+                    ...,
+                    :21,
+                    :,
                 ],  # [batch, T, 21, 7]
                 device=device,
-            ).mean()
+            ).mean(),
         )
 
         metrics["foot_contact"] = float(
             BodyEvaluator.compute_foot_contact(
                 pred_Ts_world_joint=pred_posed.Ts_world_joint[
-                    ..., :21, :
+                    ...,
+                    :21,
+                    :,
                 ],  # [batch, T, 21, 7]
                 device=device,
-            ).mean()
+            ).mean(),
         )
 
         # # MPJPE under COCO kpts
@@ -1021,7 +1059,7 @@ class VelocityDenoiseTraj(BaseDenoiseTraj):
         # Compute relative rotations using SO3
         R_curr = SO3.from_matrix(self.R_world_root[..., 1:, :, :])  # [batch, T-1, 3, 3]
         R_prev = SO3.from_matrix(
-            self.R_world_root[..., :-1, :, :]
+            self.R_world_root[..., :-1, :, :],
         )  # [batch, T-1, 3, 3]
         R_rel = R_curr.multiply(R_prev.inverse())  # [batch, T-1, 3, 3]
         self.R_world_root_tm1_t = torch.cat(
@@ -1034,7 +1072,8 @@ class VelocityDenoiseTraj(BaseDenoiseTraj):
 
         # Compute relative translations using SE3
         T_curr = SE3.from_rotation_and_translation(
-            SO3.from_matrix(self.R_world_root), self.t_world_root
+            SO3.from_matrix(self.R_world_root),
+            self.t_world_root,
         )  # [batch, T, 3, 3]
         self.t_world_root_tm1_t = torch.zeros_like(self.t_world_root)  # [batch, T, 3]
         self.t_world_root_tm1_t[..., 1:, :] = (
@@ -1047,7 +1086,7 @@ class VelocityDenoiseTraj(BaseDenoiseTraj):
         R_rel_prev = SO3.from_matrix(self.R_world_root_tm1_t[..., 1:-1, :, :])
         self.R_world_root_acc = torch.zeros_like(self.R_world_root)
         self.R_world_root_acc[..., 2:, :, :] = R_rel_curr.multiply(
-            R_rel_prev.inverse()
+            R_rel_prev.inverse(),
         ).as_matrix()
 
         # For translations, compute difference of consecutive relative translations
@@ -1122,10 +1161,10 @@ class VelocityDenoiseTraj(BaseDenoiseTraj):
             self.body_rotmats.reshape((*batch, time, -1)),
             self.contacts.reshape((*batch, time, -1)),
             self.R_world_root_tm1_t.reshape(
-                (*batch, time, -1)
+                (*batch, time, -1),
             ),  # Pack temporal offsets instead
             self.t_world_root_tm1_t.reshape(
-                (*batch, time, -1)
+                (*batch, time, -1),
             ),  # Pack temporal offsets instead
         ]
 
@@ -1168,7 +1207,7 @@ class VelocityDenoiseTraj(BaseDenoiseTraj):
                 dim=-1,
             )
             body_rotmats = body_rotmats_flat.reshape(
-                (*batch, time, (CFG.smplh.num_joints - 1), 3, 3)
+                (*batch, time, (CFG.smplh.num_joints - 1), 3, 3),
             )
             hand_rotmats = hand_rotmats_flat.reshape((*batch, time, 30, 3, 3))
         else:
@@ -1190,7 +1229,7 @@ class VelocityDenoiseTraj(BaseDenoiseTraj):
                 dim=-1,
             )
             body_rotmats = body_rotmats_flat.reshape(
-                (*batch, time, (CFG.smplh.num_joints - 1), 3, 3)
+                (*batch, time, (CFG.smplh.num_joints - 1), 3, 3),
             )
             hand_rotmats = None
 
@@ -1248,7 +1287,9 @@ class VelocityDenoiseTraj(BaseDenoiseTraj):
         loss_terms = {
             # Beta loss remains absolute since it's shape parameters
             "betas": self._weight_and_mask_loss(
-                (self.betas - other.betas) ** 2, mask, weight_t
+                (self.betas - other.betas) ** 2,
+                mask,
+                weight_t,
             ),
             # Body rotations loss (could be made relative if needed)
             "body_rotmats": self._weight_and_mask_loss(
@@ -1259,7 +1300,9 @@ class VelocityDenoiseTraj(BaseDenoiseTraj):
             # Relative rotation loss
             "R_world_root_vel": self._weight_and_mask_loss(
                 (self.R_world_root_tm1_t - other.R_world_root_tm1_t).reshape(
-                    batch, time, -1
+                    batch,
+                    time,
+                    -1,
                 )
                 ** 2,
                 vel_mask,
@@ -1274,7 +1317,9 @@ class VelocityDenoiseTraj(BaseDenoiseTraj):
             # Acceleration losses
             "R_world_root_acc": self._weight_and_mask_loss(
                 (self.R_world_root_acc - other.R_world_root_acc).reshape(
-                    batch, time, -1
+                    batch,
+                    time,
+                    -1,
                 )
                 ** 2,
                 acc_mask,
@@ -1297,7 +1342,10 @@ class VelocityDenoiseTraj(BaseDenoiseTraj):
         return loss_terms
 
     def encode(
-        self, encoders: nn.ModuleDict, batch: int, time: int
+        self,
+        encoders: nn.ModuleDict,
+        batch: int,
+        time: int,
     ) -> Float[Tensor, "batch time d_latent"]:
         """Encode trajectory into latent space."""
         encoded = (
@@ -1305,13 +1353,13 @@ class VelocityDenoiseTraj(BaseDenoiseTraj):
             + encoders["body_rotmats"](self.body_rotmats.reshape((batch, time, -1)))
             + encoders["contacts"](self.contacts)
             + encoders["R_world_root_tm1_t"](
-                self.R_world_root_tm1_t.reshape((batch, time, -1))
+                self.R_world_root_tm1_t.reshape((batch, time, -1)),
             )
             + encoders["t_world_root_tm1_t"](self.t_world_root_tm1_t)
         )
         if self.hand_rotmats is not None:
             encoded = encoded + encoders["hand_rotmats"](
-                self.hand_rotmats.reshape((batch, time, -1))
+                self.hand_rotmats.reshape((batch, time, -1)),
             )
         return encoded
 
@@ -1344,33 +1392,37 @@ class VelocityDenoiseTraj(BaseDenoiseTraj):
                 gt=other.betas.reshape(*other.betas.shape[:-1], -1),  # N, T, 16
                 pred=self.betas.reshape(*self.betas.shape[:-1], -1),  # N, T, 16
                 device=device,
-            )
+            ),
         )
 
         # Body rotation error
         metrics["body_rotmats_error"] = float(
             BodyEvaluator.compute_masked_error(
                 gt=other.body_rotmats.reshape(
-                    *other.body_rotmats.shape[:-3], -1
+                    *other.body_rotmats.shape[:-3],
+                    -1,
                 ),  # N, T, 207
                 pred=self.body_rotmats.reshape(
-                    *self.body_rotmats.shape[:-3], -1
+                    *self.body_rotmats.shape[:-3],
+                    -1,
                 ),  # N, T, 207
                 device=device,
-            )
+            ),
         )
 
         # Root transform errors
         metrics["R_world_root_error"] = float(
             BodyEvaluator.compute_masked_error(
                 gt=other.R_world_root.reshape(
-                    *other.R_world_root.shape[:-2], -1
+                    *other.R_world_root.shape[:-2],
+                    -1,
                 ),  # N, T, 9
                 pred=self.R_world_root.reshape(
-                    *self.R_world_root.shape[:-2], -1
+                    *self.R_world_root.shape[:-2],
+                    -1,
                 ),  # N, T, 9
                 device=device,
-            )
+            ),
         )
 
         metrics["t_world_root_error"] = float(
@@ -1378,7 +1430,7 @@ class VelocityDenoiseTraj(BaseDenoiseTraj):
                 gt=other.t_world_root.reshape(*other.t_world_root.shape[:-1], -1),
                 pred=self.t_world_root.reshape(*self.t_world_root.shape[:-1], -1),
                 device=device,
-            )
+            ),
         )
 
         # Foot metrics
@@ -1386,86 +1438,106 @@ class VelocityDenoiseTraj(BaseDenoiseTraj):
             BodyEvaluator.compute_foot_skate(
                 pred_Ts_world_joint=pred_posed.Ts_world_joint[..., :21, :],
                 device=device,
-            ).mean()
+            ).mean(),
         )
 
         metrics["foot_contact"] = float(
             BodyEvaluator.compute_foot_contact(
                 pred_Ts_world_joint=pred_posed.Ts_world_joint[..., :21, :],
                 device=device,
-            ).mean()
+            ).mean(),
         )
 
         metrics["mpjpe"] = float(
             BodyEvaluator.compute_mpjpe(
                 label_root_pos=gt_posed.T_world_root[..., :3],  # [batch, T, 3]
                 label_joint_pos=gt_posed.Ts_world_joint[
-                    ..., :21, 4:
+                    ...,
+                    :21,
+                    4:,
                 ],  # [batch, T, 21, 3]
                 pred_root_pos=pred_posed.T_world_root[..., :3],  # [batch, T, 3]
                 pred_joint_pos=pred_posed.Ts_world_joint[
-                    ..., :21, 4:
+                    ...,
+                    :21,
+                    4:,
                 ],  # [batch, T, 21, 3]
                 per_frame_procrustes_align=False,
                 device=device,
-            ).mean()
+            ).mean(),
         )
 
         metrics["pampjpe"] = float(
             BodyEvaluator.compute_mpjpe(
                 label_root_pos=gt_posed.T_world_root[..., :3],  # [batch, T, 3]
                 label_joint_pos=gt_posed.Ts_world_joint[
-                    ..., :21, 4:
+                    ...,
+                    :21,
+                    4:,
                 ],  # [batch, T, 21, 3]
                 pred_root_pos=pred_posed.T_world_root[..., :3],  # [batch, T, 3]
                 pred_joint_pos=pred_posed.Ts_world_joint[
-                    ..., :21, 4:
+                    ...,
+                    :21,
+                    4:,
                 ],  # [batch, T, 21, 3]
                 per_frame_procrustes_align=True,
                 device=device,
-            ).mean()
+            ).mean(),
         )
 
         metrics["head_ori"] = float(
             BodyEvaluator.compute_head_ori(
                 label_Ts_world_joint=gt_posed.Ts_world_joint[
-                    ..., :21, :
+                    ...,
+                    :21,
+                    :,
                 ],  # [batch, T, 21, 7]
                 pred_Ts_world_joint=pred_posed.Ts_world_joint[
-                    ..., :21, :
+                    ...,
+                    :21,
+                    :,
                 ],  # [batch, T, 21, 7]
                 device=device,
-            ).mean()
+            ).mean(),
         )
 
         metrics["head_trans"] = float(
             BodyEvaluator.compute_head_trans(
                 label_Ts_world_joint=gt_posed.Ts_world_joint[
-                    ..., :21, :
+                    ...,
+                    :21,
+                    :,
                 ],  # [batch, T, 21, 7]
                 pred_Ts_world_joint=pred_posed.Ts_world_joint[
-                    ..., :21, :
+                    ...,
+                    :21,
+                    :,
                 ],  # [batch, T, 21, 7]
                 device=device,
-            ).mean()
+            ).mean(),
         )
 
         metrics["foot_skate"] = float(
             BodyEvaluator.compute_foot_skate(
                 pred_Ts_world_joint=pred_posed.Ts_world_joint[
-                    ..., :21, :
+                    ...,
+                    :21,
+                    :,
                 ],  # [batch, T, 21, 7]
                 device=device,
-            ).mean()
+            ).mean(),
         )
 
         metrics["foot_contact"] = float(
             BodyEvaluator.compute_foot_contact(
                 pred_Ts_world_joint=pred_posed.Ts_world_joint[
-                    ..., :21, :
+                    ...,
+                    :21,
+                    :,
                 ],  # [batch, T, 21, 7]
                 device=device,
-            ).mean()
+            ).mean(),
         )
 
         return metrics
@@ -1575,7 +1647,8 @@ class EgoDenoiserConfig:
         # Create joint embeddings if enabled
         if self.use_joint_embeddings:
             joint_embeddings = nn.Embedding(
-                CFG.smplh.num_joints, self.joint_emb_dim
+                CFG.smplh.num_joints,
+                self.joint_emb_dim,
             ).to(device)
             all_indices = torch.arange(CFG.smplh.num_joints, device=device)
             index_embeddings = joint_embeddings(all_indices).expand(batch, time, -1, -1)
@@ -1592,7 +1665,7 @@ class EgoDenoiserConfig:
             # This removes redundant global motion information
             rel_to_parent = torch.zeros_like(masked_joints)
             kinematic_chain = get_kinematic_chain(
-                use_smplh=True
+                use_smplh=True,
             )  # Define this based on SMPL skeleton
             for joint_idx, parent_idx in kinematic_chain:
                 rel_to_parent[..., joint_idx, :] = (
@@ -1640,7 +1713,7 @@ class EgoDenoiserConfig:
             # 3. Compute motion attention scores based on relative motion
             motion_magnitude = torch.norm(velocity, dim=-1)  # [batch, time-1, 22]
             attention_scores = torch.sigmoid(
-                motion_magnitude - motion_magnitude.mean(dim=1, keepdim=True)
+                motion_magnitude - motion_magnitude.mean(dim=1, keepdim=True),
             )  # [batch, time-1, 22]
 
             # 4. Create decorrelated features
@@ -1688,23 +1761,25 @@ class EgoDenoiserConfig:
             velocities = torch.zeros_like(joints)
             velocities[:, 1:] = joints[:, 1:] - joints[:, :-1]
             velocities = velocities * vel_mask.unsqueeze(
-                -1
+                -1,
             )  # Mask out invisible velocities
 
             # Calculate accelerations and mask invisible parts
             accelerations = torch.zeros_like(joints)
             accelerations[:, 2:] = velocities[:, 2:] - velocities[:, 1:-1]
             accelerations = accelerations * acc_mask.unsqueeze(
-                -1
+                -1,
             )  # Mask out invisible accelerations
 
             # Combine with visibility masks
             velocities_with_vis = torch.cat(
-                [velocities, vel_mask.unsqueeze(-1).to(dtype)], dim=-1
+                [velocities, vel_mask.unsqueeze(-1).to(dtype)],
+                dim=-1,
             )
 
             accelerations_with_vis = torch.cat(
-                [accelerations, acc_mask.unsqueeze(-1).to(dtype)], dim=-1
+                [accelerations, acc_mask.unsqueeze(-1).to(dtype)],
+                dim=-1,
             )
 
             # Combine all components
@@ -1720,7 +1795,8 @@ class EgoDenoiserConfig:
         elif self.joint_cond_mode == "absolute":
             # joints_with_vis (22*4) + index_embeddings (22*16 if enabled)
             joints_with_vis = torch.cat(
-                [masked_joints, visible_joints_mask.unsqueeze(-1).to(dtype)], dim=-1
+                [masked_joints, visible_joints_mask.unsqueeze(-1).to(dtype)],
+                dim=-1,
             )
             components = [joints_with_vis.reshape(batch, time, -1)]
             if self.use_joint_embeddings:
@@ -1729,12 +1805,13 @@ class EgoDenoiserConfig:
 
         elif self.joint_cond_mode == "absrel_jnts":
             joints_with_vis = torch.cat(
-                [masked_joints, visible_joints_mask.unsqueeze(-1).to(dtype)], dim=-1
+                [masked_joints, visible_joints_mask.unsqueeze(-1).to(dtype)],
+                dim=-1,
             )
             first_joint = joints_with_vis[..., 0:1, :]
             other_joints = joints_with_vis[..., 1:, :]
             local_coords = other_joints - first_joint[..., :3].expand_as(
-                other_joints[..., :3]
+                other_joints[..., :3],
             )
             local_coords = torch.cat(
                 [
@@ -1754,7 +1831,8 @@ class EgoDenoiserConfig:
 
         elif self.joint_cond_mode in ("absrel", "joints_only"):
             joints_with_vis = torch.cat(
-                [masked_joints, visible_joints_mask.unsqueeze(-1).to(dtype)], dim=-1
+                [masked_joints, visible_joints_mask.unsqueeze(-1).to(dtype)],
+                dim=-1,
             )
             abs_pos = joints_with_vis
             rel_pos = torch.zeros_like(joints_with_vis)
@@ -1770,7 +1848,8 @@ class EgoDenoiserConfig:
 
         elif self.joint_cond_mode == "absrel_global_deltas":
             joints_with_vis = torch.cat(
-                [masked_joints, visible_joints_mask.unsqueeze(-1).to(dtype)], dim=-1
+                [masked_joints, visible_joints_mask.unsqueeze(-1).to(dtype)],
+                dim=-1,
             )
             first_frame = joints_with_vis[:, 0]
             current_frames = joints_with_vis
@@ -1799,12 +1878,16 @@ class EgoDenoiserConfig:
             r_mat = r_mat @ reflection_fix
 
             t = current_centroids.squeeze(2) - torch.einsum(
-                "btij,bkj->bti", r_mat, first_centroid
+                "btij,bkj->bti",
+                r_mat,
+                first_centroid,
             )
 
             components = [
                 torch.cat([joints_with_vis, index_embeddings], dim=-1).reshape(
-                    batch, time, -1
+                    batch,
+                    time,
+                    -1,
                 ),
                 r_mat.reshape(batch, time, 9),
                 t.reshape(batch, time, 3),
@@ -1849,7 +1932,7 @@ class EgoDenoiser(nn.Module):
                     nn.Linear(config.d_latent, config.d_latent),
                 )
                 for k, modality_dim in modality_dims.items()
-            }
+            },
         )
         self.decoders = nn.ModuleDict(
             {
@@ -1862,7 +1945,7 @@ class EgoDenoiser(nn.Module):
                     nn.Linear(config.d_latent, modality_dim),
                 )
                 for k, modality_dim in modality_dims.items()
-            }
+            },
         )
 
         # Helpers for converting between input dimensionality and latent dimensionality.
@@ -1898,10 +1981,10 @@ class EgoDenoiser(nn.Module):
                         use_rope_embedding=config.positional_encoding == "rope",
                         use_film_noise_conditioning=config.noise_conditioning == "film",
                         xattn_mode=config.xattn_mode,
-                    )
+                    ),
                 )
                 for _ in range(config.encoder_layers)
-            ]
+            ],
         )
         self.decoder_layers = nn.ModuleList(
             [
@@ -1917,10 +2000,10 @@ class EgoDenoiser(nn.Module):
                         use_rope_embedding=config.positional_encoding == "rope",
                         use_film_noise_conditioning=config.noise_conditioning == "film",
                         xattn_mode=config.xattn_mode,
-                    )
+                    ),
                 )
                 for _ in range(config.decoder_layers)
-            ]
+            ],
         )
 
     @jaxtyped(typechecker=typeguard.typechecked)
@@ -2009,7 +2092,10 @@ class EgoDenoiser(nn.Module):
             encoder_out = layer(encoder_out, attn_mask, noise_emb=noise_emb)
         for layer in self.decoder_layers:
             decoder_out = layer(
-                decoder_out, attn_mask, noise_emb=noise_emb, cond=encoder_out
+                decoder_out,
+                attn_mask,
+                noise_emb=noise_emb,
+                cond=encoder_out,
             )
 
         # Remove the extra token corresponding to the noise embedding.
@@ -2023,9 +2109,13 @@ class EgoDenoiser(nn.Module):
                 # Project rotation matrices for body_rotmats via SVD,
                 (
                     project_rotmats_via_svd(
-                        modality_decoder(decoder_out).reshape((-1, 3, 3))
+                        modality_decoder(decoder_out).reshape((-1, 3, 3)),
                     ).reshape(
-                        (batch, time, {"body_rotmats": 21, "hand_rotmats": 30}[key] * 9)
+                        (
+                            batch,
+                            time,
+                            {"body_rotmats": 21, "hand_rotmats": 30}[key] * 9,
+                        ),
                     )
                     # if enabled,
                     if project_output_rotmats
@@ -2045,13 +2135,15 @@ class EgoDenoiser(nn.Module):
 @jaxtyped(typechecker=typeguard.typechecked)
 @cache
 def make_positional_encoding(
-    d_latent: int, length: int, dtype: torch.dtype
+    d_latent: int,
+    length: int,
+    dtype: torch.dtype,
 ) -> Float[Tensor, "length d_latent"]:
     """Computes standard Transformer positional encoding."""
     pe = torch.zeros(length, d_latent, dtype=dtype)
     position = torch.arange(0, length, dtype=torch.float).unsqueeze(1)
     div_term = torch.exp(
-        torch.arange(0, d_latent, 2).float() * (-np.log(10000.0) / d_latent)
+        torch.arange(0, d_latent, 2).float() * (-np.log(10000.0) / d_latent),
     )
     pe[:, 0::2] = torch.sin(position * div_term)
     pe[:, 1::2] = torch.cos(position * div_term)
@@ -2061,13 +2153,14 @@ def make_positional_encoding(
 
 @jaxtyped(typechecker=typeguard.typechecked)
 def fourier_encode(
-    x: Float[Tensor, "*batch channels"], freqs: int
+    x: Float[Tensor, "*batch channels"],
+    freqs: int,
 ) -> Float[Tensor, "*batch channels_plus_2_mul_freqs_mul_channels"]:
     """Apply Fourier encoding to a tensor."""
     *batch_axes, x_dim = x.shape
     coeffs = 2.0 ** torch.arange(freqs, device=x.device)  # shape: (freqs,)
     scaled = (x[..., None] * coeffs).reshape(
-        (*batch_axes, x_dim * freqs)
+        (*batch_axes, x_dim * freqs),
     )  # shape: (*batch_axes, x_dim * freqs)
     return torch.cat(
         [
@@ -2098,7 +2191,9 @@ class TransformerBlock(nn.Module):
     def __init__(self, config: TransformerBlockConfig) -> None:
         super().__init__()
         self.sattn_qkv_proj = nn.Linear(
-            config.d_latent, config.d_latent * 3, bias=False
+            config.d_latent,
+            config.d_latent * 3,
+            bias=False,
         )
         self.sattn_out_proj = nn.Linear(config.d_latent, config.d_latent, bias=False)
 
@@ -2117,16 +2212,22 @@ class TransformerBlock(nn.Module):
 
         if config.include_xattn:
             self.xattn_kv_proj = nn.Linear(
-                config.d_latent, config.d_latent * 2, bias=False
+                config.d_latent,
+                config.d_latent * 2,
+                bias=False,
             )
             self.xattn_q_proj = nn.Linear(config.d_latent, config.d_latent, bias=False)
             self.xattn_layernorm = nn.LayerNorm(config.d_latent)
             self.xattn_out_proj = nn.Linear(
-                config.d_latent, config.d_latent, bias=False
+                config.d_latent,
+                config.d_latent,
+                bias=False,
             )
 
         self.norm_no_learnable = nn.LayerNorm(
-            config.d_feedforward, elementwise_affine=False, bias=False
+            config.d_feedforward,
+            elementwise_affine=False,
+            bias=False,
         )
         self.activation = {"gelu": nn.GELU, "relu": nn.ReLU}[config.activation]()
         self.dropout = nn.Dropout(config.dropout_p)
@@ -2134,7 +2235,7 @@ class TransformerBlock(nn.Module):
         self.mlp0 = nn.Linear(config.d_latent, config.d_feedforward)
         self.mlp_film_cond_proj = (
             zero_module(
-                nn.Linear(config.d_noise_emb, config.d_feedforward * 2, bias=False)
+                nn.Linear(config.d_noise_emb, config.d_feedforward * 2, bias=False),
             )
             if config.use_film_noise_conditioning
             else None
@@ -2169,7 +2270,9 @@ class TransformerBlock(nn.Module):
         # FiLM-style conditioning.
         if self.mlp_film_cond_proj is not None:
             scale, shift = torch.chunk(
-                self.mlp_film_cond_proj(noise_emb), chunks=2, dim=-1
+                self.mlp_film_cond_proj(noise_emb),
+                chunks=2,
+                dim=-1,
             )
             assert scale.shape == shift.shape == (batch, config.d_feedforward)
             mlp_out = (
@@ -2197,7 +2300,11 @@ class TransformerBlock(nn.Module):
             q = self.rotary_emb.rotate_queries_or_keys(q, seq_dim=-2)
             k = self.rotary_emb.rotate_queries_or_keys(k, seq_dim=-2)
         x = torch.nn.functional.scaled_dot_product_attention(
-            q, k, v, dropout_p=config.dropout_p, attn_mask=attn_mask
+            q,
+            k,
+            v,
+            dropout_p=config.dropout_p,
+            attn_mask=attn_mask,
         )
         x = self.dropout(x)
         x = rearrange(x, "b nh t dh -> b t (nh dh)", nh=config.n_heads)
@@ -2212,7 +2319,7 @@ class TransformerBlock(nn.Module):
                 {
                     "kv_from_cond_q_from_x": cond,
                     "kv_from_x_q_from_cond": x,
-                }[self.config.xattn_mode]
+                }[self.config.xattn_mode],
             ),
             "b t (qk nh dh) -> qk b nh t dh",
             qk=2,
@@ -2223,7 +2330,7 @@ class TransformerBlock(nn.Module):
                 {
                     "kv_from_cond_q_from_x": x,
                     "kv_from_x_q_from_cond": cond,
-                }[self.config.xattn_mode]
+                }[self.config.xattn_mode],
             ),
             "b t (nh dh) -> b nh t dh",
             nh=config.n_heads,
@@ -2232,7 +2339,11 @@ class TransformerBlock(nn.Module):
             q = self.rotary_emb.rotate_queries_or_keys(q, seq_dim=-2)
             k = self.rotary_emb.rotate_queries_or_keys(k, seq_dim=-2)
         x = torch.nn.functional.scaled_dot_product_attention(
-            q, k, v, dropout_p=config.dropout_p, attn_mask=attn_mask
+            q,
+            k,
+            v,
+            dropout_p=config.dropout_p,
+            attn_mask=attn_mask,
         )
         x = rearrange(x, "b nh t dh -> b t (nh dh)")
         x = self.xattn_out_proj(x)

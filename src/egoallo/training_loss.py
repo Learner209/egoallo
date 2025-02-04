@@ -1,16 +1,16 @@
 """Training loss configuration."""
 
 import dataclasses
-from typing import TYPE_CHECKING, Literal
+from typing import Literal
+from typing import TYPE_CHECKING
 
-import torch
 import torch.utils.data
+from egoallo.config import CONFIG_FILE
+from egoallo.config import make_cfg
+from egoallo.utils.setup_logger import setup_logger
 from torch import Tensor
 from torch._dynamo import OptimizedModule
 from torch.nn.parallel import DistributedDataParallel
-
-from egoallo.config import CONFIG_FILE, make_cfg
-from egoallo.utils.setup_logger import setup_logger
 
 if TYPE_CHECKING:
     from egoallo.config.train.train_config import EgoAlloTrainConfig
@@ -79,8 +79,9 @@ class TrainingLossComputer:
         # Create trajectory using denoising config factory method
         x_0: DenoiseTrajType = train_config.denoising.create_trajectory(
             **train_config.denoising.from_ego_data(
-                train_batch, include_hands=unwrapped_model.config.include_hands
-            ).__dict__
+                train_batch,
+                include_hands=unwrapped_model.config.include_hands,
+            ).__dict__,
         )
 
         x_0_packed = x_0.pack()
@@ -122,7 +123,10 @@ class TrainingLossComputer:
             # Joints 19 and 20 are the hand positions.
             wrist_start_index = 20
             hand_positions_wrt_cpf = train_batch.joints_wrt_cpf[
-                :, :, wrist_start_index : wrist_start_index + 2, :
+                :,
+                :,
+                wrist_start_index : wrist_start_index + 2,
+                :,
             ].reshape((batch, time, 6))
 
             # Exclude hand positions for some items in the batch. We'll just do
@@ -163,19 +167,22 @@ class TrainingLossComputer:
         )
         # Compute loss using x_0_pred and x_0
         loss_terms: dict[str, Tensor | float] = x_0_pred.compute_loss(
-            other=x_0, mask=train_batch.mask, weight_t=weight_t
+            other=x_0,
+            mask=train_batch.mask,
+            weight_t=weight_t,
         )
 
         if train_config.denoising.denoising_mode == "joints_only":
             assert isinstance(x_0, network.JointsOnlyTraj)
         else:
             assert isinstance(
-                x_0, (network.AbsoluteDenoiseTraj, network.VelocityDenoiseTraj)
+                x_0,
+                (network.AbsoluteDenoiseTraj, network.VelocityDenoiseTraj),
             )
             # Add joint position loss calculation
             # Get predicted joint positions through forward kinematics
             x_0_posed = x_0_pred.apply_to_body(
-                unwrapped_model.body_model.to(device)
+                unwrapped_model.body_model.to(device),
             )  # (b, t, 22, 3)
             pred_joints = torch.cat(
                 [
@@ -284,7 +291,7 @@ class TrainingLossComputer:
                         weight_t,
                         torch.sum(train_batch.mask[:, 1:]),
                     ),
-                }
+                },
             )
             # Include hand objective.
             # We didn't use this in the paper.

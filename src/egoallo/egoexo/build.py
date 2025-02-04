@@ -1,6 +1,8 @@
+from egoallo.config import CONFIG_FILE
+from egoallo.config import make_cfg
 from egoallo.registry import DATASET_MANIPULATORS
+
 from .egoexo_utils import EgoExoUtils
-from egoallo.config import make_cfg, CONFIG_FILE
 
 local_config_file = CONFIG_FILE
 CFG = make_cfg(config_name="defaults", config_file=local_config_file, cli_args=[])

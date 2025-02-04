@@ -1,31 +1,29 @@
 """Utilities for writing training scripts."""
 
 import dataclasses
-import ipdb
 import signal
 import subprocess
 import sys
 import time
 import traceback as tb
 from pathlib import Path
-from typing import (
-    Any,
-    Dict,
-    Generator,
-    Iterable,
-    Protocol,
-    Sized,
-    get_type_hints,
-    overload,
-    Optional,
-)
-from accelerate import Accelerator
+from typing import Any
+from typing import Dict
+from typing import Generator
+from typing import get_type_hints
+from typing import Iterable
+from typing import Optional
+from typing import overload
+from typing import Protocol
+from typing import Sized
 
 import torch
+from accelerate import Accelerator
 
 
 def flattened_hparam_dict_from_dataclass(
-    dataclass: Any, prefix: str | None = None
+    dataclass: Any,
+    prefix: str | None = None,
 ) -> Dict[str, Any]:
     """Convert a config object in the form of a nested dataclass into a
     flattened dictionary, for use with Tensorboard hparams."""
@@ -109,7 +107,10 @@ def range_with_metrics(start: int, stop: int, /) -> SizedIterable[LoopMetrics]: 
 
 @overload
 def range_with_metrics(
-    start: int, stop: int, step: int, /
+    start: int,
+    stop: int,
+    step: int,
+    /,
 ) -> SizedIterable[LoopMetrics]: ...
 
 
@@ -166,7 +167,7 @@ def loop_metric_generator(
             for i in range(num_gpus):
                 memory_used, memory_total = torch.cuda.mem_get_info(i)
                 gpu_memory.append(
-                    (memory_total - memory_used) / 1024**3
+                    (memory_total - memory_used) / 1024**3,
                 )  # Convert to GB
 
                 # Note: This requires nvidia-smi
@@ -180,9 +181,9 @@ def loop_metric_generator(
                                     "--format=csv,noheader,nounits",
                                     "-i",
                                     str(i),
-                                ]
-                            )
-                        )
+                                ],
+                            ),
+                        ),
                     )
                 except Exception as _:
                     gpu_util.append(0.0)

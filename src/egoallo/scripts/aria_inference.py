@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import builtins
 import dataclasses
-import time
-
 import os
+import time
 
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 
@@ -34,15 +34,15 @@ from egoallo.config.inference.inference_defaults import InferenceConfig
 
 def main(config: InferenceConfig) -> None:
     if config.use_ipdb:
-        import ipdb
-
-        ipdb.set_trace()
+        builtins.breakpoint()
 
     device = torch.device("cuda")
 
     config.output_dir.mkdir(parents=True, exist_ok=True)
     traj_paths = InferenceTrajectoryPaths.find(
-        config.traj_root, config.output_dir, soft_link=False
+        config.traj_root,
+        config.output_dir,
+        soft_link=False,
     )
     if traj_paths.splat_path is not None:
         print("Found splat at", traj_paths.splat_path)
@@ -50,12 +50,14 @@ def main(config: InferenceConfig) -> None:
         print("No scene splat found.")
     # Get point cloud + floor.
     points_data, floor_z = load_point_cloud_and_find_ground(
-        points_path=traj_paths.points_path
+        points_path=traj_paths.points_path,
     )
 
     # Read transforms from VRS / MPS, downsampled.
     transforms = InferenceInputTransforms.load(
-        traj_paths.vrs_file, traj_paths.slam_root_dir, fps=30
+        traj_paths.vrs_file,
+        traj_paths.slam_root_dir,
+        fps=30,
     ).to(device=device)
 
     # Note the off-by-one for Ts_world_cpf, which we need for relative transform computation.
@@ -64,12 +66,12 @@ def main(config: InferenceConfig) -> None:
         SE3(
             transforms.Ts_world_cpf[
                 config.start_index : config.start_index + config.traj_length + 1
-            ]
+            ],
         )
         @ SE3.from_rotation(
             SO3.from_x_radians(
-                transforms.Ts_world_cpf.new_tensor(config.glasses_x_angle_offset)
-            )
+                transforms.Ts_world_cpf.new_tensor(config.glasses_x_angle_offset),
+            ),
         )
     ).parameters()
     pose_timestamps_sec = transforms.pose_timesteps[
@@ -136,12 +138,13 @@ def main(config: InferenceConfig) -> None:
         out_path.parent.mkdir(parents=True, exist_ok=True)
         assert not out_path.exists()
         (config.output_dir / "egoallo_outputs" / (save_name + "_args.yaml")).write_text(
-            yaml.dump(dataclasses.asdict(config))
+            yaml.dump(dataclasses.asdict(config)),
         )
 
         posed = traj.apply_to_body(body_model)
         Ts_world_root = fncsmpl_extensions.get_T_world_root_from_cpf_pose(
-            posed, Ts_world_cpf[..., 1:, :]
+            posed,
+            Ts_world_cpf[..., 1:, :],
         )
         print(f"Saving to {out_path}...", end="")
         np.savez(
@@ -154,7 +157,8 @@ def main(config: InferenceConfig) -> None:
             contacts=traj.contacts.numpy(force=True),  # Sometimes we forgot this...
             betas=traj.betas.numpy(force=True),
             frame_nums=np.arange(
-                config.start_index, config.start_index + config.traj_length
+                config.start_index,
+                config.start_index + config.traj_length,
             ),
             timestamps_ns=(np.array(pose_timestamps_sec) * 1e9).astype(np.int64),
         )

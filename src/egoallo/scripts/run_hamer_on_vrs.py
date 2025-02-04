@@ -1,33 +1,29 @@
 """Script to run HaMeR on VRS data and save outputs to a pickle file."""
 
+import inspect
 import pickle
 from pathlib import Path
 
 import cv2
 import numpy as np
 import tyro
-from egoallo.hand_detection_structs import (
-    SavedHamerOutputs,
-    SingleHandHamerOutputWrtCamera,
-)
+from egoallo.hand_detection_structs import SavedHamerOutputs
+from egoallo.hand_detection_structs import SingleHandHamerOutputWrtCamera
+from egoallo.inference_utils import InferenceTrajectoryPaths
 from hamer_helper import HamerHelper
 from projectaria_tools.core import calibration
-from projectaria_tools.core.data_provider import (
-    VrsDataProvider,
-    create_vrs_data_provider,
-)
+from projectaria_tools.core.data_provider import create_vrs_data_provider
+from projectaria_tools.core.data_provider import VrsDataProvider
 from tqdm.auto import tqdm
-
-from egoallo.inference_utils import InferenceTrajectoryPaths
-
-import inspect
 
 if not hasattr(inspect, "getargspec"):
     inspect.getargspec = inspect.getfullargspec
 
 
 def main(
-    traj_root: Path, output_root: Path | None = None, overwrite: bool = False
+    traj_root: Path,
+    output_root: Path | None = None,
+    overwrite: bool = False,
 ) -> None:
     """Run HaMeR for on trajectory. We'll save outputs to
     `output_root/hamer_outputs.pkl` and `output_root/hamer_outputs_render".
@@ -53,7 +49,10 @@ def main(
 
 
 def run_hamer_and_save(
-    vrs_path: Path, pickle_out: Path, hamer_render_out: Path, overwrite: bool
+    vrs_path: Path,
+    pickle_out: Path,
+    hamer_render_out: Path,
+    overwrite: bool,
 ) -> None:
     if not overwrite:
         assert not pickle_out.exists()
@@ -90,13 +89,13 @@ def run_hamer_and_save(
         [
             sophus_T_device_camera.rotation().to_quat().squeeze(axis=0),
             sophus_T_device_camera.translation().squeeze(axis=0),
-        ]
+        ],
     )
     T_cpf_cam = np.concatenate(
         [
             sophus_T_cpf_camera.rotation().to_quat().squeeze(axis=0),
             sophus_T_cpf_camera.translation().squeeze(axis=0),
-        ]
+        ],
     )
     assert T_device_cam.shape == T_cpf_cam.shape == (7,)
 
@@ -107,10 +106,13 @@ def run_hamer_and_save(
     pbar = tqdm(range(num_images))
     for i in pbar:
         image_data, image_data_record = provider.get_image_data_by_index(
-            rgb_stream_id, i
+            rgb_stream_id,
+            i,
         )
         undistorted_image = calibration.distort_by_calibration(
-            image_data.to_numpy_array(), pinhole, camera_calib
+            image_data.to_numpy_array(),
+            pinhole,
+            camera_calib,
         )
 
         hamer_out_left, hamer_out_right = hamer_helper.look_for_hands(

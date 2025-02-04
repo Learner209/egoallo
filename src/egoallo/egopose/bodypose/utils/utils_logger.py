@@ -1,7 +1,3 @@
-import sys
-import datetime
-import logging
-
 """
 # --------------------------------------------
 # Kai Zhang (github: https://github.com/cszn)
@@ -11,16 +7,13 @@ import logging
 # --------------------------------------------
 """
 
+import datetime
+import logging
+import sys
+
 
 def log(*args, **kwargs):
     print(datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S:"), *args, **kwargs)
-
-
-"""
-# --------------------------------------------
-# logger
-# --------------------------------------------
-"""
 
 
 def logger_info(logger_name, log_path="default_logger.log"):
@@ -35,7 +28,8 @@ def logger_info(logger_name, log_path="default_logger.log"):
     level = logging.INFO
 
     formatter = logging.Formatter(
-        "%(asctime)s.%(msecs)03d : %(message)s", datefmt="%y-%m-%d %H:%M:%S"
+        "%(asctime)s.%(msecs)03d : %(message)s",
+        datefmt="%y-%m-%d %H:%M:%S",
     )
     fh = logging.FileHandler(log_path, mode="a")
     fh.setFormatter(formatter)
@@ -46,13 +40,6 @@ def logger_info(logger_name, log_path="default_logger.log"):
     sh = logging.StreamHandler()
     sh.setFormatter(formatter)
     log.addHandler(sh)
-
-
-"""
-# --------------------------------------------
-# print to file and std_out simultaneously
-# --------------------------------------------
-"""
 
 
 class logger_print(object):

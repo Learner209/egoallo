@@ -1,10 +1,3 @@
-import os
-from datetime import datetime
-import json
-import re
-import glob
-
-
 """
 # --------------------------------------------
 # Kai Zhang (github: https://github.com/cszn)
@@ -13,6 +6,12 @@ import glob
 # https://github.com/xinntao/BasicSR
 # --------------------------------------------
 """
+
+import glob
+import json
+import os
+import re
+from datetime import datetime
 
 
 def get_timestamp():
@@ -163,13 +162,6 @@ def find_last_checkpoint(save_dir, net_type="G"):
     return init_iter, init_path
 
 
-"""
-# --------------------------------------------
-# convert the opt into json file
-# --------------------------------------------
-"""
-
-
 def save(opt):
     opt_path = opt["opt_path"]
     opt_path_copy = opt["path"]["options"]
@@ -178,13 +170,6 @@ def save(opt):
     dump_path = os.path.join(opt_path_copy, filename + get_timestamp() + ext)
     with open(dump_path, "w") as dump_file:
         json.dump(opt, dump_file, indent=2)
-
-
-"""
-# --------------------------------------------
-# dict to string for logger
-# --------------------------------------------
-"""
 
 
 def dict2str(opt, indent_l=1):
@@ -197,14 +182,6 @@ def dict2str(opt, indent_l=1):
         else:
             msg += " " * (indent_l * 2) + k + ": " + str(v) + "\n"
     return msg
-
-
-"""
-# --------------------------------------------
-# convert OrderedDict to NoneDict,
-# return None for missing key
-# --------------------------------------------
-"""
 
 
 def dict_to_nonedict(opt):

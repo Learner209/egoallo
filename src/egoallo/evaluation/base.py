@@ -1,21 +1,22 @@
-from abc import ABC, abstractmethod
+from abc import ABC
+from abc import abstractmethod
 from pathlib import Path
 from typing import Optional
-from jaxtyping import jaxtyped, Float
-from egoallo import fncsmpl
-import typeguard
 
 import torch
+import typeguard
+from egoallo import fncsmpl
+from egoallo.types import Device
+from egoallo.types import MetricsDict
+from egoallo.types import PathLike
+from egoallo.types import ProcrustesMode
+from egoallo.types import ProcrustesOutput
+from jaxtyping import Float
+from jaxtyping import jaxtyped
 from torch import Tensor
 
-from egoallo.types import (
-    Device,
-    MetricsDict,
-    PathLike,
-    ProcrustesMode,
-    ProcrustesOutput,
-)
-from .utils import get_device, ensure_path
+from .utils import ensure_path
+from .utils import get_device
 
 
 class BaseEvaluator(ABC):
@@ -32,7 +33,7 @@ class BaseEvaluator(ABC):
         self.device = get_device(device)
         self.body_model_path = ensure_path(body_model_path)
         self.body_model: fncsmpl.SmplhModel = self._load_body_model(
-            self.body_model_path
+            self.body_model_path,
         )
 
     @abstractmethod

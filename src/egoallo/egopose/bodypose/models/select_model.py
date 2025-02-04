@@ -1,18 +1,11 @@
 import functools
-import torch
-from torch.nn import init
 
+import torch
+from egoallo.utils.setup_logger import setup_logger
+from torch.nn import init
 # from human_body_prior.body_model.body_model import BodyModel
 
-from egoallo.utils.setup_logger import setup_logger
-
 logger = setup_logger(output=None, name=__name__)
-
-"""
-# --------------------------------------------
-# define training model
-# --------------------------------------------
-"""
 
 
 def define_Model(opt):
@@ -28,13 +21,6 @@ def define_Model(opt):
 
     logger.info("Training model [{:s}] is created.".format(m.__class__.__name__))
     return m
-
-
-"""
-# --------------------------------------------
-# select the network of G
-# --------------------------------------------
-"""
 
 
 # --------------------------------------------
@@ -77,13 +63,6 @@ def define_G(opt):
     return netG
 
 
-"""
-# --------------------------------------------
-# weights initialization
-# --------------------------------------------
-"""
-
-
 def init_weights(net, init_type="xavier_uniform", init_bn_type="uniform", gain=1):
     """
     # Kai Zhang, https://github.com/cszn/KAIR
@@ -120,13 +99,19 @@ def init_weights(net, init_type="xavier_uniform", init_bn_type="uniform", gain=1
 
             elif init_type == "kaiming_normal":
                 init.kaiming_normal_(
-                    m.weight.data, a=0, mode="fan_in", nonlinearity="relu"
+                    m.weight.data,
+                    a=0,
+                    mode="fan_in",
+                    nonlinearity="relu",
                 )
                 m.weight.data.clamp_(-1, 1).mul_(gain)
 
             elif init_type == "kaiming_uniform":
                 init.kaiming_uniform_(
-                    m.weight.data, a=0, mode="fan_in", nonlinearity="relu"
+                    m.weight.data,
+                    a=0,
+                    mode="fan_in",
+                    nonlinearity="relu",
                 )
                 m.weight.data.mul_(gain)
 
@@ -135,7 +120,7 @@ def init_weights(net, init_type="xavier_uniform", init_bn_type="uniform", gain=1
                 pass
             else:
                 raise NotImplementedError(
-                    "Initialization method [{:s}] is not implemented".format(init_type)
+                    "Initialization method [{:s}] is not implemented".format(init_type),
                 )
 
         #            if m.bias is not None:
@@ -153,21 +138,26 @@ def init_weights(net, init_type="xavier_uniform", init_bn_type="uniform", gain=1
             else:
                 raise NotImplementedError(
                     "Initialization method [{:s}] is not implemented".format(
-                        init_bn_type
-                    )
+                        init_bn_type,
+                    ),
                 )
 
     if init_type not in ["default", "none"]:
         logger.info(
             "Initialization method [{:s} + {:s}], gain is [{:.2f}]".format(
-                init_type, init_bn_type, gain
-            )
+                init_type,
+                init_bn_type,
+                gain,
+            ),
         )
         fn = functools.partial(
-            init_fn, init_type=init_type, init_bn_type=init_bn_type, gain=gain
+            init_fn,
+            init_type=init_type,
+            init_bn_type=init_bn_type,
+            gain=gain,
         )
         net.apply(fn)
     else:
         logger.info(
-            "Pass this initialization! Initialization was done during network defination!"
+            "Pass this initialization! Initialization was done during network defination!",
         )

@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Union, override
+from typing import override
+from typing import Union
 
 import numpy as np
 import torch
 from torch import Tensor
 
 from . import _base
-from .utils import get_epsilon, register_lie_group
+from .utils import get_epsilon
+from .utils import register_lie_group
 
 
 @register_lie_group(
@@ -278,7 +280,7 @@ class SO3(_base.SOBase):
                 use_taylor,
                 torch.ones_like(theta_squared),  # Any constant value should do here.
                 theta_squared,
-            )
+            ),
         )
         safe_half_theta = 0.5 * safe_theta
 
@@ -301,7 +303,7 @@ class SO3(_base.SOBase):
                     imaginary_factor[..., None] * tangent,
                 ],
                 dim=-1,
-            )
+            ),
         )
 
     @override
@@ -318,7 +320,7 @@ class SO3(_base.SOBase):
                 use_taylor,
                 torch.ones_like(norm_sq),  # Any non-zero value should do here.
                 norm_sq,
-            )
+            ),
         )
         w_safe = torch.where(use_taylor, w, torch.ones_like(w))
         atan_n_over_w = torch.atan2(

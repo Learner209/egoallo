@@ -1,7 +1,3 @@
-from torch import nn
-import torch
-import numpy as np
-
 """
 ---- 1) FLOPs: floating point operations
 ---- 2) #Activations: the number of elements of all ‘Conv2d’ outputs
@@ -24,9 +20,16 @@ https://github.com/sovrasov/flops-counter.pytorch.git
 # --------------------------------------------
 """
 
+import numpy as np
+import torch
+from torch import nn
+
 
 def get_model_flops(
-    model, input_res, print_per_layer_stat=True, input_constructor=None
+    model,
+    input_res,
+    print_per_layer_stat=True,
+    input_constructor=None,
 ):
     assert type(input_res) is tuple, "Please provide the size of the input image."
     assert len(input_res) >= 3, "Input image should have 3 dimensions."
@@ -68,7 +71,11 @@ def get_model_activation(model, input_res, input_constructor=None):
 
 
 def get_model_complexity_info(
-    model, input_res, print_per_layer_stat=True, as_strings=True, input_constructor=None
+    model,
+    input_res,
+    print_per_layer_stat=True,
+    as_strings=True,
+    input_constructor=None,
 ):
     assert type(input_res) is tuple
     assert len(input_res) >= 3
@@ -140,11 +147,13 @@ def print_model_with_flops(model, units="GMac", precision=3):
         return ", ".join(
             [
                 flops_to_string(
-                    accumulated_flops_cost, units=units, precision=precision
+                    accumulated_flops_cost,
+                    units=units,
+                    precision=precision,
                 ),
                 "{:.3%} MACs".format(accumulated_flops_cost / total_flops),
                 self.original_extra_repr(),
-            ]
+            ],
         )
 
     def add_extra_repr(m):
@@ -180,7 +189,7 @@ def add_flops_counting_methods(net_main_module):
     net_main_module.stop_flops_count = stop_flops_count.__get__(net_main_module)
     net_main_module.reset_flops_count = reset_flops_count.__get__(net_main_module)
     net_main_module.compute_average_flops_cost = compute_average_flops_cost.__get__(
-        net_main_module
+        net_main_module,
     )
 
     net_main_module.reset_flops_count()
@@ -353,13 +362,13 @@ def add_activation_counting_methods(net_main_module):
     # this is done this way so that each function has access to self object
     # embed()
     net_main_module.start_activation_count = start_activation_count.__get__(
-        net_main_module
+        net_main_module,
     )
     net_main_module.stop_activation_count = stop_activation_count.__get__(
-        net_main_module
+        net_main_module,
     )
     net_main_module.reset_activation_count = reset_activation_count.__get__(
-        net_main_module
+        net_main_module,
     )
     net_main_module.compute_average_activation_cost = (
         compute_average_activation_cost.__get__(net_main_module)

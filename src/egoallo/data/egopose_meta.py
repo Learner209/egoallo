@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, Sequence
+from typing import Any
+from typing import Literal
+from typing import Sequence
 
 
 @dataclass(frozen=True)
@@ -16,7 +18,8 @@ class TakeMeta:
 
     # train only has trajectories with egopose annotation
     uids_from_split: dict[
-        Literal["train", "val", "test", "no_annotations"], tuple[str, ...]
+        Literal["train", "val", "test", "no_annotations"],
+        tuple[str, ...],
     ]
     type_from_uid: dict[str, Literal["physical", "procedural"]]
 
@@ -38,9 +41,9 @@ class TakeMeta:
                 set(name_from_uid.keys())
                 - set(
                     #     uids_from_split["train"]
-                    uids_from_split["test"]
+                    uids_from_split["test"],
                     #     + uids_from_split["val"]
-                )
+                ),
             ),
             name_from_uid,
         )
@@ -58,7 +61,8 @@ class TakeMeta:
 
     @staticmethod
     def _filter_uids(
-        uids: Sequence[str], name_from_uid: dict[str, str]
+        uids: Sequence[str],
+        name_from_uid: dict[str, str],
     ) -> tuple[str, ...]:
         # Filter out things like climbing and bouldering...
         test_keywords = {
@@ -80,8 +84,9 @@ class TakeMeta:
             for uid in uids
             if any(
                 map(
-                    lambda keyword: keyword in name_from_uid[uid].lower(), test_keywords
-                )
+                    lambda keyword: keyword in name_from_uid[uid].lower(),
+                    test_keywords,
+                ),
             )
         )
 

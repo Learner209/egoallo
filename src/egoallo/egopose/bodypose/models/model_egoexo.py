@@ -1,20 +1,17 @@
 from collections import OrderedDict
+
 import torch
-from torch import nn
-from torch.optim import lr_scheduler
-from torch.optim import Adam
-
-from models.select_model import define_G
-from models.model_base import ModelBase
-from models.loss import CharbonnierLoss
-
-from utils.utils_regularizers import regularizer_orth, regularizer_clip
-
 from egoallo.utils.setup_logger import setup_logger
-from egoallo.utils.smpl_mapping.mapping import (
-    EGOEXO4D_EGOPOSE_BODYPOSE_MAPPINGS,
-    EGOEXO4D_EGOPOSE_HANDPOSE_MAPPINGS,
-)
+from egoallo.utils.smpl_mapping.mapping import EGOEXO4D_EGOPOSE_BODYPOSE_MAPPINGS
+from egoallo.utils.smpl_mapping.mapping import EGOEXO4D_EGOPOSE_HANDPOSE_MAPPINGS
+from models.loss import CharbonnierLoss
+from models.model_base import ModelBase
+from models.select_model import define_G
+from torch import nn
+from torch.optim import Adam
+from torch.optim import lr_scheduler
+from utils.utils_regularizers import regularizer_clip
+from utils.utils_regularizers import regularizer_orth
 
 
 logger = setup_logger(output=None, name=__name__)
@@ -116,7 +113,10 @@ class ModelEgoExo4D(ModelBase):
             self.save_network(self.save_dir, self.netE, "E", iter_label)
         if self.opt_train["G_optimizer_reuse"]:
             self.save_optimizer(
-                self.save_dir, self.G_optimizer, "optimizerG", iter_label
+                self.save_dir,
+                self.G_optimizer,
+                "optimizerG",
+                iter_label,
             )
 
     # ----------------------------------------
@@ -132,13 +132,13 @@ class ModelEgoExo4D(ModelBase):
             self.G_lossfn = nn.MSELoss(reduction="sum").to(self.device)
         elif G_lossfn_type == "charbonnier":
             self.G_lossfn = CharbonnierLoss(self.opt_train["G_charbonnier_eps"]).to(
-                self.device
+                self.device,
             )
         elif G_lossfn_type == "geodesic":
             self.G_lossfn = geodesic_loss_R(reduction="mean")
         else:
             raise NotImplementedError(
-                "Loss type [{:s}] is not found.".format(G_lossfn_type)
+                "Loss type [{:s}] is not found.".format(G_lossfn_type),
             )
         self.G_lossfn_weight = self.opt_train["G_lossfn_weight"]
         self.G_lossaria = nn.L1Loss().to(self.device)
@@ -154,7 +154,9 @@ class ModelEgoExo4D(ModelBase):
             else:
                 logger.info("Params [{:s}] will not optimize.".format(k))
         self.G_optimizer = Adam(
-            G_optim_params, lr=self.opt_train["G_optimizer_lr"], weight_decay=0
+            G_optim_params,
+            lr=self.opt_train["G_optimizer_lr"],
+            weight_decay=0,
         )
 
     # ----------------------------------------
@@ -166,7 +168,7 @@ class ModelEgoExo4D(ModelBase):
                 self.G_optimizer,
                 self.opt_train["G_scheduler_milestones"],
                 self.opt_train["G_scheduler_gamma"],
-            )
+            ),
         )
 
     """
@@ -294,11 +296,12 @@ class ModelEgoExo4D(ModelBase):
 
                     for frame_idx in range(0, self.L.shape[0]):
                         E_global_orientation = self.netG(
-                            self.L[0 : frame_idx + 1].unsqueeze(0)
+                            self.L[0 : frame_idx + 1].unsqueeze(0),
                         )  # (BS)1 x (frame_idx) x 3
                         E_global_orientation_list.append(E_global_orientation)
                     E_global_orientation_tensor = torch.cat(
-                        E_global_orientation_list, dim=0
+                        E_global_orientation_list,
+                        dim=0,
                     )
 
             else:
@@ -312,11 +315,12 @@ class ModelEgoExo4D(ModelBase):
                     E_global_orientation_list_1 = []
                     for frame_idx in range(0, window_size):
                         E_global_orientation = self.netG(
-                            self.L[0 : frame_idx + 1].unsqueeze(0)
+                            self.L[0 : frame_idx + 1].unsqueeze(0),
                         )
                         E_global_orientation_list_1.append(E_global_orientation)
                     E_global_orientation_tensor_1 = torch.cat(
-                        E_global_orientation_list_1, dim=0
+                        E_global_orientation_list_1,
+                        dim=0,
                     )
 
                 input_list_2 = []
@@ -325,8 +329,8 @@ class ModelEgoExo4D(ModelBase):
                 for frame_idx in range(window_size, self.L.shape[0]):
                     input_list_2.append(
                         self.L[frame_idx - window_size : frame_idx + 1, ...].unsqueeze(
-                            0
-                        )
+                            0,
+                        ),
                     )
                     if len(input_list_2) >= self.max_win_seg:
                         input_tensor_2 = torch.cat(input_list_2, dim=0)
@@ -340,7 +344,8 @@ class ModelEgoExo4D(ModelBase):
                     E_global_orientation_list_2.append(E_global_orientation_2)
 
                 E_global_orientation_tensor_2 = torch.cat(
-                    E_global_orientation_list_2, dim=0
+                    E_global_orientation_list_2,
+                    dim=0,
                 )
 
                 E_global_orientation_tensor = torch.cat(

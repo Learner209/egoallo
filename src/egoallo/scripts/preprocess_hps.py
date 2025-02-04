@@ -1,4 +1,6 @@
 from __future__ import annotations
+
+import builtins
 import dataclasses
 import queue
 import threading
@@ -8,11 +10,9 @@ from typing import Optional
 
 import torch
 import tyro
-
-
 from egoallo.data.hps.hps_processor import HPSProcessor
-from egoallo.utils.setup_logger import setup_logger
 from egoallo.training_utils import ipdb_safety_net
+from egoallo.utils.setup_logger import setup_logger
 
 logger = setup_logger(output="logs/hps_preprocess", name=__name__)
 
@@ -36,7 +36,7 @@ class HPSPreprocessConfig:
 
     # Data split options
     splits: list[str] = dataclasses.field(
-        default_factory=lambda: ["train", "val", "test"]
+        default_factory=lambda: ["train", "val", "test"],
     )
 
     # Device options
@@ -61,7 +61,7 @@ def process_sequence(args: tuple[HPSProcessor, str, Path]) -> Optional[str]:
     if output_path.exists():
         logger.info(f"Sequence {sequence_name} already processed, skipping")
         return str(
-            output_path.relative_to(output_path.parent.parent) / f"{sequence_name}.npz"
+            output_path.relative_to(output_path.parent.parent) / f"{sequence_name}.npz",
         )
 
     # try:
@@ -141,7 +141,7 @@ def main(config: HPSPreprocessConfig) -> None:
 
             logger.info(
                 f"Progress: {total_count - task_queue.qsize()}/{total_count} "
-                f"({(total_count - task_queue.qsize()) / total_count * 100:.2f}%)"
+                f"({(total_count - task_queue.qsize()) / total_count * 100:.2f}%)",
             )
 
     # Start worker threads
@@ -163,9 +163,7 @@ def main(config: HPSPreprocessConfig) -> None:
 if __name__ == "__main__":
     config = tyro.cli(HPSPreprocessConfig)
     if config.debug:
-        import ipdb
-
-        ipdb.set_trace()
+        builtins.breakpoint()
 
     ipdb_safety_net()
     main(config)

@@ -1,8 +1,9 @@
-from cloudrender.libegl import EGLContext
-from OpenGL import GL as gl
 import logging
 from dataclasses import dataclass
 from typing import Tuple
+
+from cloudrender.libegl import EGLContext
+from OpenGL import GL as gl
 
 logger = logging.getLogger(__name__)
 
@@ -40,13 +41,17 @@ class BaseRenderer:
         # Color buffer
         gl.glBindRenderbuffer(gl.GL_RENDERBUFFER, self._main_cb)
         gl.glRenderbufferStorage(
-            gl.GL_RENDERBUFFER, gl.GL_RGBA, *self.config.resolution
+            gl.GL_RENDERBUFFER,
+            gl.GL_RGBA,
+            *self.config.resolution,
         )
 
         # Depth buffer
         gl.glBindRenderbuffer(gl.GL_RENDERBUFFER, self._main_db)
         gl.glRenderbufferStorage(
-            gl.GL_RENDERBUFFER, gl.GL_DEPTH_COMPONENT24, *self.config.resolution
+            gl.GL_RENDERBUFFER,
+            gl.GL_DEPTH_COMPONENT24,
+            *self.config.resolution,
         )
 
         # Frame buffer

@@ -1,47 +1,43 @@
 import os
 import os.path as osp
+from typing import Optional
 
-from tqdm import tqdm
-from egoallo.egopose.handpose.data_preparation.utils.utils import HAND_ORDER
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
-
-from egoallo.utils.smpl_mapping.mapping import (
-    EGOEXO4D_EGOPOSE_BODYPOSE_MAPPINGS,
-    EGOEXO4D_EGOPOSE_HANDPOSE_MAPPINGS,
-    USED_SMPLH_JOINT_NAMES,
-)
-from egoallo.utils.smpl_mapping.mapping import (
-    EGOEXO4D_BODYPOSE_TO_SMPLH_INDICES,
-    EGOEXO4D_HANDPOSE_TO_SMPLH_w_HAND_INDICES,
-    SMPLH_BODY_JOINTS,
-    SMPLH_HAND_JOINTS,
-)
+from egoallo.config import CONFIG_FILE
+from egoallo.config import make_cfg
+from egoallo.egoexo.egoexo_utils import EgoExoUtils
+from egoallo.egopose.handpose.data_preparation.utils.utils import HAND_ORDER
+from egoallo.env.mujoco.smpl_mujoco import SMPL_M_Viewer
+from egoallo.smpl import SMPLH_UTILS_INST
+from egoallo.smpl.simple_ik import simple_ik_solver_w_smplh
+from egoallo.smpl.smplh_utils import NUM_OF_BODY_JOINTS as SMPLH_BODY_JNT_NUM
 from egoallo.smpl.smplh_utils import (
     NUM_SMPL_JNTS,
 )
-from egoallo.utils.time_utils import linear_interpolate_missing_vals
-from egoallo.utils.ego_geom import (
-    openglpose2smplorigin,
-)
-from sklearn.cluster import DBSCAN
-from egoallo.utils.setup_logger import setup_logger
-from egoallo.smpl.simple_ik import simple_ik_solver_w_smplh
-from egoallo.utils.transformation import qpose_to_T
-from egoallo.utils.ego_geom import batch_align_to_reference_pose
-from egoallo.config import make_cfg, CONFIG_FILE
-from egoallo.smpl.smplh_utils import NUM_OF_BODY_JOINTS as SMPLH_BODY_JNT_NUM
 from egoallo.smpl.smplh_utils import (
     SMPLH_NUM_BETAS,
 )
-from egoallo.smpl import SMPLH_UTILS_INST
-from egoallo.utils.utils import NDArray, find_numerical_key_in_dict
 from egoallo.utils.aria_utils.mps import AriaMPSService
-from egoallo.egoexo.egoexo_utils import EgoExoUtils
-from egoallo.env.mujoco.smpl_mujoco import SMPL_M_Viewer
-import matplotlib.pyplot as plt
-
-from typing import Optional
+from egoallo.utils.ego_geom import batch_align_to_reference_pose
+from egoallo.utils.ego_geom import (
+    openglpose2smplorigin,
+)
+from egoallo.utils.setup_logger import setup_logger
+from egoallo.utils.smpl_mapping.mapping import EGOEXO4D_BODYPOSE_TO_SMPLH_INDICES
+from egoallo.utils.smpl_mapping.mapping import EGOEXO4D_EGOPOSE_BODYPOSE_MAPPINGS
+from egoallo.utils.smpl_mapping.mapping import EGOEXO4D_EGOPOSE_HANDPOSE_MAPPINGS
+from egoallo.utils.smpl_mapping.mapping import EGOEXO4D_HANDPOSE_TO_SMPLH_w_HAND_INDICES
+from egoallo.utils.smpl_mapping.mapping import SMPLH_BODY_JOINTS
+from egoallo.utils.smpl_mapping.mapping import SMPLH_HAND_JOINTS
+from egoallo.utils.smpl_mapping.mapping import USED_SMPLH_JOINT_NAMES
+from egoallo.utils.time_utils import linear_interpolate_missing_vals
+from egoallo.utils.transformation import qpose_to_T
+from egoallo.utils.utils import find_numerical_key_in_dict
+from egoallo.utils.utils import NDArray
+from sklearn.cluster import DBSCAN
+from tqdm import tqdm
 
 local_config_file = CONFIG_FILE
 CFG = make_cfg(config_name="defaults", config_file=local_config_file, cli_args=[])
@@ -110,7 +106,8 @@ class EgoPoseDataPreparation:
 
         take_name = egoexo_util_inst.find_take_name_from_take_uid(take_uid)
         exported_mp4_file_path = egoexo_util_inst.get_exported_mp4_path_from_take_name(
-            take_name=take_name, exported_mp4_output_dir=self.export_mp4_root_dir
+            take_name=take_name,
+            exported_mp4_output_dir=self.export_mp4_root_dir,
         )
 
         (
@@ -151,7 +148,7 @@ class EgoPoseDataPreparation:
             tracking_timestamp_close_traj,
             utc_close_traj,
         ) = aria_mps_serv.sample_close_loop_traj_from_timestamps(
-            timestamps=exported_vrs_timestamps
+            timestamps=exported_vrs_timestamps,
         )
         (
             sampled_mps_open_traj_pose,
@@ -159,14 +156,14 @@ class EgoPoseDataPreparation:
             tracking_timestamp_open_traj,
             utc_open_traj,
         ) = aria_mps_serv.sample_open_loop_traj_from_timestamps(
-            timestamps=exported_vrs_timestamps
+            timestamps=exported_vrs_timestamps,
         )
 
         try:
             assert len(this_take_ego_cam_traj) == T_mp4
         except Exception:
             logger.critical(
-                f"Ego cam anno pose json: {len(this_take_ego_cam_traj)} | exported_mp4_timestamps: {T_mp4}"
+                f"Ego cam anno pose json: {len(this_take_ego_cam_traj)} | exported_mp4_timestamps: {T_mp4}",
             )
             return
 
@@ -192,7 +189,8 @@ class EgoPoseDataPreparation:
             aligned_open_traj_quat_wxyz[0],
         )
         this_take_aligned_open_traj = np.concatenate(
-            [aligned_open_traj, aligned_open_traj_quat_wxyz], axis=1
+            [aligned_open_traj, aligned_open_traj_quat_wxyz],
+            axis=1,
         )  # T x 7
         T_world_imus_w_open_traj = qpose_to_T(this_take_aligned_open_traj)  # T x 3 x 4
 
@@ -289,7 +287,8 @@ class EgoPoseDataPreparation:
             this_take_body_anno_3d.copy()
         )  # T x (body_jnts+hand_jnts) x 3
         this_take_prev_body_anno_3d = np.concatenate(
-            [np.zeros((1, J, 3)), this_take_prev_body_anno_3d[:-1]], axis=0
+            [np.zeros((1, J, 3)), this_take_prev_body_anno_3d[:-1]],
+            axis=0,
         )  # T x (body_jnts+hand_jnts) x 3
         this_take_anno_3d_vel = (
             this_take_body_anno_3d - this_take_prev_body_anno_3d
@@ -312,7 +311,7 @@ class EgoPoseDataPreparation:
         miss_right_ankle_flag = (~this_take_body_anno_3d_valid_flag)[:, right_ankle_idx]
 
         assert not np.any(
-            np.logical_and(miss_left_ankle_flag, miss_right_ankle_flag)
+            np.logical_and(miss_left_ankle_flag, miss_right_ankle_flag),
         ), "Both left ankle and right ankle are missing, skip this body"
         assert np.any(np.sum(this_take_body_anno_3d_valid_flag, axis=-1) >= 9), (
             "At least 9 joints should be valid, skip this body"
@@ -343,7 +342,10 @@ class EgoPoseDataPreparation:
         pred_pelvis_origin_valid = []
 
         for frame_ind in tqdm(
-            range(T), total=T, desc="Predicting pelvis origin", ascii=" >="
+            range(T),
+            total=T,
+            desc="Predicting pelvis origin",
+            ascii=" >=",
         ):
             # ! Perform DBSCAN clustering on the num_of_jnts vels between the current frame and the prev frame to `find the most likely global orient`
 
@@ -367,7 +369,7 @@ class EgoPoseDataPreparation:
             for cur_label in all_labels:
                 cur_clust = in_anno_3d_vel[clustering.labels_ == cur_label]
                 np.unique(
-                    all_static_inds[clustering.labels_ == cur_label]
+                    all_static_inds[clustering.labels_ == cur_label],
                 )  # inds in the original sequence that correspond to this cluster
                 if VIZ_PLOTS:
                     plt.scatter(
@@ -387,7 +389,7 @@ class EgoPoseDataPreparation:
             cluster_size_acc = np.sum(cluster_sizes)
             cluster_weight_acc = np.zeros((1, 3))
             for cluster_ind, (cluster_size, cluster_vel) in enumerate(
-                zip(cluster_sizes, cluster_vels)
+                zip(cluster_sizes, cluster_vels),
             ):
                 cluster_weight_acc += cluster_size * cluster_vel
             weighted_cluster_vel = cluster_weight_acc / cluster_size_acc
@@ -449,7 +451,7 @@ class EgoPoseDataPreparation:
         miss_right_ankle_flag = (~this_take_body_anno_3d_valid_flag)[:, right_ankle_idx]
 
         assert not np.any(
-            np.logical_and(miss_left_ankle_flag, miss_right_ankle_flag)
+            np.logical_and(miss_left_ankle_flag, miss_right_ankle_flag),
         ), "Both left ankle and right ankle are missing, skip this body"
         assert np.any(np.sum(this_take_body_anno_3d_valid_flag, axis=-1) >= 9), (
             "At least 9 joints should be valid, skip this body"
@@ -525,16 +527,19 @@ class EgoPoseDataPreparation:
         # TODO; consider scenario where left ankle and right ankle doesn't has valid annotations.
         # TODO: the current impl only uses mean of left ankle and right ankle as pesudo transl, and gloal_orient is set to all zeros.
         this_take_trans_left_hip = this_take_body_anno_3d.copy()[
-            :, left_hip_ind
+            :,
+            left_hip_ind,
         ]  # T x 3
         this_take_trans_right_hip = this_take_body_anno_3d.copy()[
-            :, right_hip_ind
+            :,
+            right_hip_ind,
         ]  # T x 3
 
         miss_left_hip_flag = np.isnan(np.mean(this_take_trans_left_hip, axis=1))  # T
         miss_right_hip_flag = np.isnan(np.mean(this_take_trans_right_hip, axis=1))  # T
         miss_both_hips_flag = np.logical_and(
-            miss_left_hip_flag, miss_right_hip_flag
+            miss_left_hip_flag,
+            miss_right_hip_flag,
         )  # T
 
         # assert not np.any(miss_both_hips_flag), "Both left hip and right hip are missing, skip this body"
@@ -547,7 +552,8 @@ class EgoPoseDataPreparation:
         ]
 
         this_take_trans_hip = np.mean(
-            np.stack([this_take_trans_left_hip, this_take_trans_right_hip]), axis=0
+            np.stack([this_take_trans_left_hip, this_take_trans_right_hip]),
+            axis=0,
         )  # T x 3
         this_take_trans_hip[miss_both_hips_flag] = np.nan  # T x 3
 
@@ -558,7 +564,8 @@ class EgoPoseDataPreparation:
 
         this_take_prev_hip_trans = this_take_trans_hip.copy()  # T x 3
         this_take_prev_hip_trans = np.concatenate(
-            [np.zeros((1, 3)), this_take_prev_hip_trans[:-1]], axis=0
+            [np.zeros((1, 3)), this_take_prev_hip_trans[:-1]],
+            axis=0,
         )  # T x 3
         this_take_prev_3d_vel = this_take_trans_hip - this_take_prev_hip_trans  # T x 3
         this_take_prev_3d_vel[0] = this_take_prev_3d_vel[1]  # T x 3
@@ -642,7 +649,8 @@ class EgoPoseDataPreparation:
         # this_take_ego_cam_traj[:,2] = this_take_ego_cam_traj[:,2] - this_take_root_height_3d # T x 7
 
         this_take_hip_trans, this_take_pelvis_origin = self.predict_hip_trans(
-            this_take_anno_3d, this_take_anno_3d_valid_flag
+            this_take_anno_3d,
+            this_take_anno_3d_valid_flag,
         )  # T x 3
 
         # smpl_origin_as_quat, smpl_origin_as_euler = batch_ZupLookAT2smplorigin(this_take_pelvis_origin) # T x 3, T x 4
@@ -662,7 +670,8 @@ class EgoPoseDataPreparation:
             this_take_smplh_anno_3d,
             this_take_smplh_anno_3d_valid_flag,
         ) = self.convert_to_smplh_convention(
-            this_take_anno_3d, this_take_anno_3d_valid_flag
+            this_take_anno_3d,
+            this_take_anno_3d_valid_flag,
         )
         # T x 52 x 3, T x 52
         # From ros to smpl convention, only applied to this_take_body_3d and this_take_hip_trans.
@@ -688,23 +697,23 @@ class EgoPoseDataPreparation:
             this_take_coco_model_pred = coco_model_pred[take_uid]["body"]
 
             coco_model_frames = np.asarray(
-                find_numerical_key_in_dict(this_take_coco_model_pred)
+                find_numerical_key_in_dict(this_take_coco_model_pred),
             )
             this_take_valid_timestamps = np.asarray(
                 list(
                     set(this_take_valid_timestamps.tolist()).intersection(
-                        set(coco_model_frames.tolist())
-                    )
-                )
+                        set(coco_model_frames.tolist()),
+                    ),
+                ),
             )
 
             this_take_coco_model_pred = np.stack(
-                list(this_take_coco_model_pred.values())
+                list(this_take_coco_model_pred.values()),
             )  # N x 17 x 3
 
             this_take_coco_model_gt = coco_model_gt[take_uid]["body"]
             this_take_coco_model_gt = np.stack(
-                list(this_take_coco_model_gt.values())
+                list(this_take_coco_model_gt.values()),
             )  # N x 17 x 3
 
             this_take_coco_model_gt = this_take_coco_model_gt[
@@ -717,7 +726,7 @@ class EgoPoseDataPreparation:
             # TODO: this is a failed temporary fix, this_take_root_height_3d has different frames numbers with this_take_coco_model_pred.
             # this_take_coco_model_pred[:,:,2] = this_take_coco_model_pred[:,:,2] - this_take_root_height_3d # T x 7
             this_take_root_height_3d = np.zeros(
-                (this_take_coco_model_pred.shape[0],)
+                (this_take_coco_model_pred.shape[0],),
             )  # T
 
             take_name = egoexo_util_inst.find_take_name_from_take_uid(take_uid)
@@ -769,7 +778,7 @@ class EgoPoseDataPreparation:
                 tracking_timestamp_close_traj,
                 utc_close_traj,
             ) = aria_mps_serv.sample_close_loop_traj_from_timestamps(
-                timestamps=exported_vrs_timestamps
+                timestamps=exported_vrs_timestamps,
             )
             (
                 sampled_mps_open_traj_pose,
@@ -777,7 +786,7 @@ class EgoPoseDataPreparation:
                 tracking_timestamp_open_traj,
                 utc_open_traj,
             ) = aria_mps_serv.sample_open_loop_traj_from_timestamps(
-                timestamps=exported_vrs_timestamps
+                timestamps=exported_vrs_timestamps,
             )
 
             point_clouds = aria_mps_serv.read_semidense_point_cloud()
@@ -825,11 +834,13 @@ class EgoPoseDataPreparation:
 
             this_frame_hip_trans = torch.from_numpy(this_frame_hip_trans).to(device)
             this_frame_pelvis_origin = torch.from_numpy(this_frame_pelvis_origin).to(
-                device
+                device,
             )
 
             root_smplh_path = osp.join(
-                CFG.smplh.smplh_root_path, CFG.smplh.smplh_model, "model.npz"
+                CFG.smplh.smplh_root_path,
+                CFG.smplh.smplh_model,
+                "model.npz",
             )
 
             # TODO: currently only suports bodypose, hand pose excluded.
@@ -837,7 +848,7 @@ class EgoPoseDataPreparation:
                 root_smplh_path=root_smplh_path,
                 target=torch.from_numpy(this_frame_smplh_anno_3d).to(device),
                 target_mask=torch.from_numpy(this_frame_smplh_anno_3d_valid_flag).to(
-                    device
+                    device,
                 ),
                 transl=this_frame_hip_trans[None],
                 global_orient=this_frame_pelvis_origin[None],
@@ -867,22 +878,22 @@ class EgoPoseDataPreparation:
             # gen_full_body_vis(opt_pred_smplh_verts[0], opt_pred_smplh_faces, dest_mesh_vis_folder, seq_name, vis_gt=False)
 
             opt_this_take_smplh_anno_3d.append(
-                opt_pred_smplh_jnts[0, 0].detach().cpu().numpy()
+                opt_pred_smplh_jnts[0, 0].detach().cpu().numpy(),
             )
             opt_this_take_smplh_verts.append(
-                opt_pred_smplh_jnts[0, 0].detach().cpu().numpy()
+                opt_pred_smplh_jnts[0, 0].detach().cpu().numpy(),
             )
             opt_this_take_smplh_faces.append(
-                opt_pred_smplh_faces.detach().cpu().numpy()
+                opt_pred_smplh_faces.detach().cpu().numpy(),
             )
             opt_this_take_smplh_local_aa_rep.append(
-                opt_local_aa_rep[0, 0].detach().cpu().numpy()
+                opt_local_aa_rep[0, 0].detach().cpu().numpy(),
             )
             opt_this_take_smplh_root_trans.append(
-                this_frame_hip_trans[0, 0].detach().cpu().numpy()
+                this_frame_hip_trans[0, 0].detach().cpu().numpy(),
             )
             opt_this_take_smplh_root_rot.append(
-                this_frame_pelvis_origin.detach().cpu().numpy()
+                this_frame_pelvis_origin.detach().cpu().numpy(),
             )
 
             if VIS_W_MUJOCO:
@@ -900,34 +911,43 @@ class EgoPoseDataPreparation:
                     .numpy()
                 )  # T x (22*3)
                 smpl_local_aa_pose = np.concatenate(
-                    [smpl_local_aa_pose.reshape(T, -1), np.zeros((T, 2 * 3))], axis=1
+                    [smpl_local_aa_pose.reshape(T, -1), np.zeros((T, 2 * 3))],
+                    axis=1,
                 )  # T x (24*3)
                 smpl_global_trans = (
                     this_frame_hip_trans[0].reshape(T, -1).detach().cpu().numpy()
                 )  # T x 3
 
                 smpl_m_viewer.set_smpl_pose(
-                    pose=smpl_local_aa_pose, trans=smpl_global_trans, offset_z=0
+                    pose=smpl_local_aa_pose,
+                    trans=smpl_global_trans,
+                    offset_z=0,
                 )
                 smpl_m_viewer.show_pose(return_img=False, loop=False, size=(1920, 1080))
 
         opt_this_take_smplh_anno_3d = np.stack(
-            opt_this_take_smplh_anno_3d, axis=0
+            opt_this_take_smplh_anno_3d,
+            axis=0,
         )  # T x 52 x 3
         opt_this_take_smplh_verts = np.stack(
-            opt_this_take_smplh_verts, axis=0
+            opt_this_take_smplh_verts,
+            axis=0,
         )  # T x 6890 x 3
         opt_this_take_smplh_faces = np.stack(
-            opt_this_take_smplh_faces, axis=0
+            opt_this_take_smplh_faces,
+            axis=0,
         )  #  T x 13776 x 3
         opt_this_take_smplh_local_aa_rep = np.stack(
-            opt_this_take_smplh_local_aa_rep, axis=0
+            opt_this_take_smplh_local_aa_rep,
+            axis=0,
         )  # T x 52 x 3
         opt_this_take_smplh_root_trans = np.stack(
-            opt_this_take_smplh_root_trans, axis=0
+            opt_this_take_smplh_root_trans,
+            axis=0,
         )  # T x  3
         opt_this_take_smplh_root_rot = np.stack(
-            opt_this_take_smplh_root_rot, axis=0
+            opt_this_take_smplh_root_rot,
+            axis=0,
         )  # T x 3
 
         if VIS_W_MUJOCO:
@@ -937,15 +957,19 @@ class EgoPoseDataPreparation:
             )
             smpl_m_viewer = SMPL_M_Viewer(model_file=mujoco_assets_file)
             smpl_local_aa_pose = opt_this_take_smplh_local_aa_rep[
-                :, : SMPLH_BODY_JNT_NUM - 2, :
+                :,
+                : SMPLH_BODY_JNT_NUM - 2,
+                :,
             ].reshape(T, -1)  # T x (22*3)
             smpl_local_aa_pose = np.concatenate(
-                [smpl_local_aa_pose, np.zeros((T, 2 * 3))]
+                [smpl_local_aa_pose, np.zeros((T, 2 * 3))],
             )  # T x (24*3)
             smpl_global_trans = opt_this_take_smplh_root_trans.reshape(T, -1)  # T x 3
 
             smpl_m_viewer.set_smpl_pose(
-                pose=smpl_local_aa_pose, trans=smpl_global_trans, offset_z=0
+                pose=smpl_local_aa_pose,
+                trans=smpl_global_trans,
+                offset_z=0,
             )
             smpl_m_viewer.show_pose(return_img=False, loop=False, size=(1920, 1080))
 
@@ -959,7 +983,9 @@ class EgoPoseDataPreparation:
         )
 
     def convert_to_smplh_convention(
-        self, this_take_anno_3d, this_take_anno_3d_valid_flag
+        self,
+        this_take_anno_3d,
+        this_take_anno_3d_valid_flag,
     ):
         """
         Converts 3D joint annotations into the SMPL-H convention, which is suitable for human body models that
@@ -1018,7 +1044,7 @@ class EgoPoseDataPreparation:
         )
 
         body_pose_valid_flag = np.where(
-            np.asarray(EGOEXO4D_BODYPOSE_TO_SMPLH_INDICES) != -1
+            np.asarray(EGOEXO4D_BODYPOSE_TO_SMPLH_INDICES) != -1,
         )[0]
         this_take_smplh_body_anno_3d[:, body_pose_valid_flag, :] = (
             this_take_body_anno_3d[
@@ -1028,12 +1054,12 @@ class EgoPoseDataPreparation:
             ]
         )
         this_take_smplh_body_anno_3d_valid_flag = ~np.isnan(
-            np.mean(this_take_smplh_body_anno_3d, axis=-1)
+            np.mean(this_take_smplh_body_anno_3d, axis=-1),
         )  # T x (body_jnts)
 
         if this_take_anno_has_hand_flag:
             hand_pose_valid_flag = np.where(
-                np.asarray(EGOEXO4D_HANDPOSE_TO_SMPLH_w_HAND_INDICES) != -1
+                np.asarray(EGOEXO4D_HANDPOSE_TO_SMPLH_w_HAND_INDICES) != -1,
             )[0]
             this_take_smplh_hand_anno_3d[:, hand_pose_valid_flag, :] = (
                 this_take_hand_anno_3d[
@@ -1045,11 +1071,12 @@ class EgoPoseDataPreparation:
                 ]
             )
             this_take_smplh_hand_anno_3d_valid_flag = ~np.isnan(
-                np.mean(this_take_smplh_hand_anno_3d, axis=-1)
+                np.mean(this_take_smplh_hand_anno_3d, axis=-1),
             )  # T x (hand_jnts)
         else:
             this_take_smplh_hand_anno_3d_valid_flag = np.full(
-                (T, len(SMPLH_HAND_JOINTS)), False
+                (T, len(SMPLH_HAND_JOINTS)),
+                False,
             )
 
         this_take_smplh_anno_3d_valid_flag = np.concatenate(

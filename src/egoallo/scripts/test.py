@@ -3,9 +3,10 @@ from __future__ import annotations
 import dataclasses
 import time
 from pathlib import Path
-from typing import Optional, Tuple, TYPE_CHECKING
+from typing import Optional
+from typing import Tuple
+from typing import TYPE_CHECKING
 
-import torch
 import torch.utils.data
 from tqdm import tqdm
 
@@ -66,11 +67,15 @@ class DataVisualizer:
         # Visualize ground truth
         if save_gt:
             EgoTrainingData.visualize_ego_training_data(
-                gt_traj, body_model, str(gt_path)
+                gt_traj,
+                body_model,
+                str(gt_path),
             )
 
         EgoTrainingData.visualize_ego_training_data(
-            denoised_traj, body_model, str(inferred_path)
+            denoised_traj,
+            body_model,
+            str(inferred_path),
         )
 
         return gt_path, inferred_path
@@ -123,16 +128,17 @@ class TestRunner:
     def _initialize_components(self) -> None:
         """Initialize all required components."""
         runtime_config: EgoAlloTrainConfig = load_runtime_config(
-            self.inference_config.checkpoint_dir
+            self.inference_config.checkpoint_dir,
         )
         self.runtime_config = runtime_config
         self.denoiser, self.model_config = load_denoiser(
-            self.inference_config.checkpoint_dir, runtime_config
+            self.inference_config.checkpoint_dir,
+            runtime_config,
         )
         self.denoiser = self.denoiser.to(self.device)
 
         self.body_model = fncsmpl.SmplhModel.load(runtime_config.smplh_npz_path).to(
-            self.device
+            self.device,
         )
         # Override runtime config with inference config values
         for field in dataclasses.fields(type(self.inference_config)):
@@ -194,7 +200,8 @@ class TestRunner:
                     "groundtruth_body_quats": gt_body_quats[seq_idx, ..., :21, :].cpu(),
                     # Denoised trajectory data
                     "sampled_betas": denoised_traj.betas.mean(
-                        dim=1, keepdim=True
+                        dim=1,
+                        keepdim=True,
                     ).cpu(),
                     "sampled_T_world_root": SE3.from_rotation_and_translation(
                         SO3.from_matrix(denoised_traj.R_world_root),
@@ -203,7 +210,7 @@ class TestRunner:
                     .parameters()
                     .cpu(),
                     "sampled_body_quats": denoised_body_quats[..., :21, :].cpu(),
-                }
+                },
             )
 
         elif isinstance(gt_traj, JointsOnlyTraj):
@@ -213,7 +220,7 @@ class TestRunner:
                     "groundtruth_joints": gt_traj.joints[seq_idx].cpu(),
                     # Denoised trajectory data
                     "sampled_joints": denoised_traj.joints.cpu(),
-                }
+                },
             )
 
         torch.save(save_dict, output_path)
@@ -249,7 +256,7 @@ class TestRunner:
                 gt_trajs = gt_trajs._dict_map(
                     lambda key, value: torch.cat([value, getattr(gt_traj, key)], dim=0)
                     if isinstance(value, torch.Tensor)
-                    else value
+                    else value,
                 )
 
             if denoised_trajs is None:
@@ -257,14 +264,17 @@ class TestRunner:
             else:
                 denoised_trajs = denoised_trajs._dict_map(
                     lambda key, value: torch.cat(
-                        [value, getattr(denoised_traj, key)], dim=0
+                        [value, getattr(denoised_traj, key)],
+                        dim=0,
                     )
                     if isinstance(value, torch.Tensor)
-                    else value
+                    else value,
                 )
 
             metrics = denoised_traj._compute_metrics(
-                gt_traj, body_model=self.body_model, device=self.device
+                gt_traj,
+                body_model=self.body_model,
+                device=self.device,
             )
             metrics = EgoAlloEvaluationMetrics(**metrics)
 
@@ -284,7 +294,8 @@ class TestRunner:
                 _ = self.runtime_config.denoising.denoising_mode
                 self.runtime_config.denoising.denoising_mode = "absolute"
                 fit_seq_traj = self.runtime_config.denoising.from_ego_data(
-                    fit_seq_data, include_hands=True
+                    fit_seq_data,
+                    include_hands=True,
                 )
                 self.runtime_config.denoising.denoising_mode = _
 
@@ -339,12 +350,14 @@ class TestRunner:
         return gt_trajs, denoised_trajs
 
     def _compute_metrics(
-        self, dir_with_pt_files: Path
+        self,
+        dir_with_pt_files: Path,
     ) -> Optional[EgoAlloEvaluationMetrics]:
         """Compute evaluation metrics on processed sequences."""
         # try:
         evaluator = BodyEvaluator(
-            body_model_path=self.runtime_config.smplh_npz_path, device=self.device
+            body_model_path=self.runtime_config.smplh_npz_path,
+            device=self.device,
         )
 
         return evaluator.evaluate_directory(
@@ -406,10 +419,11 @@ class TestRunner:
                 else:
                     gt_trajs = gt_trajs._dict_map(
                         lambda key, value: torch.cat(
-                            [value, getattr(gt_traj, key)], dim=1
+                            [value, getattr(gt_traj, key)],
+                            dim=1,
                         )
                         if isinstance(value, torch.Tensor)
-                        else value
+                        else value,
                     )
 
                 if denoised_trajs is None:
@@ -417,14 +431,17 @@ class TestRunner:
                 else:
                     denoised_trajs = denoised_trajs._dict_map(
                         lambda key, value: torch.cat(
-                            [value, getattr(denoised_traj, key)], dim=1
+                            [value, getattr(denoised_traj, key)],
+                            dim=1,
                         )
                         if isinstance(value, torch.Tensor)
-                        else value
+                        else value,
                     )
 
             metrics = denoised_trajs._compute_metrics(
-                gt_trajs, body_model=self.body_model, device=self.device
+                gt_trajs,
+                body_model=self.body_model,
+                device=self.device,
             )
             metrics = EgoAlloEvaluationMetrics(**metrics)
             # breakpoint()

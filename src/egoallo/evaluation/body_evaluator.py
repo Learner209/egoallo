@@ -4,31 +4,26 @@ from typing import Optional
 
 import numpy as np
 import torch
-
+import typeguard
 from egoallo import fncsmpl
 from egoallo.config.train.train_config import EgoAlloTrainConfig
+from egoallo.constants import FOOT_HEIGHT_THRESHOLDS
+from egoallo.constants import FOOT_INDICES
+from egoallo.constants import HEAD_JOINT_INDEX
 from egoallo.evaluation.metrics import EgoAlloEvaluationMetrics
 from egoallo.transforms import SO3
+from egoallo.types import BatchedJointTransforms
+from egoallo.types import FloatArray
+from egoallo.types import PathLike
+from egoallo.types import ProcrustesMode
+from egoallo.types import ProcrustesOutput
 from egoallo.utilities import procrustes_align
 from egoallo.utils.setup_logger import setup_logger
-from jaxtyping import Float, jaxtyped
+from jaxtyping import Float
+from jaxtyping import jaxtyped
 from torch import Tensor
 
-import typeguard
-
 from .base import BaseEvaluator
-from egoallo.constants import (
-    FOOT_HEIGHT_THRESHOLDS,
-    FOOT_INDICES,
-    HEAD_JOINT_INDEX,
-)
-from egoallo.types import (
-    BatchedJointTransforms,
-    FloatArray,
-    PathLike,
-    ProcrustesMode,
-    ProcrustesOutput,
-)
 
 logger = setup_logger(output="logs/evaluation", name=__name__, level=logging.INFO)
 
@@ -62,7 +57,8 @@ class BodyEvaluator(BaseEvaluator):
             foot_positions[:, 1:, :, :2] - foot_positions[:, :-1, :, :2]
         )  # [N, T-1, 4, 2]
         foot_positions_diff_norm = torch.sum(
-            torch.abs(foot_positions_diff), dim=-1
+            torch.abs(foot_positions_diff),
+            dim=-1,
         )  # [N, T-1, 4]
 
         H_thresh = torch.tensor(
@@ -127,10 +123,12 @@ class BodyEvaluator(BaseEvaluator):
 
         # Use transpose() to only transpose last two dimensions
         matrix_errors = pred_matrix @ label_matrix.transpose(-2, -1) - torch.eye(
-            3, device=device
+            3,
+            device=device,
         )
         errors = torch.linalg.norm(
-            matrix_errors.reshape(pred_Ts_world_joint.shape[0], -1, 9), dim=-1
+            matrix_errors.reshape(pred_Ts_world_joint.shape[0], -1, 9),
+            dim=-1,
         )
         mean_errors = torch.mean(errors, dim=-1)
 
@@ -169,10 +167,12 @@ class BodyEvaluator(BaseEvaluator):
 
         # Concatenate root and joints
         label_positions = torch.cat(
-            [label_root_pos.unsqueeze(-2), label_joint_pos], dim=-2
+            [label_root_pos.unsqueeze(-2), label_joint_pos],
+            dim=-2,
         )  # [batch, T, J+1, 3]
         pred_positions = torch.cat(
-            [pred_root_pos.unsqueeze(-2), pred_joint_pos], dim=-2
+            [pred_root_pos.unsqueeze(-2), pred_joint_pos],
+            dim=-2,
         )  # [batch, T, J+1, 3]
 
         if per_frame_procrustes_align:
@@ -237,7 +237,9 @@ class BodyEvaluator(BaseEvaluator):
         assert num_sequences > 0
         for i in range(num_sequences):
             result = self.process_file(
-                pt_paths[i], None, use_mean_body_shape=use_mean_body_shape
+                pt_paths[i],
+                None,
+                use_mean_body_shape=use_mean_body_shape,
             )
             # Store metrics
             for metric in metric_fields:
@@ -294,7 +296,9 @@ class BodyEvaluator(BaseEvaluator):
         # Create mask if not provided
         if mask is None:
             mask = torch.ones(
-                (gt.shape[0], gt.shape[1]), dtype=torch.bool, device=device
+                (gt.shape[0], gt.shape[1]),
+                dtype=torch.bool,
+                device=device,
             )
         mask_sum = mask.sum()
 

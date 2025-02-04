@@ -1,8 +1,7 @@
 from typing import assert_never
-
-import torch
-import torch.utils.data
 from typing import TYPE_CHECKING
+
+import torch.utils.data
 
 if TYPE_CHECKING:
     from egoallo.config.train.train_config import EgoAlloTrainConfig

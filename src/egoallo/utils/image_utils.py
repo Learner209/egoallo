@@ -1,7 +1,7 @@
 import glob
 import os
-import sys
 import os.path as osp
+import sys
 
 sys.path.append(os.getcwd())
 
@@ -10,7 +10,11 @@ import cv2
 
 
 def assemble_videos(
-    videos, grid_size, description, out_file_name, text_color=(255, 255, 255)
+    videos,
+    grid_size,
+    description,
+    out_file_name,
+    text_color=(255, 255, 255),
 ):
     x_grid_num = grid_size[1]
     y_grid_num = grid_size[0]
@@ -29,7 +33,9 @@ def assemble_videos(
                 curr_image = videos[x * y + x][i]
                 curr_discription = description[x * y + x]
                 canvas[
-                    y_shape * y : y_shape * (y + 1), x_shape * x : x_shape * (x + 1), :
+                    y_shape * y : y_shape * (y + 1),
+                    x_shape * x : x_shape * (x + 1),
+                    :,
                 ] = curr_image
                 cv2.putText(
                     canvas,

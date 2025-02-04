@@ -1,11 +1,10 @@
-from yacs.config import CfgNode as CN
 import os.path as osp
-import numpy as np
 from datetime import datetime
-from egoallo.mapping import (
-    EGOEXO4D_EGOPOSE_BODYPOSE_MAPPINGS,
-    EGOEXO4D_EGOPOSE_HANDPOSE_MAPPINGS,
-)
+
+import numpy as np
+from egoallo.mapping import EGOEXO4D_EGOPOSE_BODYPOSE_MAPPINGS
+from egoallo.mapping import EGOEXO4D_EGOPOSE_HANDPOSE_MAPPINGS
+from yacs.config import CfgNode as CN
 
 
 def get_cfg_defaults():
@@ -128,20 +127,20 @@ _C.solver.save_scheduler = True
 _C.coordinate = CN()
 _C.coordinate.transform = CN()
 _C.coordinate.transform.opengl2smpl = np.array(
-    [[-1, 0, 0], [0, 1, 0], [0, 0, -1]]
+    [[-1, 0, 0], [0, 1, 0], [0, 0, -1]],
 ).tolist()
 _C.coordinate.transform.smpl2opengl = np.array(
-    [[-1, 0, 0], [0, 1, 0], [0, 0, -1]]
+    [[-1, 0, 0], [0, 1, 0], [0, 0, -1]],
 ).tolist()
 _C.coordinate.transform.aria2opengl = np.array(
-    [[0, -1, 0], [-1, 0, 0], [0, 0, -1]]
+    [[0, -1, 0], [-1, 0, 0], [0, 0, -1]],
 ).tolist()
 _C.coordinate.transform.opengl2aria = np.linalg.inv(
-    np.array(_C.coordinate.transform.aria2opengl)
+    np.array(_C.coordinate.transform.aria2opengl),
 ).tolist()
 _C.coordinate.transform.smpl2ros = np.array([[0, 0, 1], [1, 0, 0], [0, 1, 0]]).tolist()
 _C.coordinate.transform.ros2smpl = np.linalg.inv(
-    np.array(_C.coordinate.transform.smpl2ros)
+    np.array(_C.coordinate.transform.smpl2ros),
 ).tolist()
 # endregion
 
@@ -155,7 +154,8 @@ _C.mujoco.io = CN()
 _C.mujoco.io.root_path = osp.join(_C.project_root, "egoego/env/exp/")
 _C.mujoco.mujoco_assets = CN()
 _C.mujoco.mujoco_assets.root_path = osp.join(
-    _C.project_root, "egoego/env/mujoco/mujoco_assets_2.1.0"
+    _C.project_root,
+    "egoego/env/mujoco/mujoco_assets_2.1.0",
 )
 _C.mujoco.mujoco_assets.model_id = "humanoid_smpl_neutral_mesh"
 # endregion
@@ -164,10 +164,12 @@ _C.mujoco.mujoco_assets.model_id = "humanoid_smpl_neutral_mesh"
 _C.blender = CN()
 _C.blender.blender_executable_path = "/home/minghao/src/robotflow/new_egoego/assets/blender/blender-3.6.13-linux-x64/blender"
 _C.blender.scene_blender_root_path = osp.join(
-    _C.project_root, "egoego/utils/blender_utils"
+    _C.project_root,
+    "egoego/utils/blender_utils",
 )
 _C.blender.scene_blender_demo_path = osp.join(
-    _C.blender.scene_blender_root_path, "for_demo.blend"
+    _C.blender.scene_blender_root_path,
+    "for_demo.blend",
 )
 _C.blender.scene_blender_colorful_mat_path = osp.join(
     _C.blender.scene_blender_root_path,
@@ -176,16 +178,20 @@ _C.blender.scene_blender_colorful_mat_path = osp.join(
 
 _C.blender.scripts = CN()
 _C.blender.scripts.root_path = osp.join(
-    _C.project_root, "third_party/egoego/egoego/vis"
+    _C.project_root,
+    "third_party/egoego/egoego/vis",
 )
 _C.blender.scripts.blender_vis_human_utils = osp.join(
-    _C.blender.scripts.root_path, "blender_vis_human_utils.py"
+    _C.blender.scripts.root_path,
+    "blender_vis_human_utils.py",
 )
 _C.blender.scripts.blender_vis_cmp_human_utils = osp.join(
-    _C.blender.scripts.root_path, "blender_vis_cmp_human_utils.py"
+    _C.blender.scripts.root_path,
+    "blender_vis_cmp_human_utils.py",
 )
 _C.blender.scripts.blender_vis_human_and_headpose_utils = osp.join(
-    _C.blender.scripts.root_path, "blender_vis_human_and_headpose_utils.py"
+    _C.blender.scripts.root_path,
+    "blender_vis_human_and_headpose_utils.py",
 )
 # endregion
 
@@ -202,7 +208,8 @@ _C.io.egoexo.save_mesh.vis_folder = osp.join(_C.io.egoexo.exp_path, "mesh")
 _C.io.egoexo.preprocessing = CN()
 _C.io.egoexo.preprocessing.save_root = osp.join(_C.io.egoexo.exp_path, "preprocess")
 _C.io.egoexo.preprocessing.egoexo_root_path = osp.join(
-    _C.dataset_root_dir, "egoexo-default"
+    _C.dataset_root_dir,
+    "egoexo-default",
 )
 _C.io.egoexo.preprocessing.config_file = None
 
@@ -211,12 +218,14 @@ _C.io.egoexo.preprocessing.test_public_file_path = osp.join(
     "egoego/egopose/handpose/data_preparation/ego_pose_gt_anno_test_public.json",
 )
 _C.io.egoexo.preprocessing.gt_output_dir = osp.join(
-    _C.io.egoexo.exp_path, "egoexo-default-gt-output"
+    _C.io.egoexo.exp_path,
+    "egoexo-default-gt-output",
 )
 
 _C.io.egoexo.preprocessing.gt_handpose = CN()
 _C.io.egoexo.preprocessing.gt_handpose.output_dir = osp.join(
-    _C.io.egoexo.preprocessing.gt_output_dir, "handpose"
+    _C.io.egoexo.preprocessing.gt_output_dir,
+    "handpose",
 )
 
 _C.io.egoexo.preprocessing.gt_bodypose = CN()
@@ -226,30 +235,40 @@ _C.io.egoexo.preprocessing.gt_bodypose.discard_seq_than = 30
 
 _C.io.egoexo.preprocessing.gt_bodypose.output = CN()
 _C.io.egoexo.preprocessing.gt_bodypose.output.root = osp.join(
-    _C.io.egoexo.preprocessing.gt_output_dir, "bodypose", "canonical"
+    _C.io.egoexo.preprocessing.gt_output_dir,
+    "bodypose",
+    "canonical",
 )
 _C.io.egoexo.preprocessing.gt_bodypose.output.save_dir = osp.join(
-    _C.io.egoexo.preprocessing.gt_bodypose.output.root, _C.save_id
+    _C.io.egoexo.preprocessing.gt_bodypose.output.root,
+    _C.save_id,
 )
 _C.io.egoexo.preprocessing.gt_bodypose.output.config_save_dir = osp.join(
-    _C.io.egoexo.preprocessing.gt_bodypose.output.save_dir, "config"
+    _C.io.egoexo.preprocessing.gt_bodypose.output.save_dir,
+    "config",
 )
 _C.io.egoexo.preprocessing.gt_bodypose.output.log_save_dir = osp.join(
-    _C.io.egoexo.preprocessing.gt_bodypose.output.save_dir, "logs"
+    _C.io.egoexo.preprocessing.gt_bodypose.output.save_dir,
+    "logs",
 )
 
 _C.io.egoexo.preprocessing.gt_bodypose.sample_output = CN()
 _C.io.egoexo.preprocessing.gt_bodypose.sample_output.root = osp.join(
-    _C.io.egoexo.preprocessing.gt_output_dir, "bodypose", "test_sample"
+    _C.io.egoexo.preprocessing.gt_output_dir,
+    "bodypose",
+    "test_sample",
 )
 _C.io.egoexo.preprocessing.gt_bodypose.sample_output.save_dir = osp.join(
-    _C.io.egoexo.preprocessing.gt_bodypose.sample_output.root, _C.save_id
+    _C.io.egoexo.preprocessing.gt_bodypose.sample_output.root,
+    _C.save_id,
 )
 _C.io.egoexo.preprocessing.gt_bodypose.sample_output.config_save_dir = osp.join(
-    _C.io.egoexo.preprocessing.gt_bodypose.sample_output.save_dir, "config"
+    _C.io.egoexo.preprocessing.gt_bodypose.sample_output.save_dir,
+    "config",
 )
 _C.io.egoexo.preprocessing.gt_bodypose.sample_output.log_save_dir = osp.join(
-    _C.io.egoexo.preprocessing.gt_bodypose.sample_output.save_dir, "logs"
+    _C.io.egoexo.preprocessing.gt_bodypose.sample_output.save_dir,
+    "logs",
 )
 
 # Sampling num for run_demo control.
@@ -260,16 +279,19 @@ _C.io.egoexo.preprocessing.gt_bodypose.require_valid_kpts = [
 ]
 
 _C.io.egoexo.preprocessing.aria_img_output_dir = osp.join(
-    _C.io.egoexo.preprocessing.gt_output_dir, "aria_img"
+    _C.io.egoexo.preprocessing.gt_output_dir,
+    "aria_img",
 )
 _C.io.egoexo.preprocessing.sample_aria_img_output_dir = osp.join(
-    _C.io.egoexo.preprocessing.gt_output_dir, "sample_aria_img"
+    _C.io.egoexo.preprocessing.gt_output_dir,
+    "sample_aria_img",
 )
 _C.io.egoexo.preprocessing.aria_img_output_run_demo = False
 _C.io.egoexo.preprocessing.extract_aria_img_multiprocessing_thread_num = 5
 
 _C.io.egoexo.preprocessing.aria_calib_output_dir = osp.join(
-    _C.io.egoexo.preprocessing.gt_output_dir, "aria_calib"
+    _C.io.egoexo.preprocessing.gt_output_dir,
+    "aria_calib",
 )
 
 # _C.io.egoexo.preprocessing.smplh_anno_output_dir = osp.join(_C.io.egoexo.preprocessing.gt_output_dir, "smplh_anno")
@@ -279,15 +301,20 @@ _C.io.egoexo.preprocessing.aria_calib_output_dir = osp.join(
 # _C.io.egoexo.preprocessing.align_slam_multiprocessing_thread_num = 15
 
 _C.io.egoexo.preprocessing.egoexo_train_data_output_dir = osp.join(
-    _C.io.egoexo.preprocessing.gt_output_dir, "egoexo_train_data", "canonical"
+    _C.io.egoexo.preprocessing.gt_output_dir,
+    "egoexo_train_data",
+    "canonical",
 )
 _C.io.egoexo.preprocessing.sample_egoexo_train_data_output_dir = osp.join(
-    _C.io.egoexo.preprocessing.gt_output_dir, "egoexo_train_data", "test_sample"
+    _C.io.egoexo.preprocessing.gt_output_dir,
+    "egoexo_train_data",
+    "test_sample",
 )
 _C.io.egoexo.preprocessing.egoexo_train_data_multiprocessing_thread_num = 15
 
 _C.io.egoexo.preprocessing.exported_mp4_path = osp.join(
-    _C.io.egoexo.preprocessing.gt_output_dir, "exported_mp4"
+    _C.io.egoexo.preprocessing.gt_output_dir,
+    "exported_mp4",
 )
 _C.io.egoexo.preprocessing.export_mp4_multiprocessing_thread_num = 12
 
@@ -461,10 +488,12 @@ _C.datasets.test.gt_bodypose_sample_output_dir = (
 )
 _C.datasets.test.test_milestone = 7
 _C.datasets.test.ckpt_weight_path = osp.join(
-    _C.io.diffusion.ckpt_save_path, f"model_{_C.datasets.test.test_milestone}.pth"
+    _C.io.diffusion.ckpt_save_path,
+    f"model_{_C.datasets.test.test_milestone}.pth",
 )
 _C.datasets.test.save_path_root = osp.join(
-    _C.io.diffusion.project_exp_name, "test_results"
+    _C.io.diffusion.project_exp_name,
+    "test_results",
 )
 _C.datasets.test.recording_fps = _C.io.egoexo.preprocessing.fps
 

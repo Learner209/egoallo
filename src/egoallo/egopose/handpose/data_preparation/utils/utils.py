@@ -19,7 +19,7 @@ def get_aria_camera_models(aria_path):
         rgb_cam = aria_camera_model.get_camera_calib("camera-rgb")
     except Exception as e:
         print(
-            f"[Warning] Hitting exception {e}. Fall back to old projectaria_tools ..."
+            f"[Warning] Hitting exception {e}. Fall back to old projectaria_tools ...",
         )
         import projectaria_tools
 
@@ -304,7 +304,7 @@ def hand_jnts_dist_angle_check(curr_hand_pose3d):
     joint_dist_max_threshold[long_joint_dist_index] = 0.12
     ##Joint angle threshold ##
     joint_angle_min_threshold = np.array(
-        [100, 90, 90, 60, 70, 80, 60, 70, 80, 60, 70, 80, 60, 70, 80]
+        [100, 90, 90, 60, 70, 80, 60, 70, 80, 60, 70, 80, 60, 70, 80],
     )
     joint_angle_max_threshold = np.array([180] * 15)
     ## Misc ##
@@ -318,15 +318,15 @@ def hand_jnts_dist_angle_check(curr_hand_pose3d):
         if joint_idx in wrist_conn_index:
             joint_distance.append(
                 np.linalg.norm(
-                    curr_hand_pose3d[joint_idx][:3] - curr_hand_pose3d[0][:3]
-                )
+                    curr_hand_pose3d[joint_idx][:3] - curr_hand_pose3d[0][:3],
+                ),
             )
         else:
             joint_distance.append(
                 np.linalg.norm(
                     curr_hand_pose3d[joint_idx][:3]
-                    - curr_hand_pose3d[joint_idx - 1][:3]
-                )
+                    - curr_hand_pose3d[joint_idx - 1][:3],
+                ),
             )
     joint_distance = np.array(joint_distance)
 
@@ -352,7 +352,8 @@ def hand_jnts_dist_angle_check(curr_hand_pose3d):
     invalid_dist_flag_[joint_dist_index] = invalid_dist_flag
 
     invalid_angle_flag = np.logical_or(
-        joint_angle < joint_angle_min_threshold, joint_angle > joint_angle_max_threshold
+        joint_angle < joint_angle_min_threshold,
+        joint_angle > joint_angle_max_threshold,
     )
     invalid_angle_flag_ = np.full((num_of_jnts,), False)
     invalid_angle_flag_[joint_angle_index] = invalid_angle_flag
@@ -410,7 +411,9 @@ def extract_aria_calib_to_json(input_vrs, output_path):
     extract_calibration_json_cmd = f"vrs {input_vrs} | grep calib_json"
 
     p = subprocess.Popen(
-        [extract_calibration_json_cmd], shell=True, stdout=subprocess.PIPE
+        [extract_calibration_json_cmd],
+        shell=True,
+        stdout=subprocess.PIPE,
     )
     out, err = p.communicate()
     out = out.decode("utf-8")

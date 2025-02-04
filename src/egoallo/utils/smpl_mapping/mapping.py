@@ -1,16 +1,16 @@
-import numpy as np
+"""
+smplx_keypoint_names: The names of the SMPL-X keypoints
+openpose25_keypoint_names: The names of the OpenPose keypoints. The order for OpenPose here is:
+    25 body keypoints
+    21 left hand keypoints
+    21 right hand keypoints
+    51 facial landmarks
+    17 contour landmarks
+openpose_idxs: The indices of the OpenPose keypoint array.
+smplx_idxs: The corresponding SMPL-X indices.
+"""
 
-"""
-    smplx_keypoint_names: The names of the SMPL-X keypoints
-    openpose25_keypoint_names: The names of the OpenPose keypoints. The order for OpenPose here is:
-        25 body keypoints
-        21 left hand keypoints
-        21 right hand keypoints
-        51 facial landmarks
-        17 contour landmarks
-    openpose_idxs: The indices of the OpenPose keypoint array.
-    smplx_idxs: The corresponding SMPL-X indices.
-"""
+import numpy as np
 
 # 135 smplx ids
 SMPLX_IDS = [
@@ -1075,7 +1075,7 @@ SMPLH_w_HAND_TO_EGOEXO4D_HANDPOSE_INDICES = (
             9,
             10,
             -1,
-        ]
+        ],
     )
     + 20
 )

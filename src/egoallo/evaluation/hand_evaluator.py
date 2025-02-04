@@ -1,30 +1,33 @@
 import json
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import as_completed
+from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict
+from typing import List
+from typing import Optional
+from typing import Tuple
 
 import numpy as np
 import torch
+import typeguard
 import yaml
-
 from egoallo import fncsmpl
+from egoallo.constants import EGOEXO_NAMES_LEFT
+from egoallo.constants import EGOEXO_NAMES_RIGHT
+from egoallo.constants import VERTEX_IDS
+from egoallo.types import EvalMode
+from egoallo.types import FloatArray
+from egoallo.types import HandSide
+from egoallo.types import MetricsDict
+from egoallo.types import ModelType
+from egoallo.types import PathLike
+from egoallo.types import ProcrustesMode
+from egoallo.types import ProcrustesOutput
 from egoallo.utilities import procrustes_align
 from egoallo.utils.setup_logger import setup_logger
-import typeguard
 
 from .base import BaseEvaluator
-from egoallo.constants import EGOEXO_NAMES_LEFT, EGOEXO_NAMES_RIGHT, VERTEX_IDS
-from egoallo.types import (
-    EvalMode,
-    FloatArray,
-    HandSide,
-    MetricsDict,
-    ModelType,
-    PathLike,
-    ProcrustesMode,
-    ProcrustesOutput,
-)
 
 
 logger = setup_logger(output="logs/evaluation", name=__name__)
@@ -82,7 +85,7 @@ class HandEvaluator(BaseEvaluator):
             for openpose_idx, mano_idx in enumerate(mano_to_openpose)
         }
         indices = np.array(
-            [openpose_from_mano_idx[i] for i in range(len(mano_to_openpose))]
+            [openpose_from_mano_idx[i] for i in range(len(mano_to_openpose))],
         )
         return indices
 
@@ -223,7 +226,11 @@ class HandEvaluator(BaseEvaluator):
 
                 # Get predicted keypoints based on eval mode
                 pred_kpts = self._get_predicted_keypoints(
-                    take_index, frame, side, eval_mode, hamer_frames_only
+                    take_index,
+                    frame,
+                    side,
+                    eval_mode,
+                    hamer_frames_only,
                 )
                 if pred_kpts is None:
                     continue
@@ -305,11 +312,11 @@ class HandEvaluator(BaseEvaluator):
                 stats = {
                     "mpjpe": float(np.mean(mpjpe_values)),
                     "mpjpe_stderr": float(
-                        np.std(mpjpe_values) / np.sqrt(len(mpjpe_values))
+                        np.std(mpjpe_values) / np.sqrt(len(mpjpe_values)),
                     ),
                     "pampjpe": float(np.mean(pampjpe_values)),
                     "pampjpe_stderr": float(
-                        np.std(pampjpe_values) / np.sqrt(len(pampjpe_values))
+                        np.std(pampjpe_values) / np.sqrt(len(pampjpe_values)),
                     ),
                     "matched": matched_kp,
                     "total": total_kp,

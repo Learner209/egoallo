@@ -1,81 +1,79 @@
 {
-    "task": "EgoExo4D", //  root/task/videos-models-options
-    "model": "egoexo", // "plain"
-    "gpu_ids": [0], //
+  "task": "EgoExo4D",
+  "model": "egoexo",
+  "gpu_ids": [0],
 
-    "merge_bn": true, // merge BN
-    "merge_bn_startpoint": 400000, // merge BN after N iterations
+  "merge_bn": true,
+  "merge_bn_startpoint": 400000,
 
-    "path": {
-        "root": "results", // "results"
-        "pretrained_netG": null
-    },
-    "support_dir": "support_data/",
-    "wandb_mode": "online", //online, disabled
-    "wandb_name": "EgoPose", //online, disabled
-    "datasets": {
-        "train": {
-            "name": "train_dataset", // just name
-            "dataset_type": "egoexo",
-            "split": "train",
-            "dataloader_shuffle": true,
-            "dataloader_num_workers": 0,
-            "dataloader_batch_size": 128, // batch size 1 | 16 | 32 | 48 | 64 | 128 | 256
-            "num_input": 1,
-            "window_size": 300,
-            "single_joint": true,
-            "use_aria": true,
-            "use_pseudo": true, //Flag to use pseudo-groundtruth annotations for training.
-            "coord": null, //null for per-frame normalization, "aria" for first-frame normalization, "global" for global coordinates
-            "root": "/home/minghao/src/robotflow/new_egoego/datasets/egoexo-default" //ADD PATH TO EGO-EXO4D ANNOTATIONS
-        },
-        "test": {
-            "name": "test_dataset", // just name
-            "dataset_type": "egoexo",
-            "dataloader_batch_size": 1, // batch size 1 | 16 | 32 | 48 | 64 | 128
-            "num_input": 1, // number of tracking devices  3 | 4
-            "window_size": 300,
-            "single_joint": true,
-            "use_aria": true,
-            "split": "val", //Evaluate on val set
-            "use_pseudo": true,
-            "coord": null, //null for per-frame normalization, "aria" for first-frame normalization, "global" for global coordinates
-            "root": "/home/minghao/src/robotflow/new_egoego/datasets/egoexo-default" //ADD PATH TO EGO-EXO4D ANNOTATIONS
-        }
-    },
-
-    "netG": {
-        "net_type": "EgoExo4D",
-        "num_layer": 3,
-        "input_dim": 3, // 3 if only position. 7 if rotation is included
-        "output_dim": 132, // ouput channel number   #132
-        "embed_dim": 256, // channel number of linear embedding for transformer
-        "nhead": 8, //
-        "init_type": "kaiming_normal", // "orthogonal" | "normal" | "uniform" | "xavier_normal" | "xavier_uniform" | "kaiming_normal" | "kaiming_uniform"
-        "init_bn_type": "uniform", // "uniform" | "constant"
-        "init_gain": 0.2
-    },
-
+  "path": {
+    "root": "results",
+    "pretrained_netG": null
+  },
+  "support_dir": "support_data/",
+  "wandb_mode": "online",
+  "wandb_name": "EgoPose",
+  "datasets": {
     "train": {
-        "G_lossfn_type": "l1", // "l1" preferred | "l2sum" | "l2" | "ssim"
-        "G_lossfn_weight": 1.0, // default
-
-        "G_optimizer_type": "adam", // fixed, adam is enough
-        "G_optimizer_lr": 1e-4, // learning rate
-        "G_optimizer_clipgrad": null, // unused
-
-        "G_scheduler_type": "MultiStepLR", // "MultiStepLR" is enough
-        "G_scheduler_milestones": [
-            60000, 120000, 180000, 240000, 300000, 360000
-        ],
-        "G_scheduler_gamma": 0.5,
-
-        "G_regularizer_orthstep": null, // unused
-        "G_regularizer_clipstep": null, // unused
-
-        "checkpoint_test": 1000, // for testing
-        "checkpoint_save": 1000, // for saving model
-        "checkpoint_print": 50, // for print
-        "G_param_strict": false
+      "name": "train_dataset",
+      "dataset_type": "egoexo",
+      "split": "train",
+      "dataloader_shuffle": true,
+      "dataloader_num_workers": 0,
+      "dataloader_batch_size": 128,
+      "num_input": 1,
+      "window_size": 300,
+      "single_joint": true,
+      "use_aria": true,
+      "use_pseudo": true,
+      "coord": null,
+      "root": "/home/minghao/src/robotflow/new_egoego/datasets/egoexo-default"
+    },
+    "test": {
+      "name": "test_dataset",
+      "dataset_type": "egoexo",
+      "dataloader_batch_size": 1,
+      "num_input": 1,
+      "window_size": 300,
+      "single_joint": true,
+      "use_aria": true,
+      "split": "val",
+      "use_pseudo": true,
+      "coord": null,
+      "root": "/home/minghao/src/robotflow/new_egoego/datasets/egoexo-default"
     }
+  },
+
+  "netG": {
+    "net_type": "EgoExo4D",
+    "num_layer": 3,
+    "input_dim": 3,
+    "output_dim": 132,
+    "embed_dim": 256,
+    "nhead": 8,
+    "init_type": "kaiming_normal",
+    "init_bn_type": "uniform",
+    "init_gain": 0.2
+  },
+
+  "train": {
+    "G_lossfn_type": "l1",
+    "G_lossfn_weight": 1.0,
+
+    "G_optimizer_type": "adam",
+    "G_optimizer_lr": 1e-4,
+    "G_optimizer_clipgrad": null,
+
+    "G_scheduler_type": "MultiStepLR",
+    "G_scheduler_milestones": [60000, 120000, 180000, 240000, 300000, 360000],
+    "G_scheduler_gamma": 0.5,
+
+    "G_regularizer_orthstep": null,
+    "G_regularizer_clipstep": null,
+
+    "checkpoint_test": 1000,
+    "checkpoint_save": 1000,
+    "checkpoint_print": 50,
+    "G_param_strict": false
+  }
 }

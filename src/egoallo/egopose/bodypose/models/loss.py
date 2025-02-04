@@ -1,10 +1,3 @@
-import torch
-from torch import nn
-import torchvision
-from torch.nn import functional as F
-from torch import autograd as autograd
-
-
 """
 Sequential(
       (0): Conv2d(3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
@@ -47,6 +40,12 @@ Sequential(
 )
 """
 
+import torch
+import torchvision
+from torch import autograd as autograd
+from torch import nn
+from torch.nn import functional as F
+
 
 # --------------------------------------------
 # Perceptual loss
@@ -81,12 +80,12 @@ class VGGFeatureExtractor(nn.Module):
                     nn.Sequential(
                         *list(model.features.children())[
                             (feature_layer[i] + 1) : (feature_layer[i + 1] + 1)
-                        ]
+                        ],
                     ),
                 )
         else:
             self.features = nn.Sequential(
-                *list(model.features.children())[: (feature_layer + 1)]
+                *list(model.features.children())[: (feature_layer + 1)],
             )
 
         # print(self.features)
@@ -184,7 +183,7 @@ class GANLoss(nn.Module):
             self.loss = softplusgan_loss
         else:
             raise NotImplementedError(
-                "GAN type [{:s}] is not found".format(self.gan_type)
+                "GAN type [{:s}] is not found".format(self.gan_type),
             )
 
     def get_target_label(self, input, target_is_real):
@@ -258,7 +257,9 @@ def r1_penalty(real_pred, real_img):
     Eq. 9 in Which training methods for GANs do actually converge.
     """
     grad_real = autograd.grad(
-        outputs=real_pred.sum(), inputs=real_img, create_graph=True
+        outputs=real_pred.sum(),
+        inputs=real_img,
+        create_graph=True,
     )[0]
     grad_penalty = grad_real.pow(2).view(grad_real.shape[0], -1).sum(1).mean()
     return grad_penalty
@@ -266,10 +267,12 @@ def r1_penalty(real_pred, real_img):
 
 def g_path_regularize(fake_img, latents, mean_path_length, decay=0.01):
     noise = torch.randn_like(fake_img) / math.sqrt(
-        fake_img.shape[2] * fake_img.shape[3]
+        fake_img.shape[2] * fake_img.shape[3],
     )
     grad = autograd.grad(
-        outputs=(fake_img * noise).sum(), inputs=latents, create_graph=True
+        outputs=(fake_img * noise).sum(),
+        inputs=latents,
+        create_graph=True,
     )[0]
     path_lengths = torch.sqrt(grad.pow(2).sum(2).mean(1))
 

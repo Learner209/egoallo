@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-
 import numpy as np
 import torch
+import typeguard
+from jaxtyping import Float
+from jaxtyping import jaxtyped
 from torch import Tensor
 
-from . import fncsmpl, transforms
-from jaxtyping import Float, jaxtyped
-import typeguard
+from . import fncsmpl
+from . import transforms
 
 
 @jaxtyped(typechecker=typeguard.typechecked)
@@ -45,7 +46,8 @@ def get_T_head_cpf(shaped: fncsmpl.SmplhShaped) -> Float[Tensor, "*batch 7"]:
     return fncsmpl.broadcasting_cat(
         [
             transforms.SO3.identity(
-                device=cpf_pos_wrt_head.device, dtype=cpf_pos_wrt_head.dtype
+                device=cpf_pos_wrt_head.device,
+                dtype=cpf_pos_wrt_head.dtype,
             ).wxyz,
             cpf_pos_wrt_head,
         ],
@@ -71,7 +73,7 @@ def get_T_world_root_from_cpf_pose(
         transforms.SE3(Ts_world_cpf)  # shape: [..., 7]
         # T_cpf_head
         @ transforms.SE3(
-            get_T_head_cpf(posed.shaped_model)
+            get_T_head_cpf(posed.shaped_model),
         ).inverse()  # shape: [..., 7]
         # T_head_world
         @ transforms.SE3(posed.Ts_world_joint[..., 14, :]).inverse()  # shape: [..., 7]

@@ -1,26 +1,17 @@
-import torch
-import cv2
-import os
-import numpy as np
-
-import egoego.utils.transformation
-
-# import trimesh
-# from human_body_prior.body_model.body_model import BodyModel
-# from human_body_prior.tools.omni_tools import copy2cpu as c2c
-# from body_visualizer.tools.vis_tools import colors
-# from body_visualizer.mesh.mesh_viewer import MeshViewer
-# from body_visualizer.mesh.sphere import points_to_spheres
-# import trimesh.util as util
-# from psbody.mesh import Mesh
-
-os.environ["PYOPENGL_PLATFORM"] = "egl"
-
 """
 # --------------------------------
 # CheckerBoard, from Xianghui Xie
 # --------------------------------
 """
+
+import os
+
+import cv2
+import egoego.utils.transformation
+import numpy as np
+import torch
+
+os.environ["PYOPENGL_PLATFORM"] = "egl"
 
 
 class CheckerBoard:
@@ -31,11 +22,20 @@ class CheckerBoard:
         self.offset = None
 
     def init_checker(
-        self, offset, plane="xz", xlength=500, ylength=200, square_size=0.5
+        self,
+        offset,
+        plane="xz",
+        xlength=500,
+        ylength=200,
+        square_size=0.5,
     ):
         "generate checkerboard and prepare v, f, t"
         checker = self.gen_checker_xy(
-            self.black, self.white, square_size, xlength, ylength
+            self.black,
+            self.white,
+            square_size,
+            xlength,
+            ylength,
         )
         rot = np.eye(3)
         if plane == "xz":
@@ -86,7 +86,8 @@ class CheckerBoard:
         texts = torch.zeros(1, nf, 4, 4, 4, 3).cuda()
         for i in range(nf):
             texts[0, i, :, :, :, :] = torch.tensor(
-                checker.fc[i], dtype=torch.float32
+                checker.fc[i],
+                dtype=torch.float32,
             ).cuda()
         return verts, faces, texts
 
@@ -171,16 +172,12 @@ class CheckerBoard:
         )
         checker = CheckerBoard()
         checker.init_checker(
-            offset, xlength=xlength, ylength=ylength, square_size=square_size
+            offset,
+            xlength=xlength,
+            ylength=ylength,
+            square_size=square_size,
         )
         return checker
-
-
-"""
-# --------------------------------
-# Visualize avatar using body pose information and body model
-# --------------------------------
-"""
 
 
 def save_animation(body_pose, savepath, bm, fps=60, resolution=(800, 800)):
@@ -198,27 +195,30 @@ def save_animation(body_pose, savepath, bm, fps=60, resolution=(800, 800)):
         generator = CheckerBoard()
         checker = generator.gen_checker_xy(generator.black, generator.white)
         checker_mesh = trimesh.Trimesh(
-            checker.v, checker.f, process=False, face_colors=checker.fc
+            checker.v,
+            checker.f,
+            process=False,
+            face_colors=checker.fc,
         )
 
         body_mesh.apply_transform(
-            egoego.utils.torch_geometry_transforms.rotation_matrix(-90, (0, 0, 10))
+            egoego.utils.torch_geometry_transforms.rotation_matrix(-90, (0, 0, 10)),
         )
         body_mesh.apply_transform(
-            egoego.utils.torch_geometry_transforms.rotation_matrix(30, (10, 0, 0))
+            egoego.utils.torch_geometry_transforms.rotation_matrix(30, (10, 0, 0)),
         )
         body_mesh.apply_transform(
-            egoego.utils.torch_geometry_transforms.scale_matrix(0.5)
+            egoego.utils.torch_geometry_transforms.scale_matrix(0.5),
         )
 
         checker_mesh.apply_transform(
-            egoego.utils.torch_geometry_transforms.rotation_matrix(-90, (0, 0, 10))
+            egoego.utils.torch_geometry_transforms.rotation_matrix(-90, (0, 0, 10)),
         )
         checker_mesh.apply_transform(
-            egoego.utils.torch_geometry_transforms.rotation_matrix(30, (10, 0, 0))
+            egoego.utils.torch_geometry_transforms.rotation_matrix(30, (10, 0, 0)),
         )
         checker_mesh.apply_transform(
-            egoego.utils.torch_geometry_transforms.scale_matrix(0.5)
+            egoego.utils.torch_geometry_transforms.scale_matrix(0.5),
         )
 
         mv.set_static_meshes([checker_mesh, body_mesh])

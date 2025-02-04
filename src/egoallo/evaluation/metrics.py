@@ -1,12 +1,14 @@
+import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict
+from typing import Optional
+
 import numpy as np
 import torch
+import typeguard
 import yaml
 from jaxtyping import jaxtyped
-import typeguard
-import logging
 
 
 @jaxtyped(typechecker=typeguard.typechecked)
@@ -54,7 +56,8 @@ class EgoAlloEvaluationMetrics:
                     "average_sample_mean": float(np.nanmean(values)),
                     "stddev_sample": float(np.nanstd(values)),
                     "stderr_sample": float(
-                        np.nanstd(values) / np.sqrt(np.count_nonzero(~np.isnan(values)))
+                        np.nanstd(values)
+                        / np.sqrt(np.count_nonzero(~np.isnan(values))),
                     ),
                 }
         return metrics_dict
@@ -80,7 +83,8 @@ class EgoAlloEvaluationMetrics:
         """Load metrics from files."""
         data = torch.load(metrics_file)
         summary_file = metrics_file.parent / metrics_file.name.replace(
-            "disaggregated_metrics", "summary"
+            "disaggregated_metrics",
+            "summary",
         ).replace(".pt", ".yaml")
 
         return cls(
@@ -90,7 +94,10 @@ class EgoAlloEvaluationMetrics:
         )
 
     def print_metrics(
-        self, logger=None, level: str = "info", verbose: bool = False
+        self,
+        logger=None,
+        level: str = "info",
+        verbose: bool = False,
     ) -> None:
         """Print metrics information using the provided logger.
 

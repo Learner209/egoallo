@@ -1,9 +1,12 @@
-from typing import TYPE_CHECKING, Any, Literal, Union, assert_never, cast
+from typing import Any
+from typing import assert_never
+from typing import cast
+from typing import Literal
+from typing import TYPE_CHECKING
+from typing import Union
 
 import h5py
 import numpy as np
-import torch
-import torch.utils
 import torch.utils.data
 
 if TYPE_CHECKING:
@@ -127,7 +130,8 @@ class VanillaEgoAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
             self._approximated_length = (
                 sum(
                     cast(
-                        h5py.Dataset, cast(h5py.Group, hdf5_file[g])["T_world_root"]
+                        h5py.Dataset,
+                        cast(h5py.Group, hdf5_file[g])["T_world_root"],
                     ).shape[0]
                     for g in self._groups
                 )
@@ -256,7 +260,9 @@ class VanillaEgoAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         mask_ratio = self._get_mask_ratio()
         num_masked = int(num_joints * mask_ratio)
         visible_joints_mask = torch.ones(
-            (subseq_len, num_joints), dtype=torch.bool, device=device
+            (subseq_len, num_joints),
+            dtype=torch.bool,
+            device=device,
         )
 
         # * Randomly select joints to mask, all data within a timestep is masked together, across batch is different.
@@ -360,7 +366,8 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
             for p in all_paths
             if any(p.startswith(prefix) for prefix in split_prefixes)
             and cast(
-                h5py.Dataset, cast(h5py.Group, hdf5_file[p])["T_world_root"]
+                h5py.Dataset,
+                cast(h5py.Group, hdf5_file[p])["T_world_root"],
             ).shape[0]
             >= self.min_seq_len
         ]
@@ -433,7 +440,9 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         mask_ratio = self._get_mask_ratio()
         num_masked = int(num_joints * mask_ratio)
         visible_joints_mask = torch.ones(
-            (seq_len, num_joints), dtype=torch.bool, device=device
+            (seq_len, num_joints),
+            dtype=torch.bool,
+            device=device,
         )
 
         # * Randomly select joints to mask, all data within a timestep is masked together, across batch is different.
@@ -466,7 +475,12 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         return ret
 
     def _load_sequence_data(
-        self, group: str, start_t: int, end_t: int, total_t: int, seq_len: int
+        self,
+        group: str,
+        start_t: int,
+        end_t: int,
+        total_t: int,
+        seq_len: int,
     ) -> dict[str, Any]:
         """Load sequence data from HDF5 file or cache.
 
@@ -513,7 +527,8 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         return kwargs
 
     def _get_npz_group(
-        self, group: str
+        self,
+        group: str,
     ) -> Union[h5py.Group, dict[str, np.ndarray[Any, Any]]]:
         """Get NPZ group from cache or HDF5 file.
 

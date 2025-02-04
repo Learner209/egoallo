@@ -4,20 +4,17 @@ import random
 
 import numpy as np
 import torch
-from torch.utils.data import Dataset
-from tqdm import tqdm
-
-from egoallo.config import CONFIG_FILE, make_cfg
+from egoallo.config import CONFIG_FILE
+from egoallo.config import make_cfg
 from egoallo.egoexo import EGOEXO_UTILS_INST
 from egoallo.utils.setup_logger import setup_logger
-from egoallo.utils.smpl_mapping.mapping import (
-    EGOEXO4D_EGOPOSE_BODYPOSE_MAPPINGS,
-    EGOEXO4D_EGOPOSE_HANDPOSE_MAPPINGS,
-)
+from egoallo.utils.smpl_mapping.mapping import EGOEXO4D_EGOPOSE_BODYPOSE_MAPPINGS
+from egoallo.utils.smpl_mapping.mapping import EGOEXO4D_EGOPOSE_HANDPOSE_MAPPINGS
 from egoallo.utils.transformation import T_to_qpose
-
-# from egoallo.egopose.main import load_raw_anno
 from egoallo.utils.utils import find_numerical_key_in_dict
+from torch.utils.data import Dataset
+from tqdm import tqdm
+# from egoallo.egopose.main import load_raw_anno
 
 local_config_file = CONFIG_FILE
 CFG = make_cfg(config_name="defaults", config_file=local_config_file, cli_args=[])
@@ -43,7 +40,8 @@ def load_raw_anno(opt, anno_type, split, run_demo=False):
 
     gt_anno_output_dir = osp.join(gt_bodypose_anno_output_dir, "annotation", anno_type)
     body_gt_annot_path = osp.join(
-        gt_anno_output_dir, f"ego_pose_gt_anno_{split}_public.json"
+        gt_anno_output_dir,
+        f"ego_pose_gt_anno_{split}_public.json",
     )
     anno = json.load(open(body_gt_annot_path))
     return anno, anno_type, split
@@ -56,7 +54,9 @@ class Filtered_Dataset_EgoExo(Dataset):
         self.split = opt["split"]
         self.slice_window = opt["window_size"]
         self.anno, self.anno_type, self.split = load_raw_anno(
-            opt, opt["anno_type"], opt["split"]
+            opt,
+            opt["anno_type"],
+            opt["split"],
         )
 
         self.take_uids = list(self.anno.keys())
@@ -80,7 +80,7 @@ class Filtered_Dataset_EgoExo(Dataset):
             take_name = self.anno[take_uid]["metadata"]["take_name"]
 
             valid_frames = np.asarray(
-                sorted(find_numerical_key_in_dict(self.anno[take_uid]))
+                sorted(find_numerical_key_in_dict(self.anno[take_uid])),
             )
             if len(valid_frames) < self.slice_window:
                 self.skip_uids.append(take_uid)
@@ -188,7 +188,7 @@ class Filtered_Dataset_EgoExo_inference(Dataset):
             take_name = self.anno[take_uid]["metadata"]["take_name"]
 
             valid_frames = np.asarray(
-                sorted(find_numerical_key_in_dict(self.anno[take_uid]))
+                sorted(find_numerical_key_in_dict(self.anno[take_uid])),
             )
 
             Ts_world_cam = np.stack(

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
 import dataclasses
 from pathlib import Path
-from egoallo.types import DatasetType, DatasetSliceStrategy
+from typing import TYPE_CHECKING
+
+from egoallo.types import DatasetSliceStrategy
+from egoallo.types import DatasetType
 
 
 if TYPE_CHECKING:

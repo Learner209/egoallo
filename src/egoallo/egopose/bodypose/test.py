@@ -1,14 +1,16 @@
-import json
-import torch
-import os.path
-import logging
 import argparse
+import json
+import logging
+import os.path
+
 import numpy as np
-from utils import utils_logger
-from torch.utils.data import DataLoader
-from utils import utils_option as option
-from data.select_dataset import define_Dataset
+import torch
 from models.select_model import define_Model
+from torch.utils.data import DataLoader
+from utils import utils_logger
+from utils import utils_option as option
+
+from data.select_dataset import define_Dataset
 
 
 def main(json_path="options/test_egoexo.json"):
@@ -20,7 +22,10 @@ def main(json_path="options/test_egoexo.json"):
 
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "-opt", type=str, default=json_path, help="Path to option JSON file."
+        "-opt",
+        type=str,
+        default=json_path,
+        help="Path to option JSON file.",
     )
 
     opt = option.parse(parser.parse_args().opt, is_train=True)
@@ -39,7 +44,8 @@ def main(json_path="options/test_egoexo.json"):
     # ----------------------------------------
     # -->-->-->-->-->-->-->-->-->-->-->-->-->-
     init_iter, init_path_G = option.find_last_checkpoint(
-        opt["path"]["models"], net_type="G"
+        opt["path"]["models"],
+        net_type="G",
     )
     opt["path"]["pretrained_netG"] = init_path_G
     current_step = init_iter
@@ -61,7 +67,8 @@ def main(json_path="options/test_egoexo.json"):
     # ----------------------------------------
     logger_name = "test"
     utils_logger.logger_info(
-        logger_name, os.path.join(opt["path"]["log"], logger_name + ".log")
+        logger_name,
+        os.path.join(opt["path"]["log"], logger_name + ".log"),
     )
     logger = logging.getLogger(logger_name)
 
@@ -127,7 +134,7 @@ def main(json_path="options/test_egoexo.json"):
         gt_nan = visible * gt_position
 
         data = model.visible[0] * torch.sqrt(
-            torch.sum(torch.square(gt_nan - predicted_position), axis=-1)
+            torch.sum(torch.square(gt_nan - predicted_position), axis=-1),
         )
         pos_error_ = torch.nanmean(data)
 
@@ -138,7 +145,7 @@ def main(json_path="options/test_egoexo.json"):
         ) * 10
 
         data_vel = torch.sqrt(
-            torch.sum(torch.square(gt_nan_velocity - predicted_velocity), axis=-1)
+            torch.sum(torch.square(gt_nan_velocity - predicted_velocity), axis=-1),
         )
         vel_error_ = torch.nanmean(data_vel)
 
@@ -191,7 +198,7 @@ def main(json_path="options/test_egoexo.json"):
                     len(task_ids),
                     (pos_.mean()) * 100,
                     (vel_.mean()),
-                )
+                ),
             )
 
     pos_error = sum(pos_error) / len(pos_error)
@@ -200,8 +207,9 @@ def main(json_path="options/test_egoexo.json"):
     # testing log
     logger.info(
         "Average positional error [cm]: {:<.5f}, Average velocity error [cm/s]: {:<.5f}\n".format(
-            pos_error * 100, vel_error
-        )
+            pos_error * 100,
+            vel_error,
+        ),
     )
 
 

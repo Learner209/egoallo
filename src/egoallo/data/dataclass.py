@@ -1,10 +1,12 @@
 from pathlib import Path
 from typing import TYPE_CHECKING
+
 import numpy as np
-import torch
 import torch.utils.data
 import typeguard
-from jaxtyping import Bool, Float, jaxtyped
+from jaxtyping import Bool
+from jaxtyping import Float
+from jaxtyping import jaxtyped
 from torch import Tensor
 
 if TYPE_CHECKING:
@@ -103,17 +105,18 @@ class EgoTrainingData(TensorDataclass):
         ).to(device)
 
         body_quats = tf.SO3.exp(
-            raw_fields["pose_body"].reshape(timesteps, 21, 3)
+            raw_fields["pose_body"].reshape(timesteps, 21, 3),
         ).wxyz.to(device)
         hand_quats = tf.SO3.exp(
-            raw_fields["pose_hand"].reshape(timesteps, 30, 3)
+            raw_fields["pose_hand"].reshape(timesteps, 30, 3),
         ).wxyz.to(device)
 
         shaped = body_model.with_shape(raw_fields["betas"].unsqueeze(0).to(device))
 
         # Batch the SMPL body model operations, this can be pretty memory-intensive...
         posed = shaped.with_pose_decomposed(
-            T_world_root=T_world_root.to(device), body_quats=body_quats.to(device)
+            T_world_root=T_world_root.to(device),
+            body_quats=body_quats.to(device),
         )
 
         # Get initial x,y position offset (ignoring z)

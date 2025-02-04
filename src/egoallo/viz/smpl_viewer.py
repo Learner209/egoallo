@@ -2,19 +2,17 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Optional, TYPE_CHECKING
+from typing import Optional
+from typing import TYPE_CHECKING
 
 import numpy as np
 import torch
+from egoallo.fncsmpl import SE3
+from egoallo.fncsmpl import SmplhModel
+from egoallo.fncsmpl import SO3
+from egoallo.fncsmpl_extensions import get_T_world_cpf
 from tqdm import tqdm
 from videoio import VideoWriter
-
-from egoallo.fncsmpl import (
-    SE3,
-    SO3,
-    SmplhModel,
-)
-from egoallo.fncsmpl_extensions import get_T_world_cpf
 
 
 if TYPE_CHECKING:
@@ -90,13 +88,17 @@ class BaseRenderer:
         # Color buffer
         gl.glBindRenderbuffer(gl.GL_RENDERBUFFER, self._main_cb)
         gl.glRenderbufferStorage(
-            gl.GL_RENDERBUFFER, gl.GL_RGBA, *self.config.resolution
+            gl.GL_RENDERBUFFER,
+            gl.GL_RGBA,
+            *self.config.resolution,
         )
 
         # Depth buffer
         gl.glBindRenderbuffer(gl.GL_RENDERBUFFER, self._main_db)
         gl.glRenderbufferStorage(
-            gl.GL_RENDERBUFFER, gl.GL_DEPTH_COMPONENT24, *self.config.resolution
+            gl.GL_RENDERBUFFER,
+            gl.GL_DEPTH_COMPONENT24,
+            *self.config.resolution,
         )
 
         # Frame buffer
@@ -154,7 +156,7 @@ class SMPLViewer(BaseRenderer):
         # Initialize scene components
         self.scene = Scene()
         self.scene_path = scene_path or Path(
-            "./assets/cloudrender/test_assets/MPI_Etage6.zip"
+            "./assets/cloudrender/test_assets/MPI_Etage6.zip",
         )
 
         # Initialize instance variables
@@ -240,11 +242,11 @@ class SMPLViewer(BaseRenderer):
         ).parameters()
 
         denoised_traj = denoised_traj.map(
-            lambda x: x.unsqueeze(0)
+            lambda x: x.unsqueeze(0),
         )  # prepend a new axis to incorporate changes in `apply_to_body` function.
         posed = denoised_traj.apply_to_body(body_model)
         posed = posed.map(
-            lambda x: x.squeeze(0)
+            lambda x: x.squeeze(0),
         )  # remove the first dim as a compensation for the denoised_traj unsqueeze operation.
         denoised_traj = denoised_traj.map(lambda x: x.squeeze(0))  # restore the state
         global_root_orient_aa = SO3(posed.T_world_root[..., :4]).log()
@@ -268,13 +270,14 @@ class SMPLViewer(BaseRenderer):
                     "pose": pose[i].cpu().numpy(),
                     "shape": denoised_traj.betas[0, :10].cpu().numpy(),
                     "translation": T_world_root[i, 4:].cpu().numpy(),
-                }
+                },
             )
 
         # Setup SMPL renderer
         # import ipdb; ipdb.set_trace()
         self.smpl_renderer.set_sequence(
-            sequence, default_frame_time=1 / self.config.fps
+            sequence,
+            default_frame_time=1 / self.config.fps,
         )
         self.smpl_renderer.set_material(0.3, 1, 0, 0)
         self.scene.add_object(self.smpl_renderer)
@@ -292,7 +295,9 @@ class SMPLViewer(BaseRenderer):
         # Render frames
         with (
             VideoWriter(
-                output_path, resolution=self.config.resolution, fps=self.config.fps
+                output_path,
+                resolution=self.config.resolution,
+                fps=self.config.fps,
             ) as vw,
             AsyncPBOCapture(self.config.resolution, queue_size=40) as capturing,
         ):
@@ -340,7 +345,7 @@ class SMPLViewer(BaseRenderer):
         # Calculate camera position in world coordinates
         smpl_pos = torch.from_numpy(cur_smpl_trans).float()
         camera_offset = torch.tensor(
-            [distance * np.cos(angle), distance * np.sin(angle), height]
+            [distance * np.cos(angle), distance * np.sin(angle), height],
         )
         camera_pos = smpl_pos + camera_offset
 
@@ -376,7 +381,7 @@ class SMPLViewer(BaseRenderer):
         shadow_offset = -self.light.direction * 5  # Increased distance
         shadow_height_offset = np.array([0.0, 0.0, 2.0])  # Raise shadow camera
         self.shadow_map.camera.init_extrinsics(
-            pose=smpl_translation + shadow_offset + shadow_height_offset
+            pose=smpl_translation + shadow_offset + shadow_height_offset,
         )
 
         # Clear buffers and render
@@ -394,7 +399,9 @@ class SMPLViewer(BaseRenderer):
             video_writer.write(color)
 
     def _flush_remaining_frames(
-        self, video_writer: VideoWriter, capture: AsyncPBOCapture
+        self,
+        video_writer: VideoWriter,
+        capture: AsyncPBOCapture,
     ) -> None:
         """Flush any remaining frames in the capture queue."""
         # Flush the remaining frames

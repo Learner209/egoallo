@@ -88,7 +88,7 @@ def run_training(
         # Save experiment files
         experiment_dir.mkdir(exist_ok=True, parents=True)
         (experiment_dir / "git_commit.txt").write_text(
-            training_utils.get_git_commit_hash()
+            training_utils.get_git_commit_hash(),
         )
         (experiment_dir / "git_diff.txt").write_text(training_utils.get_git_diff())
         (experiment_dir / "run_config.yaml").write_text(yaml.dump(config))
@@ -102,7 +102,7 @@ def run_training(
         # Save various things that might be useful.
         experiment_dir.mkdir(exist_ok=True, parents=True)
         (experiment_dir / "git_commit.txt").write_text(
-            training_utils.get_git_commit_hash()
+            training_utils.get_git_commit_hash(),
         )
         (experiment_dir / "git_diff.txt").write_text(training_utils.get_git_diff())
         (experiment_dir / "run_config.yaml").write_text(yaml.dump(config))
@@ -140,12 +140,16 @@ def run_training(
         weight_decay=config.weight_decay,
     )
     scheduler = torch.optim.lr_scheduler.LambdaLR(
-        optim, lr_lambda=lambda step: min(1.0, step / config.warmup_steps)
+        optim,
+        lr_lambda=lambda step: min(1.0, step / config.warmup_steps),
     )
 
     # HF accelerate setup. We use this for parallelism, etc!
     model, train_loader, optim, scheduler = accelerator.prepare(
-        model, train_loader, optim, scheduler
+        model,
+        train_loader,
+        optim,
+        scheduler,
     )
     accelerator.register_for_checkpointing(scheduler)
 
@@ -155,7 +159,7 @@ def run_training(
 
     # Get the initial step count.
     if restore_checkpoint_dir is not None and restore_checkpoint_dir.name.startswith(
-        "checkpoint_"
+        "checkpoint_",
     ):
         step = int(restore_checkpoint_dir.name.partition("_")[2])
     else:
@@ -201,7 +205,8 @@ def run_training(
                 accelerator.backward(loss)
                 if accelerator.sync_gradients:
                     accelerator.clip_grad_norm_(
-                        model.parameters(), config.max_grad_norm
+                        model.parameters(),
+                        config.max_grad_norm,
                     )
                 optim.step()
                 scheduler.step()
@@ -345,7 +350,7 @@ def run_training(
                                     step=step,
                                 )
                                 logger.info(
-                                    f"Step {step}, Loss: {log_outputs['train_loss']:.6f}, Eval: {metric_name} {stat_name}: {stat_value:.4f}"
+                                    f"Step {step}, Loss: {log_outputs['train_loss']:.6f}, Eval: {metric_name} {stat_name}: {stat_value:.4f}",
                                 )
 
                     except Exception as e:
@@ -377,10 +382,10 @@ def test_run_training_cli():
             experiment_name="test_experiment",
             learning_rate=1e-4,
             dataset_hdf5_path=Path(
-                "./data/amass_rich_hps/processed_amass_rich_hps.hdf5"
+                "./data/amass_rich_hps/processed_amass_rich_hps.hdf5",
             ),
             dataset_files_path=Path(
-                "./data/amass_rich_hps/processed_amass_rich_hps.txt"
+                "./data/amass_rich_hps/processed_amass_rich_hps.txt",
             ),
             mask_ratio=0.0,
             splits=("train", "val"),

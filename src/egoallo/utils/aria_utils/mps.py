@@ -1,59 +1,61 @@
 import json
-from egoallo.utils.utils import images_to_video, images_to_video_w_imageio
 import os.path as osp
-import open3d as o3d
-from typing import Optional
-from tqdm import tqdm
-
-import polyscope as ps
-import numpy as np
 from collections import defaultdict
-import plotly.graph_objs as go
-from pytorch3d import transforms
-import torch
-from typing import Tuple, Dict, List
-from projectaria_tools.core import mps  # IO for Aria MPS assets
-from projectaria_tools.core.mps.utils import (
-    get_nearest_pose,
-    filter_points_from_count,
-    filter_points_from_confidence,
-)
-from projectaria_tools.utils.vrs_to_mp4_utils import get_timestamp_from_mp4
+from typing import Dict
+from typing import List
+from typing import Optional
+from typing import Tuple
 
+import numpy as np
+import open3d as o3d
+import plotly.graph_objs as go
+import polyscope as ps
+import torch
+from egoallo.config import CONFIG_FILE
+from egoallo.config import make_cfg
 from egoallo.egoexo.egoexo_utils import EgoExoUtils
 from egoallo.smpl.smplh_utils import (
     NUM_EGOEXO4D_EGOPOSE_JNTS,
 )
-from egoallo.utils.ego_geom import (
-    aria_camera_device2opengl_pose,
-)
-from egoallo.utils.setup_logger import setup_logger
-from egoallo.utils.utils import find_numerical_key_in_dict
-from egoallo.utils.transformation import qpose_to_T, T_to_qpose
-from egoallo.config import make_cfg, CONFIG_FILE
-from egoallo.utils.utils import NDArray
 from egoallo.utils.aria_utils.open3d_vis import (
     build_cam_frustum_w_extr as build_cam_frustum_w_extr_open3d,
 )
 from egoallo.utils.aria_utils.open3d_vis import (
     draw_coco_kinematic_tree as draw_coco_kinematic_tree_open3d,
 )
-from egoallo.utils.aria_utils.ps_vis import (
-    build_cam_frustum_w_extr as build_cam_frustum_w_extr_ps,
-)
-from egoallo.utils.aria_utils.ps_vis import (
-    draw_coco_kinematic_tree as draw_coco_kinematic_tree_ps,
-)
-from egoallo.utils.aria_utils.ps_vis import draw_camera_pose as draw_camera_pose_ps
 from egoallo.utils.aria_utils.plotly_vis import (
     build_cam_frustum_w_extr as build_cam_frustum_w_extr_plotly,
 )
 from egoallo.utils.aria_utils.plotly_vis import (
-    draw_coco_kinematic_tree as draw_coco_kinematic_tree_plotly,
-)
-from egoallo.utils.aria_utils.plotly_vis import (
     draw_camera_pose as draw_camera_pose_plotly,
 )
+from egoallo.utils.aria_utils.plotly_vis import (
+    draw_coco_kinematic_tree as draw_coco_kinematic_tree_plotly,
+)
+from egoallo.utils.aria_utils.ps_vis import (
+    build_cam_frustum_w_extr as build_cam_frustum_w_extr_ps,
+)
+from egoallo.utils.aria_utils.ps_vis import draw_camera_pose as draw_camera_pose_ps
+from egoallo.utils.aria_utils.ps_vis import (
+    draw_coco_kinematic_tree as draw_coco_kinematic_tree_ps,
+)
+from egoallo.utils.ego_geom import (
+    aria_camera_device2opengl_pose,
+)
+from egoallo.utils.setup_logger import setup_logger
+from egoallo.utils.transformation import qpose_to_T
+from egoallo.utils.transformation import T_to_qpose
+from egoallo.utils.utils import find_numerical_key_in_dict
+from egoallo.utils.utils import images_to_video
+from egoallo.utils.utils import images_to_video_w_imageio
+from egoallo.utils.utils import NDArray
+from projectaria_tools.core import mps  # IO for Aria MPS assets
+from projectaria_tools.core.mps.utils import filter_points_from_confidence
+from projectaria_tools.core.mps.utils import filter_points_from_count
+from projectaria_tools.core.mps.utils import get_nearest_pose
+from projectaria_tools.utils.vrs_to_mp4_utils import get_timestamp_from_mp4
+from pytorch3d import transforms
+from tqdm import tqdm
 
 
 local_config_file = CONFIG_FILE
@@ -140,7 +142,9 @@ class AriaMPSService:
             logger.info(f"Error encoutered during get timestamps from mp4 files: {e}")
 
     def sample_close_loop_traj_from_timestamps(
-        self, timestamps: NDArray, subsample_rate: int = 1
+        self,
+        timestamps: NDArray,
+        subsample_rate: int = 1,
     ) -> Tuple[NDArray, NDArray, NDArray, NDArray]:
         """Read close loop traj.
 
@@ -161,10 +165,10 @@ class AriaMPSService:
                 the UTC timestamp in seconds
         """
         if not isinstance(self.closed_loop_traj_path, str) or not osp.exists(
-            self.closed_loop_traj_path
+            self.closed_loop_traj_path,
         ):
             logger.warning(
-                f"close loop trajectory file not found at {self.closed_loop_traj_path}"
+                f"close loop trajectory file not found at {self.closed_loop_traj_path}",
             )
             return None, None, None, None
 
@@ -172,14 +176,15 @@ class AriaMPSService:
         sampled_loop_traj = []
         for sample_idx, sample_timestamp in enumerate(timestamps):
             sampled_loop_traj.append(
-                get_nearest_pose(closed_loop_traj, sample_timestamp)
+                get_nearest_pose(closed_loop_traj, sample_timestamp),
             )
 
         sampled_loop_traj = sampled_loop_traj[::subsample_rate]
 
         sampled_close_loop_traj_pose = np.empty([len(sampled_loop_traj), 7])
         T_world_imus = np.tile(
-            np.eye(4)[np.newaxis, :, :], (len(sampled_loop_traj), 1, 1)
+            np.eye(4)[np.newaxis, :, :],
+            (len(sampled_loop_traj), 1, 1),
         )
         close_timestamp_tracking_s = np.empty([len(sampled_loop_traj)])
         close_utc_timestamp = np.empty([len(sampled_loop_traj)])
@@ -208,7 +213,9 @@ class AriaMPSService:
         )
 
     def sample_open_loop_traj_from_timestamps(
-        self, timestamps: NDArray, subsample_rate: int = 1
+        self,
+        timestamps: NDArray,
+        subsample_rate: int = 1,
     ) -> Tuple[NDArray, NDArray, NDArray, NDArray]:
         """Read open loop traj.
 
@@ -229,10 +236,10 @@ class AriaMPSService:
                 the UTC timestamp in seconds
         """
         if not isinstance(self.open_loop_traj_path, str) or not osp.exists(
-            self.open_loop_traj_path
+            self.open_loop_traj_path,
         ):
             logger.warning(
-                f"open loop trajectory file not found at {self.open_loop_traj_path}"
+                f"open loop trajectory file not found at {self.open_loop_traj_path}",
             )
             return None, None, None, None
 
@@ -240,14 +247,15 @@ class AriaMPSService:
         sampled_loop_traj = []
         for sample_idx, sample_timestamp in enumerate(timestamps):
             sampled_loop_traj.append(
-                get_nearest_pose(opend_loop_traj, sample_timestamp)
+                get_nearest_pose(opend_loop_traj, sample_timestamp),
             )
 
         sampled_loop_traj = sampled_loop_traj[::subsample_rate]
 
         sampled_open_loop_traj_pose = np.empty([len(sampled_loop_traj), 7])
         T_world_imus = np.tile(
-            np.eye(4)[np.newaxis, :, :], (len(sampled_loop_traj), 1, 1)
+            np.eye(4)[np.newaxis, :, :],
+            (len(sampled_loop_traj), 1, 1),
         )
         open_timestamp_tracking_s = np.empty([len(sampled_loop_traj)])
         open_utc_timestamp = np.empty([len(sampled_loop_traj)])
@@ -293,7 +301,8 @@ class AriaMPSService:
         pass
 
     def read_open_loop_traj(
-        self, skip: int = 100
+        self,
+        skip: int = 100,
     ) -> Tuple[NDArray, NDArray, NDArray, NDArray]:
         """Read open loop traj.
 
@@ -316,10 +325,10 @@ class AriaMPSService:
                 the UTC timestamp in seconds
         """
         if not isinstance(self.open_loop_traj_path, str) or not osp.exists(
-            self.open_loop_traj_path
+            self.open_loop_traj_path,
         ):
             logger.warning(
-                f"open loop trajectory file not found at {self.open_loop_traj_path}"
+                f"open loop trajectory file not found at {self.open_loop_traj_path}",
             )
             return None, None, None, None
 
@@ -359,7 +368,8 @@ class AriaMPSService:
         )
 
     def read_close_loop_traj(
-        self, skip: int = 100
+        self,
+        skip: int = 100,
     ) -> Tuple[NDArray, NDArray, NDArray, NDArray]:
         """Read close loop traj from file.
         Closed loop trajectory is the high frequency (IMU rate, which is 1kHz) pose estimation output by our mapping process, in an arbitrary gravity aligned world coordinate frame. The estimation includes pose and dynamics (translational and angular velocities).
@@ -384,10 +394,10 @@ class AriaMPSService:
                 the UTC timestamp in seconds
         """
         if not isinstance(self.closed_loop_traj_path, str) or not osp.exists(
-            self.closed_loop_traj_path
+            self.closed_loop_traj_path,
         ):
             logger.warning(
-                f"Closed loop trajectory file not found at {self.closed_loop_traj_path}"
+                f"Closed loop trajectory file not found at {self.closed_loop_traj_path}",
             )
             return None, None, None, None
 
@@ -427,7 +437,8 @@ class AriaMPSService:
         )
 
     def get_exo_cams_calibs_w_cam_json(
-        self, take: dict
+        self,
+        take: dict,
     ) -> Tuple[List[str], Dict[str, NDArray], Dict[str, NDArray]]:
         """Get exo_cam_calibs from `camera.json`.
 
@@ -445,10 +456,10 @@ class AriaMPSService:
                 same with exo_cam_calibs, but the value is 7-dim pose
         """
         if not isinstance(self.cam_pose_anno_path, str) or not osp.exists(
-            self.cam_pose_anno_path
+            self.cam_pose_anno_path,
         ):
             logger.warning(
-                f"Camera pose annotation file not found at {self.cam_pose_anno_path}"
+                f"Camera pose annotation file not found at {self.cam_pose_anno_path}",
             )
             return None, None, None
 
@@ -468,7 +479,7 @@ class AriaMPSService:
             tmp_pose[:, :3] = T_exo_world_cam[:3, 3]
             tmp_pose[:, 3:] = (
                 transforms.matrix_to_quaternion(
-                    torch.from_numpy(T_exo_world_cam[:3, :3])
+                    torch.from_numpy(T_exo_world_cam[:3, :3]),
                 )
                 .cpu()
                 .numpy()
@@ -477,7 +488,8 @@ class AriaMPSService:
         return exo_cam_names, exo_cams_calibs, exo_cams_calibs_pose
 
     def get_ego_cam_calibs(
-        self, take: dict
+        self,
+        take: dict,
     ) -> Tuple[str, Dict[str, NDArray], Dict[str, NDArray]]:
         """Get calibration results of ego cameras from `camera.json`.
 
@@ -496,10 +508,10 @@ class AriaMPSService:
         """
 
         if not isinstance(self.cam_pose_anno_path, str) or not osp.exists(
-            self.cam_pose_anno_path
+            self.cam_pose_anno_path,
         ):
             logger.warning(
-                f"Camera pose annotation file not found at {self.cam_pose_anno_path}"
+                f"Camera pose annotation file not found at {self.cam_pose_anno_path}",
             )
             return None, None, None
         ego_cam_name = EgoExoUtils.get_ego_aria_cam_name(take)
@@ -507,7 +519,7 @@ class AriaMPSService:
         T_ego_world_cams = {}
         T_ego_world_cam_poses = {}
         frames = find_numerical_key_in_dict(
-            cam_pose_anno[ego_cam_name]["camera_extrinsics"]
+            cam_pose_anno[ego_cam_name]["camera_extrinsics"],
         )
 
         for frame_ind, frame_num in enumerate(frames):
@@ -521,7 +533,7 @@ class AriaMPSService:
             tmp_pose[:, :3] = T_ego_world_cam[:3, 3]
             tmp_pose[:, 3:] = (
                 transforms.matrix_to_quaternion(
-                    torch.from_numpy(T_ego_world_cam[:3, :3])
+                    torch.from_numpy(T_ego_world_cam[:3, :3]),
                 )
                 .cpu()
                 .numpy()
@@ -550,16 +562,16 @@ class AriaMPSService:
         exo_cams_calibs = {}
         exo_cams_calibs_pose = {}
         if not isinstance(self.goprocalibs_path, str) or not osp.exists(
-            self.goprocalibs_path
+            self.goprocalibs_path,
         ):
             logger.warning(
-                f"GoPro calibration file not found at {self.goprocalibs_path}"
+                f"GoPro calibration file not found at {self.goprocalibs_path}",
             )
             return None, None, None
         static_calibrations = mps.read_static_camera_calibrations(self.goprocalibs_path)
 
         for ind, (static_calibration, exo_cam_name) in enumerate(
-            zip(static_calibrations, exo_cam_names)
+            zip(static_calibrations, exo_cam_names),
         ):
             T_world_device = static_calibration.transform_world_cam.to_matrix()
             trans_world_device = static_calibration.transform_world_cam.translation()
@@ -658,7 +670,7 @@ class AriaMPSService:
         # region
         if not osp.exists(self.online_calib_json_path):
             raise ValueError(
-                f"Online calibration json file not found at {self.online_calib_json_path}"
+                f"Online calibration json file not found at {self.online_calib_json_path}",
             )
         online_calibs = mps.read_online_calibration(self.online_calib_json_path)
 
@@ -677,7 +689,7 @@ class AriaMPSService:
     def read_semidense_point_cloud(self):
         if not osp.exists(self.point_observation_path):
             raise ValueError(
-                f"Point observation file not found at {self.point_observation_path}"
+                f"Point observation file not found at {self.point_observation_path}",
             )
         if self.mps_data_provider is None:
             self.mps_data_paths_provider = mps.MpsDataPathsProvider(self.take_root_path)
@@ -720,7 +732,9 @@ class AriaMPSService:
         # Create a camera view from parameters
         intrinsics = ps.CameraIntrinsics(fov_vertical_deg=60, aspect=2)
         extrinsics = ps.CameraExtrinsics(
-            root=(0.0, -2.0, 1.0), look_dir=(0.0, 0.0, 0.0), up_dir=(0.0, 0.0, 1.0)
+            root=(0.0, -2.0, 1.0),
+            look_dir=(0.0, 0.0, 0.0),
+            up_dir=(0.0, 0.0, 1.0),
         )
         params = ps.CameraParameters(intrinsics, extrinsics)
         cam = ps.register_camera_view("cam", params)
@@ -733,7 +747,10 @@ class AriaMPSService:
         # Add an image to be displayed in the camera frame
         H, W = 1080, 1920
         cam.add_scalar_image_quantity(
-            "scalar_img", np.zeros((H, W)), enabled=True, show_in_camera_billboard=True
+            "scalar_img",
+            np.zeros((H, W)),
+            enabled=True,
+            show_in_camera_billboard=True,
         )
 
         zero_trans = np.eye(4)
@@ -750,7 +767,8 @@ class AriaMPSService:
                 ].copy()
                 T_exo_world_cam_pose_w_anno[2, 3] += mean_offset_z
                 build_cam_frustum_w_extr_ps(
-                    T_exo_world_cam_pose_w_anno, surface_mesh_id="exo_world_cam"
+                    T_exo_world_cam_pose_w_anno,
+                    surface_mesh_id="exo_world_cam",
                 )
 
         if (
@@ -761,14 +779,17 @@ class AriaMPSService:
                 T_tmp = T_exo_world_cam_w_gopro_calib[exo_cam_name].copy()
                 T_tmp[2, 3] += mean_offset_z
                 build_cam_frustum_w_extr_ps(
-                    T_tmp, surface_mesh_id="exo_world_cam_gopro"
+                    T_tmp,
+                    surface_mesh_id="exo_world_cam_gopro",
                 )
 
         if point_clouds is not None and CFG.plotly.semidense_observations.enable:
             threshold_invdep = 5e-4
             threshold_dep = 5e-4
             point_clouds = filter_points_from_confidence(
-                point_clouds, threshold_invdep, threshold_dep
+                point_clouds,
+                threshold_invdep,
+                threshold_dep,
             )
             if downsample_point_cloud:
                 point_clouds = filter_points_from_count(point_clouds, 500_000)
@@ -777,7 +798,7 @@ class AriaMPSService:
             tmp_pts[:, 2] += mean_offset_z
             cloud = ps.register_point_cloud("ptc", tmp_pts)
             cloud.set_radius(
-                0.0009
+                0.0009,
             )  # radius is relative to a scene length scale by default
             cloud.set_material("candy")
             cloud.set_transparency(0.95)
@@ -839,7 +860,8 @@ class AriaMPSService:
                 T_ego_world_cam = qpose_to_T(opengl_cam_pose)[0].copy()
                 T_ego_world_cam[2, 3] += offset_z[render_ind]
                 build_cam_frustum_w_extr_ps(
-                    T_ego_world_cam, surface_mesh_id="ego_world_cam"
+                    T_ego_world_cam,
+                    surface_mesh_id="ego_world_cam",
                 )
 
             # Build IMU trajectories
@@ -852,12 +874,14 @@ class AriaMPSService:
                 T_world_imu_w_close_traj = T_world_imus_w_close[render_ind].copy()
                 T_world_imu_w_close_traj[2, 3] += offset_z[render_ind]
                 build_cam_frustum_w_extr_ps(
-                    T_world_imu_w_close_traj, surface_mesh_id="imu_close_traj"
+                    T_world_imu_w_close_traj,
+                    surface_mesh_id="imu_close_traj",
                 )
                 T_world_imu_w_open_traj = T_world_imus_w_open[render_ind].copy()
                 T_world_imu_w_open_traj[2, 3] += offset_z[render_ind]
                 build_cam_frustum_w_extr_ps(
-                    T_world_imu_w_open_traj, surface_mesh_id="imu_close_traj"
+                    T_world_imu_w_open_traj,
+                    surface_mesh_id="imu_close_traj",
                 )
 
             # Handle additional kwargs for plotting
@@ -914,7 +938,8 @@ class AriaMPSService:
 
             if gen_vis_save_root_dir is not None:
                 gen_vis_save_frame_path = osp.join(
-                    gen_vis_save_root_dir, "{:06d}.png".format(render_ind)
+                    gen_vis_save_root_dir,
+                    "{:06d}.png".format(render_ind),
                 )
                 ps.screenshot(gen_vis_save_frame_path)
 
@@ -987,7 +1012,7 @@ class AriaMPSService:
                 ].copy()
                 T_exo_world_cam_pose_w_anno[2, 3] += mean_offset_z
                 exo_cam_frustums[i] = build_cam_frustum_w_extr_open3d(
-                    T_exo_world_cam_pose_w_anno
+                    T_exo_world_cam_pose_w_anno,
                 )
             static_traces.extend(exo_cam_frustums)
 
@@ -1032,7 +1057,7 @@ class AriaMPSService:
             T_ego_world_cams = np.stack(list(T_ego_world_cams.values()), axis=0).copy()
             T_ego_world_cams[:, 2, 3] += offset_z
             logger.info(
-                f"ego_cam_traj | x: {np.mean(T_ego_world_cams[:, 0, 3])}, y: {np.mean(T_ego_world_cams[:, 1, 3])}, z: {np.mean(T_ego_world_cams[:, 2, 3])}"
+                f"ego_cam_traj | x: {np.mean(T_ego_world_cams[:, 0, 3])}, y: {np.mean(T_ego_world_cams[:, 1, 3])}, z: {np.mean(T_ego_world_cams[:, 2, 3])}",
             )
             ego_cam_traj = go.Scatter3d(
                 x=T_ego_world_cams[:, 0, 3],
@@ -1069,7 +1094,7 @@ class AriaMPSService:
                 T_world_imu_w_close_traj = T_world_imus_w_close[i].copy()
                 T_world_imu_w_close_traj[2, 3] += offset_z[i]
                 close_traj_cam_frustums[i] = build_cam_frustum_w_extr_open3d(
-                    T_world_imu_w_close_traj
+                    T_world_imu_w_close_traj,
                 )
             dynamic_traces["close_traj_cam_frustums"] = close_traj_cam_frustums
 
@@ -1078,7 +1103,7 @@ class AriaMPSService:
                 T_world_imu_w_open_traj = T_world_imus_w_open[i].copy()
                 T_world_imu_w_open_traj[2, 3] += offset_z[i]
                 open_traj_cam_frustums[i] = build_cam_frustum_w_extr_open3d(
-                    T_world_imu_w_open_traj
+                    T_world_imu_w_open_traj,
                 )
             dynamic_traces["open_traj_cam_frustums"] = open_traj_cam_frustums
 
@@ -1122,7 +1147,7 @@ class AriaMPSService:
                     visible=False,
                 )
                 logger.info(
-                    f"Ts_world_cams/{ind} | x: {np.mean(Ts_world_cam_[:, 0, 3])}, y: {np.mean(Ts_world_cam_[:, 1, 3])}, z: {np.mean(Ts_world_cam_[:, 2, 3])}"
+                    f"Ts_world_cams/{ind} | x: {np.mean(Ts_world_cam_[:, 0, 3])}, y: {np.mean(Ts_world_cam_[:, 1, 3])}, z: {np.mean(Ts_world_cam_[:, 2, 3])}",
                 )
                 world_cam_trajs.append(ego_cam_traj)
             static_traces.extend(world_cam_trajs)
@@ -1140,7 +1165,8 @@ class AriaMPSService:
                 tmp_3d_pt = coco_world_3d_pt[:NUM_EGOEXO4D_EGOPOSE_JNTS].copy()
                 # tmp_3d_pt[:,2] += offset_z[ind]
                 coco_lines_vis = draw_coco_kinematic_tree_open3d(
-                    tmp_3d_pt, coco_cfg=CFG.plotly.coco_kinematic_tree
+                    tmp_3d_pt,
+                    coco_cfg=CFG.plotly.coco_kinematic_tree,
                 )
                 coco_lines_vis = {
                     f"coco_world_3d_pts_{i}": coco_lines_vis[i]
@@ -1162,7 +1188,8 @@ class AriaMPSService:
                 tmp_3d_pt = coco_world_3d_pt[:NUM_EGOEXO4D_EGOPOSE_JNTS].copy()
                 # tmp_3d_pt[:,2] += offset_z[ind]
                 coco_lines_vis = draw_coco_kinematic_tree_open3d(
-                    tmp_3d_pt, coco_cfg=CFG.plotly.model_pred_coco_kpts
+                    tmp_3d_pt,
+                    coco_cfg=CFG.plotly.model_pred_coco_kpts,
                 )
                 coco_lines_vis = {
                     f"model_pred_coco_world_3d_pts_{i}": coco_lines_vis[i]
@@ -1184,7 +1211,8 @@ class AriaMPSService:
                 tmp_3d_pt = coco_world_3d_pt[:NUM_EGOEXO4D_EGOPOSE_JNTS].copy()
                 # tmp_3d_pt[:,2] += offset_z[ind]
                 coco_lines_vis = draw_coco_kinematic_tree_open3d(
-                    tmp_3d_pt, coco_cfg=CFG.plotly.model_gt_coco_kpts
+                    tmp_3d_pt,
+                    coco_cfg=CFG.plotly.model_gt_coco_kpts,
                 )
                 coco_lines_vis = {
                     f"model_gt_coco_world_3d_pts_{i}": coco_lines_vis[i]
@@ -1199,40 +1227,40 @@ class AriaMPSService:
             tmp_T = T_world_imus_w_close.copy()
             tmp_T[:, 2, 3] += offset_z
             imu_close_traj_points = np.array(
-                [tmp_T[:, 0, 3], tmp_T[:, 1, 3], tmp_T[:, 2, 3]]
+                [tmp_T[:, 0, 3], tmp_T[:, 1, 3], tmp_T[:, 2, 3]],
             ).T
             imu_close_traj_line_set = o3d.geometry.LineSet()
             imu_close_traj_line_set.points = o3d.utility.Vector3dVector(
-                imu_close_traj_points
+                imu_close_traj_points,
             )
             imu_close_traj_line_set.lines = o3d.utility.Vector2iVector(
-                [[i, i + 1] for i in range(len(imu_close_traj_points) - 1)]
+                [[i, i + 1] for i in range(len(imu_close_traj_points) - 1)],
             )
             imu_close_traj_line_set.paint_uniform_color(
-                CFG.plotly.closed_slam_traj.color
+                CFG.plotly.closed_slam_traj.color,
             )
             static_traces.append(imu_close_traj_line_set)
             logger.info(
-                f"close_trajectory | x: {np.mean(tmp_T[:, 0, 3])}, y: {np.mean(tmp_T[:, 1, 3])}, z: {np.mean(tmp_T[:, 2, 3])}"
+                f"close_trajectory | x: {np.mean(tmp_T[:, 0, 3])}, y: {np.mean(tmp_T[:, 1, 3])}, z: {np.mean(tmp_T[:, 2, 3])}",
             )
 
         if T_world_imus_w_open is not None and CFG.plotly.open_slam_traj.enable:
             tmp_T = T_world_imus_w_open.copy()
             tmp_T[:, 2, 3] += offset_z
             imu_open_traj_points = np.array(
-                [tmp_T[:, 0, 3], tmp_T[:, 1, 3], tmp_T[:, 2, 3]]
+                [tmp_T[:, 0, 3], tmp_T[:, 1, 3], tmp_T[:, 2, 3]],
             ).T
             imu_open_traj_line_set = o3d.geometry.LineSet()
             imu_open_traj_line_set.points = o3d.utility.Vector3dVector(
-                imu_open_traj_points
+                imu_open_traj_points,
             )
             imu_open_traj_line_set.lines = o3d.utility.Vector2iVector(
-                [[i, i + 1] for i in range(len(imu_open_traj_points) - 1)]
+                [[i, i + 1] for i in range(len(imu_open_traj_points) - 1)],
             )
             imu_open_traj_line_set.paint_uniform_color(CFG.plotly.open_slam_traj.color)
             static_traces.append(imu_open_traj_line_set)
             logger.info(
-                f"open_trajectory | x: {np.mean(tmp_T[:, 0, 3])}, y: {np.mean(tmp_T[:, 1, 3])}, z: {np.mean(tmp_T[:, 2, 3])}"
+                f"open_trajectory | x: {np.mean(tmp_T[:, 0, 3])}, y: {np.mean(tmp_T[:, 1, 3])}, z: {np.mean(tmp_T[:, 2, 3])}",
             )
 
         if point_clouds is not None and CFG.plotly.semidense_observations.enable:
@@ -1240,7 +1268,9 @@ class AriaMPSService:
             threshold_invdep = 5e-4
             threshold_dep = 5e-4
             point_clouds = filter_points_from_confidence(
-                point_clouds, threshold_invdep, threshold_dep
+                point_clouds,
+                threshold_invdep,
+                threshold_dep,
             )
             if downsample_point_cloud:
                 # Downsampling the data for web viewing
@@ -1257,7 +1287,7 @@ class AriaMPSService:
                 np.max(tmp_pts[:, 2]) - np.min(tmp_pts[:, 2])
             )  # Normalize z-coordinates for color mapping
             global_points.colors = o3d.utility.Vector3dVector(
-                np.column_stack([colors, colors, colors])
+                np.column_stack([colors, colors, colors]),
             )  # Grayscale based on z
             static_traces.append(global_points)
 
@@ -1281,7 +1311,7 @@ class AriaMPSService:
             for i, trace in enumerate(traces):
                 dynamic_visibility[i].append(trace)
                 vis.add_geometry(
-                    trace
+                    trace,
                 )  # Add all geometries to the visualizer initially
 
         # Function to update visibility based on the current time step
@@ -1364,7 +1394,7 @@ class AriaMPSService:
                 ].copy()
                 T_exo_world_cam_pose_w_anno[2, 3] += mean_offset_z
                 exo_cam_frustums[i] = build_cam_frustum_w_extr_plotly(
-                    T_exo_world_cam_pose_w_anno
+                    T_exo_world_cam_pose_w_anno,
                 )
             static_traces.extend(exo_cam_frustums)
 
@@ -1409,7 +1439,7 @@ class AriaMPSService:
             T_ego_world_cams = np.stack(list(T_ego_world_cams.values()), axis=0).copy()
             T_ego_world_cams[:, 2, 3] += offset_z
             logger.info(
-                f"ego_cam_traj | x: {np.mean(T_ego_world_cams[:, 0, 3])}, y: {np.mean(T_ego_world_cams[:, 1, 3])}, z: {np.mean(T_ego_world_cams[:, 2, 3])}"
+                f"ego_cam_traj | x: {np.mean(T_ego_world_cams[:, 0, 3])}, y: {np.mean(T_ego_world_cams[:, 1, 3])}, z: {np.mean(T_ego_world_cams[:, 2, 3])}",
             )
             ego_cam_traj = go.Scatter3d(
                 x=T_ego_world_cams[:, 0, 3],
@@ -1446,7 +1476,7 @@ class AriaMPSService:
                 T_world_imu_w_close_traj = T_world_imus_w_close[i].copy()
                 T_world_imu_w_close_traj[2, 3] += offset_z[i]
                 close_traj_cam_frustums[i] = build_cam_frustum_w_extr_plotly(
-                    T_world_imu_w_close_traj
+                    T_world_imu_w_close_traj,
                 )
             dynamic_traces["close_traj_cam_frustums"] = close_traj_cam_frustums
 
@@ -1455,7 +1485,7 @@ class AriaMPSService:
                 T_world_imu_w_open_traj = T_world_imus_w_open[i].copy()
                 T_world_imu_w_open_traj[2, 3] += offset_z[i]
                 open_traj_cam_frustums[i] = build_cam_frustum_w_extr_plotly(
-                    T_world_imu_w_open_traj
+                    T_world_imu_w_open_traj,
                 )
             dynamic_traces["open_traj_cam_frustums"] = open_traj_cam_frustums
 
@@ -1499,7 +1529,7 @@ class AriaMPSService:
                     visible=False,
                 )
                 logger.info(
-                    f"Ts_world_cams/{ind} | x: {np.mean(Ts_world_cam_[:, 0, 3])}, y: {np.mean(Ts_world_cam_[:, 1, 3])}, z: {np.mean(Ts_world_cam_[:, 2, 3])}"
+                    f"Ts_world_cams/{ind} | x: {np.mean(Ts_world_cam_[:, 0, 3])}, y: {np.mean(Ts_world_cam_[:, 1, 3])}, z: {np.mean(Ts_world_cam_[:, 2, 3])}",
                 )
                 world_cam_trajs.append(ego_cam_traj)
             static_traces.extend(world_cam_trajs)
@@ -1517,7 +1547,8 @@ class AriaMPSService:
                 tmp_3d_pt = coco_world_3d_pt[:NUM_EGOEXO4D_EGOPOSE_JNTS].copy()
                 # tmp_3d_pt[:,2] += offset_z[ind]
                 coco_lines_vis = draw_coco_kinematic_tree_plotly(
-                    tmp_3d_pt, coco_cfg=CFG.plotly.coco_kinematic_tree
+                    tmp_3d_pt,
+                    coco_cfg=CFG.plotly.coco_kinematic_tree,
                 )
                 coco_lines_vis = {
                     f"coco_world_3d_pts_{i}": coco_lines_vis[i]
@@ -1539,7 +1570,8 @@ class AriaMPSService:
                 tmp_3d_pt = coco_world_3d_pt[:NUM_EGOEXO4D_EGOPOSE_JNTS].copy()
                 # tmp_3d_pt[:,2] += offset_z[ind]
                 coco_lines_vis = draw_coco_kinematic_tree_plotly(
-                    tmp_3d_pt, coco_cfg=CFG.plotly.model_pred_coco_kpts
+                    tmp_3d_pt,
+                    coco_cfg=CFG.plotly.model_pred_coco_kpts,
                 )
                 coco_lines_vis = {
                     f"model_pred_coco_world_3d_pts_{i}": coco_lines_vis[i]
@@ -1561,7 +1593,8 @@ class AriaMPSService:
                 tmp_3d_pt = coco_world_3d_pt[:NUM_EGOEXO4D_EGOPOSE_JNTS].copy()
                 # tmp_3d_pt[:,2] += offset_z[ind]
                 coco_lines_vis = draw_coco_kinematic_tree_plotly(
-                    tmp_3d_pt, coco_cfg=CFG.plotly.model_gt_coco_kpts
+                    tmp_3d_pt,
+                    coco_cfg=CFG.plotly.model_gt_coco_kpts,
                 )
                 coco_lines_vis = {
                     f"model_gt_coco_world_3d_pts_{i}": coco_lines_vis[i]
@@ -1591,7 +1624,7 @@ class AriaMPSService:
             )
             static_traces.append(imu_close_traj_go_item)
             logger.info(
-                f"close_trajectory | x: {np.mean(tmp_T[:, 0, 3])}, y: {np.mean(tmp_T[:, 1, 3])}, z: {np.mean(tmp_T[:, 2, 3])}"
+                f"close_trajectory | x: {np.mean(tmp_T[:, 0, 3])}, y: {np.mean(tmp_T[:, 1, 3])}, z: {np.mean(tmp_T[:, 2, 3])}",
             )
 
         if T_world_imus_w_open is not None and CFG.plotly.open_slam_traj.enable:
@@ -1613,7 +1646,7 @@ class AriaMPSService:
             )
             static_traces.append(imu_open_traj_go_item)
             logger.info(
-                f"open_trajectory | x: {np.mean(tmp_T[:, 0, 3])}, y: {np.mean(tmp_T[:, 1, 3])}, z: {np.mean(tmp_T[:, 2, 3])}"
+                f"open_trajectory | x: {np.mean(tmp_T[:, 0, 3])}, y: {np.mean(tmp_T[:, 1, 3])}, z: {np.mean(tmp_T[:, 2, 3])}",
             )
 
         if point_clouds is not None and CFG.plotly.semidense_observations.enable:
@@ -1621,7 +1654,9 @@ class AriaMPSService:
             threshold_invdep = 5e-4
             threshold_dep = 5e-4
             point_clouds = filter_points_from_confidence(
-                point_clouds, threshold_invdep, threshold_dep
+                point_clouds,
+                threshold_invdep,
+                threshold_dep,
             )
             # point_clouds = filter_points_from_confidence(point_clouds)
             if downsample_point_cloud:
@@ -1676,8 +1711,8 @@ class AriaMPSService:
                             time_step == i
                             for traces in dynamic_traces.values()
                             for time_step in range(T)
-                        ]
-                    }
+                        ],
+                    },
                 ],
                 label=tracking_timestamps[i],
             )
@@ -1690,7 +1725,7 @@ class AriaMPSService:
                     currentvalue={"suffix": " s", "prefix": "Time :"},
                     pad={"t": 5},
                     steps=steps,
-                )
+                ),
             ],
             scene=dict(
                 bgcolor="lightgray",

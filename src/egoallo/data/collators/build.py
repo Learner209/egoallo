@@ -1,7 +1,10 @@
-from typing import Callable, TYPE_CHECKING
+from typing import Callable
+from typing import TYPE_CHECKING
+
+from .collate_dataclass import collate_dataclass
+from .collate_dataclass import collate_tensor_only_dataclass
 from .default_batch_collator import default_collate
 from .extended_batch_collator import extended_collate
-from .collate_dataclass import collate_dataclass, collate_tensor_only_dataclass
 
 if TYPE_CHECKING:
     from egoallo.config.train.train_config import EgoAlloTrainConfig

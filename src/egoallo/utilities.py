@@ -1,31 +1,30 @@
-import random
-import subprocess
-import imageio
-from contextlib import redirect_stdout
-import numpy as np
-import torch
-import os
-import os.path as osp
-import re
-import sys
-import ipdb
-import shutil
 import argparse
 import glob
-from typing import Optional, Tuple
-from torch import Tensor
+import os
+import os.path as osp
+import random
+import re
+import shutil
+import subprocess
+import sys
+from contextlib import redirect_stdout
 from pathlib import Path
-from jaxtyping import Float, jaxtyped
+from typing import Optional
+from typing import Tuple
+
+import imageio
+import numpy as np
+import torch
 import typeguard
-
+from egoallo.utils.setup_logger import setup_logger
+from jaxtyping import Float
+from jaxtyping import jaxtyped
+from torch import Tensor
 from yacs.config import CfgNode as CN
-
 # from egoego.config import make_cfg, CONFIG_FILE
 # from egoego.utils.setup_logger import setup_logger
 # local_config_file = CONFIG_FILE
 # CFG = make_cfg(config_name="defaults", config_file=local_config_file, cli_args=[])
-
-from egoallo.utils.setup_logger import setup_logger
 
 local_logger = setup_logger(output=None, name=__name__)
 
@@ -53,7 +52,7 @@ def debug_on_error(debug, logger=local_logger):
 
         def exception_handler(type, value, traceback):
             logger.critical(
-                "\nAn exception occurred while executing the requested command:"
+                "\nAn exception occurred while executing the requested command:",
             )
             hr(logger=logger)
             sys.__excepthook__(type, value, traceback)
@@ -110,20 +109,21 @@ def signal_handler(signal_received, frame, logger, opt):
         val_cfg.freeze()
         cfg_basename = osp.splitext(osp.basename(config_file))[0]
         val_cfg_save_path = osp.join(
-            opt.io.diffusion.val_save_path, f"{cfg_basename}_val.yaml"
+            opt.io.diffusion.val_save_path,
+            f"{cfg_basename}_val.yaml",
         )
         with open(val_cfg_save_path, "w") as f:
             with redirect_stdout(f):
                 print(val_cfg.dump())
         logger.info(
             "Corresponding val config file has been saved to: {}".format(
-                val_cfg_save_path
-            )
+                val_cfg_save_path,
+            ),
         )
 
     exp_save_root_dir = opt.io.diffusion.project_exp_name
     response = input(
-        f"Are you sure you want to delete the directory '{exp_save_root_dir}'? (y/n): "
+        f"Are you sure you want to delete the directory '{exp_save_root_dir}'? (y/n): ",
     )
 
     if response.lower() == "yes" or response.lower() == "y":
@@ -144,7 +144,9 @@ def convert_to_dict(cfg_node, key_list=[]):
         if type(cfg_node) not in _VALID_TYPES:
             local_logger.warning(
                 "Key {} with value {} is not a valid type; valid types: {}".format(
-                    ".".join(key_list), type(cfg_node), _VALID_TYPES
+                    ".".join(key_list),
+                    type(cfg_node),
+                    _VALID_TYPES,
                 ),
             )
         return cfg_node
@@ -201,7 +203,7 @@ class EarlyStopping:
         elif score < self.best_score + self.delta:
             self.counter += 1
             local_logger.info(
-                f"Epoch: [{epoch:4,d}], EarlyStopping counter: {self.counter} out of {self.patience}"
+                f"Epoch: [{epoch:4,d}], EarlyStopping counter: {self.counter} out of {self.patience}",
             )
             if self.counter >= self.patience:
                 self.early_stop = True

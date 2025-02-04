@@ -1,4 +1,6 @@
 from __future__ import annotations
+
+import builtins
 import dataclasses
 import queue
 import threading
@@ -8,10 +10,9 @@ from typing import Optional
 
 import torch
 import tyro
-
 from egoallo.data.rich.rich_processor import RICHDataProcessor
-from egoallo.utils.setup_logger import setup_logger
 from egoallo.training_utils import ipdb_safety_net
+from egoallo.utils.setup_logger import setup_logger
 
 logger = setup_logger(output="logs/rich_preprocess", name=__name__)
 
@@ -37,7 +38,7 @@ class RICHPreprocessConfig:
 
     # Data split options
     splits: list[str] = dataclasses.field(
-        default_factory=lambda: ["train", "val", "test"]
+        default_factory=lambda: ["train", "val", "test"],
     )
 
     # Device options
@@ -134,7 +135,7 @@ def main(config: RICHPreprocessConfig) -> None:
 
             logger.info(
                 f"Progress: {total_count - task_queue.qsize()}/{total_count} "
-                f"({(total_count - task_queue.qsize()) / total_count * 100:.2f}%)"
+                f"({(total_count - task_queue.qsize()) / total_count * 100:.2f}%)",
             )
 
     # Start worker threads
@@ -166,9 +167,7 @@ if __name__ == "__main__":
     # Parse config and run
     config = tyro.cli(RICHPreprocessConfig)
     if config.debug:
-        import ipdb
-
-        ipdb.set_trace()
+        builtins.breakpoint()
 
     ipdb_safety_net()
     main(config)

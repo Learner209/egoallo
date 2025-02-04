@@ -12,19 +12,26 @@ class EgoExo4D(nn.Module):
 
         encoder_layer = nn.TransformerEncoderLayer(embed_dim, nhead=nhead)
         self.transformer_encoder = nn.TransformerEncoder(
-            encoder_layer, num_layers=num_layer
+            encoder_layer,
+            num_layers=num_layer,
         )
 
         self.stabilizer = nn.Sequential(
-            nn.Linear(embed_dim, 256), nn.ReLU(), nn.Linear(256, output_dim)
+            nn.Linear(embed_dim, 256),
+            nn.ReLU(),
+            nn.Linear(256, output_dim),
         )
         self.joint_rotation_decoder = nn.Sequential(
-            nn.Linear(embed_dim, 256), nn.ReLU(), nn.Linear(256, 126)
+            nn.Linear(embed_dim, 256),
+            nn.ReLU(),
+            nn.Linear(256, 126),
         )
 
     def forward(self, input_tensor, image=None, do_fk=True):
         input_tensor = input_tensor.reshape(
-            input_tensor.shape[0], input_tensor.shape[1], -1
+            input_tensor.shape[0],
+            input_tensor.shape[1],
+            -1,
         )  # BS x T x 3
         x = self.linear_embedding(input_tensor)  # BS x T x D
         x = x.permute(1, 0, 2)  # T x BS x D

@@ -1,8 +1,9 @@
-import numpy as np
+import argparse
 import json
 import os
+
+import numpy as np
 from tqdm import tqdm
-import argparse
 
 
 def translate_poses(anno, cams):

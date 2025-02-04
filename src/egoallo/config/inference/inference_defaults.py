@@ -4,9 +4,10 @@ import dataclasses
 from pathlib import Path
 
 import torch
-
-from egoallo.types import DatasetType, DatasetSliceStrategy, DatasetSplit
 from egoallo.guidance_optimizer_jax import GuidanceMode
+from egoallo.types import DatasetSliceStrategy
+from egoallo.types import DatasetSplit
+from egoallo.types import DatasetType
 
 
 @dataclasses.dataclass

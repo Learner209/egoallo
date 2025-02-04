@@ -40,7 +40,7 @@ VERTEX_IDS: Dict[str, Dict[str, int]] = {
         "rmiddle": 5905,
         "rring": 6016,
         "rpinky": 6133,
-    }
+    },
 }
 
 # Body evaluation constants

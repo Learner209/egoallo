@@ -5,13 +5,12 @@ import time
 from pathlib import Path
 
 import h5py
-import torch
 import torch.cuda
 import tyro
-from egoallo import network
 from egoallo import fncsmpl
-from egoallo.data.dataclass import EgoTrainingData
+from egoallo import network
 from egoallo import training_utils
+from egoallo.data.dataclass import EgoTrainingData
 
 # faulthandler.enable()
 
@@ -52,13 +51,16 @@ def main(
 
             print(f"Processing {npz_path} on device {device_idx}...")
             train_data = EgoTrainingData.load_from_npz(
-                device_body_model, npz_path, include_hands=include_hands
+                device_body_model,
+                npz_path,
+                include_hands=include_hands,
             )
 
             npz_path.stem + ".mp4"
             # FIXME: the from_ego_data function is an instance moethod of network.DenoisingConfig
             denoising_config = network.DenoisingConfig(
-                denoising_mode="absolute", include_hands=True
+                denoising_mode="absolute",
+                include_hands=True,
             )
             denoising_config.from_ego_data(train_data)
 
@@ -84,7 +86,7 @@ def main(
                     break
             else:
                 raise ValueError(
-                    f"NPZ file {npz_path} not found in any input directory"
+                    f"NPZ file {npz_path} not found in any input directory",
                 )
 
             print(f"Writing to group {group_name} on {device_idx}...")

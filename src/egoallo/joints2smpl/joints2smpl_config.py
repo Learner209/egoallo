@@ -75,9 +75,11 @@ amass_smpl_idx = range(22)
 SMPL_MODEL_DIR = "assets/smpl_based_model"
 GMM_MODEL_DIR = os.path.join(os.path.dirname(__file__), "smpl_models/")
 SMPL_MEAN_FILE = os.path.join(
-    os.path.dirname(__file__), "smpl_models/neutral_smpl_mean_params.h5"
+    os.path.dirname(__file__),
+    "smpl_models/neutral_smpl_mean_params.h5",
 )
 # for collsion
 Part_Seg_DIR = os.path.join(
-    os.path.dirname(__file__), "smpl_models/smplx_parts_segm.pkl"
+    os.path.dirname(__file__),
+    "smpl_models/smplx_parts_segm.pkl",
 )

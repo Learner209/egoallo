@@ -1,5 +1,8 @@
 import dataclasses
-from typing import Any, Callable, Self, dataclass_transform
+from typing import Any
+from typing import Callable
+from typing import dataclass_transform
+from typing import Self
 
 import torch
 
@@ -100,7 +103,7 @@ class TensorDataclass:
                     **{
                         k: _map_impl(fn, v, f"{name}" if name else k)
                         for k, v in vars(val).items()
-                    }
+                    },
                 )
             elif isinstance(val, (list, tuple)):
                 raise NotImplementedError("Not implemented for list or tuple")
@@ -130,7 +133,8 @@ class TensorDataclass:
             if isinstance(val1, torch.Tensor) and isinstance(val2, torch.Tensor):
                 return val1.shape == val2.shape
             elif isinstance(val1, TensorDataclass) and isinstance(
-                val2, TensorDataclass
+                val2,
+                TensorDataclass,
             ):
                 return all(
                     _check_shapes_impl(v1, v2)
@@ -168,7 +172,7 @@ class TensorDataclass:
                         batch_size = val.shape[0]
                     elif batch_size != val.shape[0]:
                         raise ValueError(
-                            f"Inconsistent batch sizes found: {batch_size} vs {val.shape[0]}"
+                            f"Inconsistent batch sizes found: {batch_size} vs {val.shape[0]}",
                         )
                     return val.shape[0]
             elif isinstance(val, TensorDataclass):
@@ -222,7 +226,7 @@ class TensorDataclass:
                     return val[idx]
                 except IndexError as e:
                     raise IndexError(
-                        f"Invalid index {idx} for tensor of shape {val.shape}"
+                        f"Invalid index {idx} for tensor of shape {val.shape}",
                     ) from e
             elif isinstance(val, TensorDataclass):
                 return type(val)(**_getitem_impl(vars(val), idx))
@@ -258,19 +262,19 @@ class TensorDataclass:
                     target[idx] = val
                 except IndexError as e:
                     raise IndexError(
-                        f"Invalid index {idx} for tensor of shape {target.shape}"
+                        f"Invalid index {idx} for tensor of shape {target.shape}",
                     ) from e
             elif isinstance(target, TensorDataclass):
                 if not isinstance(val, TensorDataclass):
                     raise TypeError(
-                        f"Cannot set TensorDataclass with value of type {type(val)}"
+                        f"Cannot set TensorDataclass with value of type {type(val)}",
                     )
                 for k, v in vars(target).items():
                     _setitem_impl(v, idx, getattr(val, k))
             elif isinstance(target, (list, tuple)):
                 if not isinstance(val, (list, tuple)):
                     raise TypeError(
-                        f"Cannot set {type(target)} with value of type {type(val)}"
+                        f"Cannot set {type(target)} with value of type {type(val)}",
                     )
                 for t, v in zip(target, val):
                     _setitem_impl(t, idx, v)

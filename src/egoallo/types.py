@@ -1,9 +1,14 @@
 from pathlib import Path
-from typing import Dict, Literal, Tuple, Union
-from egoallo.network import AbsoluteDenoiseTraj, JointsOnlyTraj, VelocityDenoiseTraj
+from typing import Dict
+from typing import Literal
+from typing import Tuple
+from typing import Union
 
 import numpy as np
 import torch
+from egoallo.network import AbsoluteDenoiseTraj
+from egoallo.network import JointsOnlyTraj
+from egoallo.network import VelocityDenoiseTraj
 from jaxtyping import Float
 from numpy.typing import NDArray
 from torch import Tensor
@@ -21,7 +26,12 @@ BoolArray = NDArray[np.bool_]
 ModelType = Literal["smplh", "mano", "smplx"]
 HandSide = Literal["left", "right"]
 GuidanceMode = Literal[
-    "hamer", "no_hands", "aria_wrist_only", "aria_hamer", "hamer_wrist", "hamer_reproj2"
+    "hamer",
+    "no_hands",
+    "aria_wrist_only",
+    "aria_hamer",
+    "hamer_wrist",
+    "hamer_reproj2",
 ]
 
 # Tensor types
@@ -50,7 +60,10 @@ DatasetType = Literal[
 ]
 
 DatasetSliceStrategy = Literal[
-    "deterministic", "random_uniform_len", "random_variable_len", "full_sequence"
+    "deterministic",
+    "random_uniform_len",
+    "random_variable_len",
+    "full_sequence",
 ]
 
 DatasetSplit = Literal["train", "val", "test", "just_humaneva"]

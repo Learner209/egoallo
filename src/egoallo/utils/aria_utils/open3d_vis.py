@@ -7,12 +7,12 @@
 #  - Images
 #  - Point cloud
 ##
+from typing import List
 
 import numpy as np
 import open3d as o3d
-from typing import List
-
-from egoallo.config import make_cfg, CONFIG_FILE
+from egoallo.config import CONFIG_FILE
+from egoallo.config import make_cfg
 from egoallo.utils.setup_logger import setup_logger
 
 local_config_file = CONFIG_FILE
@@ -32,7 +32,7 @@ def build_cam_frustum_w_extr(T_world_cam):
                 [-0.5, 0.5, 1, 1],
                 [-0.5, -0.5, 1, 1],
                 [0.5, -0.5, 1, 1],
-            ]
+            ],
         )
         * CFG.plotly.camera_frustum.scale
     )
@@ -42,7 +42,7 @@ def build_cam_frustum_w_extr(T_world_cam):
     mesh = o3d.geometry.TriangleMesh()
     mesh.vertices = o3d.utility.Vector3dVector(points_transformed)
     mesh.triangles = o3d.utility.Vector3iVector(
-        [[0, 1, 2], [0, 2, 3], [0, 3, 4], [1, 2, 3], [1, 3, 4]]
+        [[0, 1, 2], [0, 2, 3], [0, 3, 4], [1, 2, 3], [1, 3, 4]],
     )
     mesh.paint_uniform_color([0, 0, 0])  # Invisible
     return mesh
@@ -78,7 +78,7 @@ def draw_coco_kinematic_tree(coco_kpts, coco_cfg) -> List[o3d.geometry.LineSet]:
         line_set.paint_uniform_color(
             np.asarray(coco_cfg.color_rgb_line_body).astype(np.float64)
             if p1 > 4
-            else np.asarray(coco_cfg.color_rgb_line_head).astype(np.float64)
+            else np.asarray(coco_cfg.color_rgb_line_head).astype(np.float64),
         )
         line_sets.append(line_set)
 
@@ -86,7 +86,8 @@ def draw_coco_kinematic_tree(coco_kpts, coco_cfg) -> List[o3d.geometry.LineSet]:
 
 
 def draw_camera_pose(
-    T: np.ndarray, colors: List[str] = ["red", "green", "blue"]
+    T: np.ndarray,
+    colors: List[str] = ["red", "green", "blue"],
 ) -> List[o3d.geometry.LineSet]:
     """
     Draw an RGB 3D coordinate system based on a 3x4 camera pose matrix using Open3D.
@@ -126,7 +127,7 @@ def draw_camera_pose(
 
         # Set color for the line
         line_set.paint_uniform_color(
-            np.array(o3d.utility.Vector3dVector(np.array([color])))
+            np.array(o3d.utility.Vector3dVector(np.array([color]))),
         )
 
         # Add the LineSet to the list

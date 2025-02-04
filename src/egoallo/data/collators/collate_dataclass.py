@@ -6,7 +6,7 @@ def collate_dataclass[T](batch: list[T]) -> T:
     """Collate function that works for dataclasses."""
     keys = vars(batch[0]).keys()
     return type(batch[0])(
-        **{k: torch.stack([getattr(b, k) for b in batch]) for k in keys}
+        **{k: torch.stack([getattr(b, k) for b in batch]) for k in keys},
     )
 
 

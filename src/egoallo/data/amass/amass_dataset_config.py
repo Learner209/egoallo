@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import dataclasses
 from pathlib import Path
-from typing import List, Any
+from typing import Any
+from typing import List
 
 import torch
 
@@ -58,7 +59,7 @@ class AMASSDatasetConfig:
             "MPI_Limits",
             "TCD_handMocap",
             "TotalCapture",
-        ]
+        ],
     )
 
     val_datasets: List[str] = dataclasses.field(
@@ -67,14 +68,14 @@ class AMASSDatasetConfig:
             "MPI_HDM05",
             "MPI_mosh",
             "SFU",
-        ]
+        ],
     )
 
     test_datasets: List[str] = dataclasses.field(
         default_factory=lambda: [
             "Transitions_mocap",
             "SSM_synced",
-        ]
+        ],
     )
 
     # Device options
@@ -108,11 +109,11 @@ class AMASSDatasetConfig:
             raise ValueError(f"Target FPS must be positive, got {self.target_fps}")
         if self.min_sequence_length <= 0:
             raise ValueError(
-                f"Min sequence length must be positive, got {self.min_sequence_length}"
+                f"Min sequence length must be positive, got {self.min_sequence_length}",
             )
         if self.num_processes <= 0:
             raise ValueError(
-                f"Number of processes must be positive, got {self.num_processes}"
+                f"Number of processes must be positive, got {self.num_processes}",
             )
 
     def get_processor_kwargs(self) -> dict[str, Any]:

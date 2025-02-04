@@ -1,7 +1,10 @@
 import os
+
 import torch
-from utils.utils_bnorm import merge_bn, tidy_sequential
-from torch.nn.parallel import DataParallel, DistributedDataParallel
+from torch.nn.parallel import DataParallel
+from torch.nn.parallel import DistributedDataParallel
+from utils.utils_bnorm import merge_bn
+from utils.utils_bnorm import tidy_sequential
 
 
 class ModelBase:
@@ -122,7 +125,7 @@ class ModelBase:
         msg += "Networks name: {}".format(network.__class__.__name__) + "\n"
         msg += (
             "Params number: {}".format(
-                sum(map(lambda x: x.numel(), network.parameters()))
+                sum(map(lambda x: x.numel(), network.parameters())),
             )
             + "\n"
         )
@@ -150,7 +153,12 @@ class ModelBase:
                 v = param.data.clone().float()
                 msg += (
                     " | {:>6.3f} | {:>6.3f} | {:>6.3f} | {:>6.3f} | {} || {:s}".format(
-                        v.mean(), v.min(), v.max(), v.std(), v.shape, name
+                        v.mean(),
+                        v.min(),
+                        v.max(),
+                        v.std(),
+                        v.shape,
+                        name,
                     )
                     + "\n"
                 )
@@ -222,9 +230,9 @@ class ModelBase:
             torch.load(
                 load_path,
                 map_location=lambda storage, loc: storage.cuda(
-                    torch.cuda.current_device()
+                    torch.cuda.current_device(),
                 ),
-            )
+            ),
         )
 
     def update_E(self, decay=0.999):

@@ -2,18 +2,19 @@
 
 from __future__ import annotations
 
+import builtins
 import queue
 import threading
 import time
 from pathlib import Path
-from typing import Optional, List
+from typing import List
+from typing import Optional
 
 import tyro
-
-from egoallo.data.amass.amass_processor import AMASSProcessor
 from egoallo.data.amass.amass_dataset_config import AMASSDatasetConfig
-from egoallo.utils.setup_logger import setup_logger
+from egoallo.data.amass.amass_processor import AMASSProcessor
 from egoallo.training_utils import ipdb_safety_net
+from egoallo.utils.setup_logger import setup_logger
 
 logger = setup_logger(output="logs/amass_preprocess", name=__name__)
 
@@ -109,7 +110,7 @@ def main(config: AMASSDatasetConfig) -> None:
 
             logger.info(
                 f"Progress: {total_count - task_queue.qsize()}/{total_count} "
-                f"({(total_count - task_queue.qsize()) / total_count * 100:.2f}%)"
+                f"({(total_count - task_queue.qsize()) / total_count * 100:.2f}%)",
             )
 
     # Start worker threads
@@ -133,9 +134,7 @@ def main(config: AMASSDatasetConfig) -> None:
 if __name__ == "__main__":
     config = tyro.cli(AMASSDatasetConfig)
     if config.debug:
-        import ipdb
-
-        ipdb.set_trace()
+        builtins.breakpoint()
 
     ipdb_safety_net()
     main(config)

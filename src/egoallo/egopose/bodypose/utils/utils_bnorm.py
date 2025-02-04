@@ -1,7 +1,3 @@
-import torch
-from torch import nn
-
-
 """
 # --------------------------------------------
 # Batch Normalization
@@ -12,6 +8,9 @@ from torch import nn
 # 01/Jan/2019
 # --------------------------------------------
 """
+
+import torch
+from torch import nn
 
 
 # --------------------------------------------

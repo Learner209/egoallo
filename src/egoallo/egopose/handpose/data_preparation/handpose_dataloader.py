@@ -1,26 +1,29 @@
 import json
-from tqdm import tqdm
 import os
 
 import cv2
 import numpy as np
-from projectaria_tools.core import calibration
-from egoallo.egopose.handpose.data_preparation.utils.utils import (
-    aria_landscape_to_portrait,
-    cam_to_img,
-    get_ego_pose_takes_from_splits,
-    HAND_ORDER,
-    pad_bbox_from_kpts,
-    rand_bbox_from_kpts,
-    hand_jnts_dist_angle_check,
-    reproj_error_check,
-    world_to_cam,
-)
-
-from egoallo.utils.smpl_mapping.mapping import EGOEXO4D_EGOPOSE_HANDPOSE_MAPPINGS
 from egoallo.egoexo import EGOEXO_UTILS_INST
 from egoallo.egoexo.egoexo_utils import EgoExoUtils
+from egoallo.egopose.handpose.data_preparation.utils.utils import (
+    aria_landscape_to_portrait,
+)
+from egoallo.egopose.handpose.data_preparation.utils.utils import cam_to_img
+from egoallo.egopose.handpose.data_preparation.utils.utils import (
+    get_ego_pose_takes_from_splits,
+)
+from egoallo.egopose.handpose.data_preparation.utils.utils import (
+    hand_jnts_dist_angle_check,
+)
+from egoallo.egopose.handpose.data_preparation.utils.utils import HAND_ORDER
+from egoallo.egopose.handpose.data_preparation.utils.utils import pad_bbox_from_kpts
+from egoallo.egopose.handpose.data_preparation.utils.utils import rand_bbox_from_kpts
+from egoallo.egopose.handpose.data_preparation.utils.utils import reproj_error_check
+from egoallo.egopose.handpose.data_preparation.utils.utils import world_to_cam
 from egoallo.utils.setup_logger import setup_logger
+from egoallo.utils.smpl_mapping.mapping import EGOEXO4D_EGOPOSE_HANDPOSE_MAPPINGS
+from projectaria_tools.core import calibration
+from tqdm import tqdm
 
 HAND_JOINTS = EGOEXO4D_EGOPOSE_HANDPOSE_MAPPINGS
 NUM_OF_HAND_JOINTS = len(HAND_JOINTS) // 2
@@ -67,7 +70,8 @@ class hand_pose_anno_loader:
             )
         )
         self.cam_pose_dir = os.path.join(
-            self.dataset_root, f"annotations/ego_pose/{split}/camera_pose"
+            self.dataset_root,
+            f"annotations/ego_pose/{split}/camera_pose",
         )
 
         # Load dataset
@@ -118,27 +122,29 @@ class hand_pose_anno_loader:
             comm_take_w_cam_pose = sorted(list(set(comm_take)))
         else:
             comm_take_w_cam_pose = sorted(
-                list(set(comm_take) & set(comm_local_take_uid))
+                list(set(comm_take) & set(comm_local_take_uid)),
             )
 
         logger.info(
-            f"Find {len(comm_take_w_cam_pose)} takes in {self.split} ({self.anno_type}) dataset. Start data processing..."
+            f"Find {len(comm_take_w_cam_pose)} takes in {self.split} ({self.anno_type}) dataset. Start data processing...",
         )
 
         # Iterate through all takes from annotation directory and check
         for curr_take_uid in tqdm(comm_take_w_cam_pose):
             curr_take_name = EGOEXO_UTILS_INST.find_take_name_from_take_uid(
-                curr_take_uid
+                curr_take_uid,
             )
             assert curr_take_name is not None, (
                 f"Take name not found for {curr_take_uid}."
             )
             # Load annotation, camera pose JSON and image directory
             curr_take_anno_path = os.path.join(
-                self.hand_anno_dir, f"{curr_take_uid}.json"
+                self.hand_anno_dir,
+                f"{curr_take_uid}.json",
             )
             curr_take_cam_pose_path = os.path.join(
-                self.cam_pose_dir, f"{curr_take_uid}.json"
+                self.cam_pose_dir,
+                f"{curr_take_uid}.json",
             )
             # Load in annotation JSON and image directory
             curr_take_cam_pose = json.load(open(curr_take_cam_pose_path))
@@ -190,12 +196,12 @@ class hand_pose_anno_loader:
             return curr_take_db
         # Build camera projection matrix
         curr_intri = np.array(cam_pose[aria_cam_name]["camera_intrinsics"]).astype(
-            np.float32
+            np.float32,
         )
         for frame_idx in cam_pose[aria_cam_name]["camera_extrinsics"].keys():
             curr_frame_anno = {}
             curr_extri = np.array(
-                cam_pose[aria_cam_name]["camera_extrinsics"][frame_idx]
+                cam_pose[aria_cam_name]["camera_extrinsics"][frame_idx],
             ).astype(np.float32)
             # Compose current hand GT info in current frame
             for hand_idx, hand_name in enumerate(HAND_ORDER):
@@ -232,10 +238,13 @@ class hand_pose_anno_loader:
         for frame_idx, curr_frame_anno in anno.items():
             # Load in current frame's 2D & 3D annotation and camera parameter
             curr_hand_2d_kpts, curr_hand_3d_kpts, _ = self.load_frame_hand_2d_3d_kpts(
-                curr_frame_anno, aria_cam_name
+                curr_frame_anno,
+                aria_cam_name,
             )
             curr_ego_intr, curr_ego_extr = self.load_frame_cam_pose(
-                frame_idx, cam_pose, aria_cam_name
+                frame_idx,
+                cam_pose,
+                aria_cam_name,
             )
             # Skip this frame if missing valid data
             if (
@@ -257,7 +266,8 @@ class hand_pose_anno_loader:
                 # Transform annotation 2d kpts if in portrait view
                 if self.portrait_view:
                     one_hand_2d_kpts = aria_landscape_to_portrait(
-                        one_hand_2d_kpts, self.undist_img_dim
+                        one_hand_2d_kpts,
+                        self.undist_img_dim,
                     )
                 one_hand_3d_kpts_world = curr_hand_3d_kpts[start_idx:end_idx]
                 # Skip this hand if the hand wrist (root) is None
@@ -266,18 +276,20 @@ class hand_pose_anno_loader:
 
                 # Hand biomechanical structure check
                 one_hand_3d_kpts_world = hand_jnts_dist_angle_check(
-                    one_hand_3d_kpts_world
+                    one_hand_3d_kpts_world,
                 )
                 # 3D world to camera
                 one_hand_3d_kpts_cam = world_to_cam(
-                    one_hand_3d_kpts_world, curr_ego_extr
+                    one_hand_3d_kpts_world,
+                    curr_ego_extr,
                 )
                 # Camera to image plane
                 one_hand_proj_2d_kpts = cam_to_img(one_hand_3d_kpts_cam, curr_ego_intr)
                 # Transform projected 2d kpts if in portrait view
                 if self.portrait_view:
                     one_hand_proj_2d_kpts = aria_landscape_to_portrait(
-                        one_hand_proj_2d_kpts, self.undist_img_dim
+                        one_hand_proj_2d_kpts,
+                        self.undist_img_dim,
                     )
 
                 # Filter projected 2D kpts
@@ -288,7 +300,8 @@ class hand_pose_anno_loader:
 
                 # Filter 2D annotation kpts
                 one_hand_filtered_anno_2d_kpts, _ = self.one_hand_kpts_valid_check(
-                    one_hand_2d_kpts, aria_mask
+                    one_hand_2d_kpts,
+                    aria_mask,
                 )
 
                 # Filter 3D anno by checking reprojection error with 2D anno (which is usually better)
@@ -310,7 +323,7 @@ class hand_pose_anno_loader:
                     one_hand_filtered_3d_kpts_world[~valid_3d_kpts_flag] = None
                     one_hand_filtered_3d_kpts_world[0] = one_hand_3d_kpts_world[0]
                     valid_3d_kpts_flag = ~np.isnan(
-                        np.mean(one_hand_filtered_3d_kpts_cam, axis=1)
+                        np.mean(one_hand_filtered_3d_kpts_cam, axis=1),
                     )
                     # Generate hand bbox based on 2D GT kpts
                     if self.split == "test":
@@ -326,12 +339,12 @@ class hand_pose_anno_loader:
                             self.bbox_padding,
                         )
                     assert sum(
-                        np.isnan(np.mean(one_hand_filtered_3d_kpts_cam, axis=1))
+                        np.isnan(np.mean(one_hand_filtered_3d_kpts_cam, axis=1)),
                     ) == sum(~valid_3d_kpts_flag), (
                         f"Missing 3d kpts count mismatch: {sum(np.isnan(np.mean(one_hand_filtered_3d_kpts_cam, axis=1)))} vs {sum(~valid_3d_kpts_flag)}"
                     )
                     assert sum(
-                        np.isnan(np.mean(one_hand_filtered_3d_kpts_world, axis=1))
+                        np.isnan(np.mean(one_hand_filtered_3d_kpts_world, axis=1)),
                     ) == sum(~valid_3d_kpts_flag), (
                         f"Missing 3d kpts count mismatch: {sum(np.isnan(np.mean(one_hand_filtered_3d_kpts_world, axis=1)))} vs {sum(~valid_3d_kpts_flag)}"
                     )
@@ -380,21 +393,24 @@ class hand_pose_anno_loader:
         aria_cam_name = EgoExoUtils.get_ego_aria_cam_name(take)
         # Load aria calibration model
         curr_aria_calib_json_path = os.path.join(
-            self.aria_calib_dir, f"{curr_take_name}.json"
+            self.aria_calib_dir,
+            f"{curr_take_name}.json",
         )
         if not os.path.exists(curr_aria_calib_json_path):
             logger.warning(
-                f"No Aria calibration JSON file found at {curr_aria_calib_json_path}. Skipped this take."
+                f"No Aria calibration JSON file found at {curr_aria_calib_json_path}. Skipped this take.",
             )
             return None, None
         aria_rgb_calib = calibration.device_calibration_from_json(
-            curr_aria_calib_json_path
+            curr_aria_calib_json_path,
         ).get_camera_calib("camera-rgb")
         dst_cam_calib = calibration.get_linear_camera_calibration(512, 512, 150)
         # Generate mask in undistorted aria view
         mask = np.full((1408, 1408), 255, dtype=np.uint8)
         undistorted_mask = calibration.distort_by_calibration(
-            mask, dst_cam_calib, aria_rgb_calib
+            mask,
+            dst_cam_calib,
+            aria_rgb_calib,
         )
         undistorted_mask = (
             cv2.rotate(undistorted_mask, cv2.ROTATE_90_CLOCKWISE)
@@ -448,7 +464,7 @@ class hand_pose_anno_loader:
                                     [
                                         curr_frame_2d_anno[finger_k_json]["x"],
                                         curr_frame_2d_anno[finger_k_json]["y"],
-                                    ]
+                                    ],
                                 )
                             else:
                                 curr_frame_2d_kpts.append([None, None])
@@ -460,7 +476,7 @@ class hand_pose_anno_loader:
                                 [
                                     curr_frame_2d_anno[finger_k_json]["x"],
                                     curr_frame_2d_anno[finger_k_json]["y"],
-                                ]
+                                ],
                             )
                         else:
                             curr_frame_2d_kpts.append([None, None])
@@ -494,12 +510,12 @@ class hand_pose_anno_loader:
                                         curr_frame_3d_anno[finger_k_json]["x"],
                                         curr_frame_3d_anno[finger_k_json]["y"],
                                         curr_frame_3d_anno[finger_k_json]["z"],
-                                    ]
+                                    ],
                                 )
                                 joints_view_stat.append(
                                     curr_frame_3d_anno[finger_k_json][
                                         "num_views_for_3d"
-                                    ]
+                                    ],
                                 )
                             else:
                                 curr_frame_3d_kpts.append([None, None, None])
@@ -516,10 +532,10 @@ class hand_pose_anno_loader:
                                     curr_frame_3d_anno[finger_k_json]["x"],
                                     curr_frame_3d_anno[finger_k_json]["y"],
                                     curr_frame_3d_anno[finger_k_json]["z"],
-                                ]
+                                ],
                             )
                             joints_view_stat.append(
-                                curr_frame_3d_anno[finger_k_json]["num_views_for_3d"]
+                                curr_frame_3d_anno[finger_k_json]["num_views_for_3d"],
                             )
                         else:
                             curr_frame_3d_kpts.append([None, None, None])
@@ -542,10 +558,10 @@ class hand_pose_anno_loader:
             return None, None
         # Build camera projection matrix
         curr_cam_intrinsic = np.array(
-            cam_pose[aria_cam_name]["camera_intrinsics"]
+            cam_pose[aria_cam_name]["camera_intrinsics"],
         ).astype(np.float32)
         curr_cam_extrinsics = np.array(
-            cam_pose[aria_cam_name]["camera_extrinsics"][frame_idx]
+            cam_pose[aria_cam_name]["camera_extrinsics"][frame_idx],
         ).astype(np.float32)
         return curr_cam_intrinsic, curr_cam_extrinsics
 
@@ -568,10 +584,12 @@ class hand_pose_anno_loader:
         new_kpts[miss_anno_flag] = 0
         # 2. Check out-bound annotation kpts
         x_out_bound = np.logical_or(
-            new_kpts[:, 0] < 0, new_kpts[:, 0] >= self.undist_img_dim[1]
+            new_kpts[:, 0] < 0,
+            new_kpts[:, 0] >= self.undist_img_dim[1],
         )
         y_out_bound = np.logical_or(
-            new_kpts[:, 1] < 0, new_kpts[:, 1] >= self.undist_img_dim[0]
+            new_kpts[:, 1] < 0,
+            new_kpts[:, 1] >= self.undist_img_dim[0],
         )
         out_bound_flag = np.logical_or(x_out_bound, y_out_bound)
         new_kpts[out_bound_flag] = 0

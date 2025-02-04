@@ -1,5 +1,5 @@
 valid_kpts_num_thresh: 9
 
 gt_bodypose:
-    run_demo: false
-    require_valid_kpts: []
+  run_demo: false
+  require_valid_kpts: []

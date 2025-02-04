@@ -1,8 +1,9 @@
-from egoallo.registry import CONFIGS
-from .defaults import get_cfg_defaults
-
 import os.path as osp
+
+from egoallo.registry import CONFIGS
 from egoallo.utils.setup_logger import setup_logger
+
+from .defaults import get_cfg_defaults
 
 logger = setup_logger(output=None, name=__name__)
 

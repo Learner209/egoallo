@@ -1,10 +1,10 @@
 import torch
-from egoallo.joints2smpl import joints2smpl_config
-from jaxtyping import Float, jaxtyped
-from torch import Tensor
 import typeguard
-
+from egoallo.joints2smpl import joints2smpl_config
 from egoallo.joints2smpl.prior import MaxMixturePrior
+from jaxtyping import Float
+from jaxtyping import jaxtyped
+from torch import Tensor
 
 
 # Guassian
@@ -27,7 +27,7 @@ def angle_prior(pose: Float[Tensor, "batch_size 69"]) -> Float[Tensor, "batch_si
     return (
         torch.exp(
             pose[:, [55 - 3, 58 - 3, 12 - 3, 15 - 3]]
-            * torch.tensor([1.0, -1.0, -1, -1.0], device=pose.device)
+            * torch.tensor([1.0, -1.0, -1, -1.0], device=pose.device),
         )
         ** 2
     )
@@ -89,7 +89,11 @@ def body_fitting_loss(
     )
 
     projected_joints = perspective_projection(
-        model_joints, rotation, camera_t, focal_length, camera_center
+        model_joints,
+        rotation,
+        camera_t,
+        focal_length,
+        camera_center,
     )
 
     # Weighted robust reprojection error
@@ -138,7 +142,11 @@ def camera_fitting_loss(
         torch.eye(3, device=model_joints.device).unsqueeze(0).expand(batch_size, -1, -1)
     )
     projected_joints = perspective_projection(
-        model_joints, rotation, camera_t, focal_length, camera_center
+        model_joints,
+        rotation,
+        camera_t,
+        focal_length,
+        camera_center,
     )
 
     # get the indexed four
@@ -203,7 +211,7 @@ def body_fitting_loss_3d(
     joint3d_error = gmof((model_joints + camera_translation) - j3d, sigma)
 
     joint3d_loss_part = (joints3d_conf**2) * joint3d_error.sum(
-        dim=-1
+        dim=-1,
     )  # average over x,y,z 3d. conf is confidence level of each joint.
     joint3d_loss = (joint_loss_weight**2) * joint3d_loss_part
 
@@ -218,7 +226,10 @@ def body_fitting_loss_3d(
     # Calculate the loss due to interpenetration
     if use_collision:
         triangles = torch.index_select(model_vertices, 1, model_faces).view(
-            batch_size, -1, 3, 3
+            batch_size,
+            -1,
+            3,
+            3,
         )
 
         with torch.no_grad():
@@ -230,7 +241,7 @@ def body_fitting_loss_3d(
 
         if collision_idxs.ge(0).sum().item() > 0:
             collision_loss = torch.sum(
-                collision_loss_weight * pen_distance(triangles, collision_idxs)
+                collision_loss_weight * pen_distance(triangles, collision_idxs),
             )
 
     pose_preserve_loss = (pose_preserve_weight**2) * (

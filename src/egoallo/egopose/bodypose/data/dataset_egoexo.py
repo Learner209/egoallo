@@ -6,10 +6,9 @@ import random
 import joblib
 import numpy as np
 import torch
+from egoallo.utils.setup_logger import setup_logger
 from torch.utils.data import Dataset
 from tqdm import tqdm
-
-from egoallo.utils.setup_logger import setup_logger
 
 logger = setup_logger(output=None, name=__name__)
 
@@ -25,7 +24,11 @@ class Dataset_EgoExo(Dataset):
         self.root_takes = os.path.join(self.root, "takes")
         self.split = opt["split"]
         self.root_poses = os.path.join(
-            self.root, "annotations", "ego_pose", self.split, "body"
+            self.root,
+            "annotations",
+            "ego_pose",
+            self.split,
+            "body",
         )
         self.use_pseudo = opt["use_pseudo"]
         self.coord = opt["coord"]
@@ -33,14 +36,14 @@ class Dataset_EgoExo(Dataset):
         # load sequences paths
 
         manually_annotated_takes = os.listdir(
-            os.path.join(self.root_poses, "annotation")
+            os.path.join(self.root_poses, "annotation"),
         )
         self.manually_annotated_takes = [
             take.split(".")[0] for take in manually_annotated_takes
         ]
         if self.use_pseudo:
             pseudo_annotated_takes = os.listdir(
-                os.path.join(self.root_poses, "automatic")
+                os.path.join(self.root_poses, "automatic"),
             )
             self.pseudo_annotated_takes = [
                 take.split(".")[0] for take in pseudo_annotated_takes
@@ -85,8 +88,8 @@ class Dataset_EgoExo(Dataset):
                             os.path.join(
                                 self.root_poses.replace("body", "camera_pose"),
                                 take_uid + ".json",
-                            )
-                        )
+                            ),
+                        ),
                     )
                     camera_json["metadata"]["take_name"]
                     if take_uid not in self.manually_annotated_takes:
@@ -95,42 +98,54 @@ class Dataset_EgoExo(Dataset):
                             pose_json = json.load(
                                 open(
                                     os.path.join(
-                                        self.root_poses, "automatic", take_uid + ".json"
-                                    )
-                                )
+                                        self.root_poses,
+                                        "automatic",
+                                        take_uid + ".json",
+                                    ),
+                                ),
                             )
                             if (
                                 len(pose_json) > (self.slice_window + 2)
                             ) and self.split == "train":
                                 ann, traj = self.translate_poses(
-                                    pose_json, camera_json, self.coord
+                                    pose_json,
+                                    camera_json,
+                                    self.coord,
                                 )
                                 if len(traj) > (self.slice_window + 2):
                                     self.valid_take_uids.append(take_uid)
                             elif self.split != "train":
                                 ann, traj = self.translate_poses(
-                                    pose_json, camera_json, self.coord
+                                    pose_json,
+                                    camera_json,
+                                    self.coord,
                                 )
                                 self.valid_take_uids.append(take_uid)
                     elif take_uid in self.manually_annotated_takes:
                         pose_json = json.load(
                             open(
                                 os.path.join(
-                                    self.root_poses, "annotation", take_uid + ".json"
-                                )
-                            )
+                                    self.root_poses,
+                                    "annotation",
+                                    take_uid + ".json",
+                                ),
+                            ),
                         )
                         if (
                             len(pose_json) > (self.slice_window + 2)
                         ) and self.split == "train":
                             ann, traj = self.translate_poses(
-                                pose_json, camera_json, self.coord
+                                pose_json,
+                                camera_json,
+                                self.coord,
                             )
                             if len(traj) > (self.slice_window + 2):
                                 self.valid_take_uids.append(take_uid)
                         elif self.split != "train":
                             ann, traj = self.translate_poses(
-                                pose_json, camera_json, self.coord
+                                pose_json,
+                                camera_json,
+                                self.coord,
                             )
                             self.valid_take_uids.append(take_uid)
 
@@ -199,7 +214,8 @@ class Dataset_EgoExo(Dataset):
                     T_world_camera = np.linalg.inv(T_world_camera_)
                 elif coord == "aria":
                     T_world_camera = np.dot(
-                        T_first_camera, np.linalg.inv(T_world_camera_)
+                        T_first_camera,
+                        np.linalg.inv(T_world_camera_),
                     )
                 else:
                     T_world_camera = T_world_camera_
@@ -213,7 +229,7 @@ class Dataset_EgoExo(Dataset):
                                 joints[joint_name]["x"],
                                 joints[joint_name]["y"],
                                 joints[joint_name]["z"],
-                            ]
+                            ],
                         )
                         if coord == "global":
                             new_joint4d = joint4d
@@ -221,7 +237,7 @@ class Dataset_EgoExo(Dataset):
                             new_joint4d = T_first_camera.dot(joint4d)
                         else:
                             new_joint4d = T_world_camera_.dot(
-                                joint4d
+                                joint4d,
                             )  # The skels always stay in 0,0,0 wrt their camera frame
                         joints[joint_name]["x"] = new_joint4d[0]
                         joints[joint_name]["y"] = new_joint4d[1]
@@ -251,7 +267,7 @@ class Dataset_EgoExo(Dataset):
             if keyp in keypoints:
                 flags.append(1)  # visible
                 poses.append(
-                    [skeleton[keyp]["x"], skeleton[keyp]["y"], skeleton[keyp]["z"]]
+                    [skeleton[keyp]["x"], skeleton[keyp]["y"], skeleton[keyp]["z"]],
                 )  # visible
             else:
                 flags.append(0)  # not visible
@@ -264,15 +280,16 @@ class Dataset_EgoExo(Dataset):
         camera_json = json.load(
             open(
                 os.path.join(
-                    self.root_poses.replace("body", "camera_pose"), take_uid + ".json"
-                )
-            )
+                    self.root_poses.replace("body", "camera_pose"),
+                    take_uid + ".json",
+                ),
+            ),
         )
         take_name = camera_json["metadata"]["take_name"]
 
         if self.use_pseudo and take_uid in self.pseudo_annotated_takes:
             pose_json = json.load(
-                open(os.path.join(self.root_poses, "automatic", take_uid + ".json"))
+                open(os.path.join(self.root_poses, "automatic", take_uid + ".json")),
             )
             if (len(pose_json) > (self.slice_window + 2)) and self.split == "train":
                 ann, traj = self.translate_poses(pose_json, camera_json, self.coord)
@@ -280,7 +297,7 @@ class Dataset_EgoExo(Dataset):
                 ann, traj = self.translate_poses(pose_json, camera_json, self.coord)
         elif take_uid in self.manually_annotated_takes:
             pose_json = json.load(
-                open(os.path.join(self.root_poses, "annotation", take_uid + ".json"))
+                open(os.path.join(self.root_poses, "annotation", take_uid + ".json")),
             )
             if (len(pose_json) > (self.slice_window + 2)) and self.split == "train":
                 ann, traj = self.translate_poses(pose_json, camera_json, self.coord)
@@ -288,7 +305,7 @@ class Dataset_EgoExo(Dataset):
                 ann, traj = self.translate_poses(pose_json, camera_json, self.coord)
         else:
             raise UserWarning(
-                "Take uid {} not found in any annotation folder".format(take_uid)
+                "Take uid {} not found in any annotation folder".format(take_uid),
             )
 
         pose = ann
@@ -347,7 +364,11 @@ class Dataset_EgoExo_inference(Dataset):
         self.root_takes = os.path.join(self.root, "takes")
         self.split = opt["split"]  # val or test
         self.camera_poses = os.path.join(
-            self.root, "annotations", "ego_pose", self.split, "camera_pose"
+            self.root,
+            "annotations",
+            "ego_pose",
+            self.split,
+            "camera_pose",
         )
         self.use_pseudo = opt["use_pseudo"]
         self.coord = opt["coord"]
@@ -368,12 +389,14 @@ class Dataset_EgoExo_inference(Dataset):
 
         for take_uid in tqdm(self.takes_metadata):
             camera_json = json.load(
-                open(os.path.join(self.camera_poses, take_uid + ".json"))
+                open(os.path.join(self.camera_poses, take_uid + ".json")),
             )
             camera_json["metadata"]["take_name"]
             self.cameras[take_uid] = camera_json
             traj = self.translate_camera(
-                [*self.dummy_json[take_uid]["body"]], camera_json, self.coord
+                [*self.dummy_json[take_uid]["body"]],
+                camera_json,
+                self.coord,
             )
             self.trajectories[take_uid] = traj
 

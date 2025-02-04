@@ -29,16 +29,16 @@ Author: Christoph Gohlke
 Organization: Laboratory for Fluorescence Dynamics, University of California, Irvine
 """
 
-from __future__ import division, print_function
+from __future__ import division
+from __future__ import print_function
 
 import math
 
 import numpy
-import torch
-from torch import nn
-
 import numpy as np
+import torch
 from pytorch3d import transforms as transforms
+from torch import nn
 
 
 __all__ = [
@@ -61,8 +61,6 @@ __all__ = [
 ]
 
 
-"""Constant with number pi
-"""
 PI = torch.Tensor([3.14159265358979323846])
 
 
@@ -232,7 +230,7 @@ def convert_points_from_homogeneous(points):
         raise TypeError("Input type is not a torch.Tensor. Got {}".format(type(points)))
     if len(points.shape) < 2:
         raise ValueError(
-            "Input must be at least a 2D tensor. Got {}".format(points.shape)
+            "Input must be at least a 2D tensor. Got {}".format(points.shape),
         )
     return points[..., :-1] / points[..., -1:]
 
@@ -251,7 +249,7 @@ def convert_points_to_homogeneous(points):
         raise TypeError("Input type is not a torch.Tensor. Got {}".format(type(points)))
     if len(points.shape) < 2:
         raise ValueError(
-            "Input must be at least a 2D tensor. Got {}".format(points.shape)
+            "Input must be at least a 2D tensor. Got {}".format(points.shape),
         )
     return nn.functional.pad(points, (0, 1), "constant", 1.0)
 
@@ -295,7 +293,8 @@ def aa_to_rotMat(aa):
         r12 = -wx * sin_theta + wy * wz * (k_one - cos_theta)
         r22 = cos_theta + wz * wz * (k_one - cos_theta)
         rotation_matrix = torch.cat(
-            [r00, r01, r02, r10, r11, r12, r20, r21, r22], dim=1
+            [r00, r01, r02, r10, r11, r12, r20, r21, r22],
+            dim=1,
         )
         return rotation_matrix.view(-1, 3, 3)
 
@@ -303,7 +302,8 @@ def aa_to_rotMat(aa):
         rx, ry, rz = torch.chunk(aa, 3, dim=1)
         k_one = torch.ones_like(rx)
         rotation_matrix = torch.cat(
-            [k_one, -rz, ry, rz, k_one, -rx, -ry, rx, k_one], dim=1
+            [k_one, -rz, ry, rz, k_one, -rx, -ry, rx, k_one],
+            dim=1,
         )
         return rotation_matrix.view(-1, 3, 3)
 
@@ -380,7 +380,7 @@ def orth6d_to_rotMat(ortho6d):
         v_mag = torch.max(
             v_mag,
             torch.autograd.Variable(
-                torch.tensor([1e-8], dtype=v_mag.dtype).to(v.device)
+                torch.tensor([1e-8], dtype=v_mag.dtype).to(v.device),
             ),
         )
         v_mag = v_mag.view(batch, 1).expand(batch, v.shape[1])
@@ -397,7 +397,8 @@ def orth6d_to_rotMat(ortho6d):
         k = u[:, 0] * v[:, 1] - u[:, 1] * v[:, 0]
 
         out = torch.cat(
-            (i.view(batch, 1), j.view(batch, 1), k.view(batch, 1)), 1
+            (i.view(batch, 1), j.view(batch, 1), k.view(batch, 1)),
+            1,
         )  # BS x 3
 
         return out
@@ -653,14 +654,15 @@ def canonicalize_smpl_root(aa_poses, root_vec=[PI, 0, 0]):
     device = aa_poses.device
 
     target_mat = aa_to_rotMat(
-        torch.tensor([root_vec], dtype=aa_poses.dtype).to(device)
+        torch.tensor([root_vec], dtype=aa_poses.dtype).to(device),
     )[:, :3, :3].to(device)  # 1 x 3 x 3
     org_mats = aa_to_rotMat(aa_poses[:, :3])[:, :3, :3].to(device)  # N x 3 x 3
     org_mat_inv = torch.inverse(org_mats[0]).to(device)  # 3 x 3
     apply_mat = torch.matmul(target_mat, org_mat_inv)  # 1 x 3 x 3
     res_root_mat = torch.matmul(apply_mat, org_mats)  # N x 3 x 3
     zeros = torch.zeros(
-        (res_root_mat.shape[0], res_root_mat.shape[1], 1), dtype=res_root_mat.dtype
+        (res_root_mat.shape[0], res_root_mat.shape[1], 1),
+        dtype=res_root_mat.dtype,
     ).to(device)  # N x 3 x 1
     res_root_mats_4 = torch.cat((res_root_mat, zeros), dim=2)  # N x 3 x 4
     res_root_aa = rotMat_to_aa(res_root_mats_4)  # N x 3
@@ -882,20 +884,20 @@ def rotMat_to_quat(rotation_matrix, eps=1e-6):
     """
     if not torch.is_tensor(rotation_matrix):
         raise TypeError(
-            "Input type is not a torch.Tensor. Got {}".format(type(rotation_matrix))
+            "Input type is not a torch.Tensor. Got {}".format(type(rotation_matrix)),
         )
 
     if len(rotation_matrix.shape) > 3:
         raise ValueError(
             "Input size must be a three dimensional tensor. Got {}".format(
-                rotation_matrix.shape
-            )
+                rotation_matrix.shape,
+            ),
         )
     if not rotation_matrix.shape[-2:] == (3, 4):
         raise ValueError(
             "Input size must be a N x 3 x 4  tensor. Got {}".format(
-                rotation_matrix.shape
-            )
+                rotation_matrix.shape,
+            ),
         )
 
     rmat_t = torch.transpose(rotation_matrix, 1, 2)
@@ -967,7 +969,7 @@ def rotMat_to_quat(rotation_matrix, eps=1e-6):
         t0_rep * mask_c0
         + t1_rep * mask_c1
         + t2_rep * mask_c2  # noqa
-        + t3_rep * mask_c3
+        + t3_rep * mask_c3,
     )  # noqa
     q *= 0.5
     return q
@@ -1398,12 +1400,12 @@ def quat_to_aa_t(quaternion: torch.Tensor) -> torch.Tensor:
     """
     if not torch.is_tensor(quaternion):
         raise TypeError(
-            "Input type is not a torch.Tensor. Got {}".format(type(quaternion))
+            "Input type is not a torch.Tensor. Got {}".format(type(quaternion)),
         )
 
     if not quaternion.shape[-1] == 4:
         raise ValueError(
-            "Input must be a tensor of shape Nx4 or 4. Got {}".format(quaternion.shape)
+            "Input must be a tensor of shape Nx4 or 4. Got {}".format(quaternion.shape),
         )
     # unpack input and compute conversion
     q1: torch.Tensor = quaternion[..., 1]
@@ -1866,7 +1868,7 @@ def rand_quat(rand=None):
     t1 = pi2 * rand[1]
     t2 = pi2 * rand[2]
     return np.array(
-        [np.cos(t2) * r2, np.sin(t1) * r1, np.cos(t1) * r1, np.sin(t2) * r2]
+        [np.cos(t2) * r2, np.sin(t1) * r1, np.cos(t1) * r1, np.sin(t2) * r2],
     )
 
 
@@ -2282,7 +2284,7 @@ def rotation_matrix(angle, direction, point=None):
             [0.0, -direction[2], direction[1]],
             [direction[2], 0.0, -direction[0]],
             [-direction[1], direction[0], 0.0],
-        ]
+        ],
     )
     M = numpy.identity(4)
     M[:3, :3] = R
@@ -2718,7 +2720,11 @@ def decompose_matrix(matrix):
 
 
 def compose_matrix(
-    scale=None, shear=None, angles=None, translate=None, perspective=None
+    scale=None,
+    shear=None,
+    angles=None,
+    translate=None,
+    perspective=None,
 ):
     """Return transformation matrix from sequence of transformations.
 
@@ -2797,14 +2803,14 @@ def orthogonalization_matrix(lengths, angles):
             [-a * sinb * co, b * sina, 0.0, 0.0],
             [a * cosb, b * cosa, c, 0.0],
             [0.0, 0.0, 0.0, 1.0],
-        ]
+        ],
     )
 
 
 def affine_matrix_from_points(v0, v1, shear=True, scale=True, usesvd=True):
     """Return affine transform matrix to register two point sets.
 
-    v0 and v1 are shape (ndims, \*) arrays of at least ndims non-homogeneous
+    v0 and v1 are shape (ndims, *) arrays of at least ndims non-homogeneous
     coordinates, where ndims is the dimensionality of the coordinate space.
 
     If shear is False, a similarity transformation matrix is returned.
@@ -2915,7 +2921,7 @@ def affine_matrix_from_points(v0, v1, shear=True, scale=True, usesvd=True):
 def superimposition_matrix(v0, v1, scale=False, usesvd=True):
     """Return matrix to transform given 3D point set into second point set.
 
-    v0 and v1 are shape (3, \*) or (4, \*) arrays of at least 3 points.
+    v0 and v1 are shape (3, *) or (4, *) arrays of at least 3 points.
 
     The parameters scale and usesvd are explained in the more general
     affine_matrix_from_points function.

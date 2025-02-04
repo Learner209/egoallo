@@ -1,10 +1,10 @@
 # project_aria.py
 import cv2
 import numpy as np
+from egoallo.utils.setup_logger import setup_logger
 from matplotlib import pyplot as plt
 from projectaria_tools.core import calibration
 from projectaria_tools.core.image import InterpolationMethod
-from egoallo.utils.setup_logger import setup_logger
 
 logger = setup_logger(output=None, name=__name__)
 
@@ -49,7 +49,7 @@ class CalibrationUtilities:
 
         camera_name = "camera-rgb"
         transform_device_camera = self.device_calib.get_transform_device_sensor(
-            camera_name
+            camera_name,
         ).to_matrix()
         transform_camera_device = np.linalg.inv(transform_device_camera)
         print(f"Device calibration origin label {self.device_calib.get_origin_label()}")
@@ -61,7 +61,8 @@ class CalibrationUtilities:
             point_in_device = np.array([0, 0, 10])
             point_in_camera = (
                 np.matmul(
-                    transform_camera_device[0:3, 0:3], point_in_device.transpose()
+                    transform_camera_device[0:3, 0:3],
+                    point_in_device.transpose(),
                 )
                 + transform_camera_device[0:3, 3]
             )
@@ -69,7 +70,7 @@ class CalibrationUtilities:
             maybe_pixel = rgb_calib.project(point_in_camera)
             if maybe_pixel is not None:
                 print(
-                    f"Get pixel {maybe_pixel} within image of size {rgb_calib.get_image_size()}"
+                    f"Get pixel {maybe_pixel} within image of size {rgb_calib.get_image_size()}",
                 )
 
     def get_calib_for_sensor_w_device_base(self):
@@ -79,16 +80,16 @@ class CalibrationUtilities:
         et_calib = self.device_calib.get_aria_et_camera_calib()
         if et_calib is not None:
             print(
-                f"Camera {et_calib[0].get_label()} has image size {et_calib[0].get_image_size()}"
+                f"Camera {et_calib[0].get_label()} has image size {et_calib[0].get_image_size()}",
             )
             print(
-                f"Camera {et_calib[1].get_label()} has image size {et_calib[1].get_image_size()}"
+                f"Camera {et_calib[1].get_label()} has image size {et_calib[1].get_image_size()}",
             )
 
         imu_calib = self.device_calib.get_imu_calib("imu-left")
         if imu_calib is not None:
             print(
-                f"{imu_calib.get_label()} has extrinsics transform_Device_Imu:\n {imu_calib.get_transform_device_imu().to_matrix3x4()}"
+                f"{imu_calib.get_label()} has extrinsics transform_Device_Imu:\n {imu_calib.get_transform_device_imu().to_matrix3x4()}",
             )
 
     def undistort_aria_image(self):
@@ -115,25 +116,36 @@ class CalibrationUtilities:
 
         # distort image
         rectified_array = calibration.distort_by_calibration(
-            image_array, dst_calib, src_calib, InterpolationMethod.BILINEAR
+            image_array,
+            dst_calib,
+            src_calib,
+            InterpolationMethod.BILINEAR,
         )
 
         # visualize input and results
         plt.figure()
         fig, axes = plt.subplots(1, 2, figsize=(12, 5))
         fig.suptitle(
-            f"Image undistortion (focal length = {dst_calib.get_focal_lengths()})"
+            f"Image undistortion (focal length = {dst_calib.get_focal_lengths()})",
         )
 
         axes[0].imshow(image_array, cmap="gray", vmin=0, vmax=255)
         axes[0].title.set_text(f"sensor image ({cam_name})")
         axes[0].tick_params(
-            left=False, right=False, labelleft=False, labelbottom=False, bottom=False
+            left=False,
+            right=False,
+            labelleft=False,
+            labelbottom=False,
+            bottom=False,
         )
         axes[1].imshow(rectified_array, cmap="gray", vmin=0, vmax=255)
         axes[1].title.set_text(f"undistorted image ({cam_name})")
         axes[1].tick_params(
-            left=False, right=False, labelleft=False, labelbottom=False, bottom=False
+            left=False,
+            right=False,
+            labelleft=False,
+            labelbottom=False,
+            bottom=False,
         )
         plt.show()
 
@@ -141,7 +153,10 @@ class CalibrationUtilities:
 
     @staticmethod
     def get_exo_cam_masks(
-        take, exo_traj_df, portrait_view=False, dimension=(3840, 2160)
+        take,
+        exo_traj_df,
+        portrait_view=False,
+        dimension=(3840, 2160),
     ):
         """
         Generate masks for exo cameras in the undistorted aria view.
@@ -183,7 +198,10 @@ class CalibrationUtilities:
             # Generate mask in undistorted aria view
             mask = np.full(dimension[::-1], 255, dtype=np.uint8)
             undistorted_mask, new_K_latest = CalibrationUtilities.undistort_exocam(
-                mask, I, D, dimension
+                mask,
+                I,
+                D,
+                dimension,
             )
             undistorted_mask = (
                 cv2.rotate(undistorted_mask, cv2.ROTATE_90_CLOCKWISE)
@@ -195,7 +213,7 @@ class CalibrationUtilities:
 
         if len(exo_cam_masks) == 0:
             logger.warning(
-                "No exo camera masks generated. Probably because there is a mismatch between take-file specified exo-cam_names and the goprocalibs.csv"
+                "No exo camera masks generated. Probably because there is a mismatch between take-file specified exo-cam_names and the goprocalibs.csv",
             )
 
         return exo_cam_masks, valid_exo_cam_names
@@ -248,10 +266,19 @@ class CalibrationUtilities:
 
         # This is how scaled_K, dim2 and balance are used to determine the final K used to un-distort image. OpenCV document failed to make this clear!
         new_K = cv2.fisheye.estimateNewCameraMatrixForUndistortRectify(
-            scaled_K, distortion_coeffs, dim2, np.eye(3), balance=balance
+            scaled_K,
+            distortion_coeffs,
+            dim2,
+            np.eye(3),
+            balance=balance,
         )
         map1, map2 = cv2.fisheye.initUndistortRectifyMap(
-            scaled_K, distortion_coeffs, np.eye(3), new_K, dim3, cv2.CV_16SC2
+            scaled_K,
+            distortion_coeffs,
+            np.eye(3),
+            new_K,
+            dim3,
+            cv2.CV_16SC2,
         )
         undistorted_image = cv2.remap(
             image,
@@ -270,7 +297,7 @@ class CalibrationUtilities:
                 [_raw_camera["intrinsics_0"], 0, _raw_camera["intrinsics_2"]],
                 [0, _raw_camera["intrinsics_1"], _raw_camera["intrinsics_3"]],
                 [0, 0, 1],
-            ]
+            ],
         )
         distortion_coeffs = np.array(
             [
@@ -278,6 +305,6 @@ class CalibrationUtilities:
                 _raw_camera["intrinsics_5"],
                 _raw_camera["intrinsics_6"],
                 _raw_camera["intrinsics_7"],
-            ]
+            ],
         )
         return distortion_coeffs, intrinsics

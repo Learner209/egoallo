@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-
 # Max-Planck-Gesellschaft zur Förderung der Wissenschaften e.V. (MPG) is
 # holder of all proprietary rights on this computer program.
 # You can only use this computer program if you have closed
@@ -13,18 +12,15 @@
 # for Intelligent Systems. All rights reserved.
 #
 # Contact: ps-license@tuebingen.mpg.de
-
 from __future__ import absolute_import
-from __future__ import print_function
 from __future__ import division
+from __future__ import print_function
 
-import sys
 import os
-
 import pickle
+import sys
 
 import numpy as np
-
 import torch
 from torch import nn
 
@@ -63,7 +59,8 @@ class SMPLifyAnglePrior(nn.Module):
         self.register_buffer("angle_prior_idxs", angle_prior_idxs)
 
         angle_prior_signs = np.array(
-            [1, -1, -1, -1], dtype=np.float32 if dtype == torch.float32 else np.float64
+            [1, -1, -1, -1],
+            dtype=np.float32 if dtype == torch.float32 else np.float64,
         )
         angle_prior_signs = torch.tensor(angle_prior_signs, dtype=dtype)
         self.register_buffer("angle_prior_signs", angle_prior_signs)
@@ -123,7 +120,7 @@ class MaxMixturePrior(nn.Module):
         if not os.path.exists(full_gmm_fn):
             print(
                 'The path to the mixture prior "{}"'.format(full_gmm_fn)
-                + " does not exist, exiting!"
+                + " does not exist, exiting!",
             )
             sys.exit(-1)
 
@@ -204,7 +201,8 @@ class MaxMixturePrior(nn.Module):
 
             curr_loglikelihood = torch.einsum("bj,ji->bi", [diff_from_mean, prec])
             curr_loglikelihood = torch.einsum(
-                "bi,bi->b", [curr_loglikelihood, diff_from_mean]
+                "bi,bi->b",
+                [curr_loglikelihood, diff_from_mean],
             )
             cov_term = torch.log(torch.det(cov) + self.epsilon)
             curr_loglikelihood += 0.5 * (cov_term + self.random_var_dim * self.pi_term)

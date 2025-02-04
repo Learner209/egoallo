@@ -8,18 +8,23 @@ from __future__ import annotations
 
 import pickle
 from pathlib import Path
-from typing import Protocol, TypedDict, cast
+from typing import cast
+from typing import Protocol
+from typing import TypedDict
 
 import numpy as np
 import torch
 import typeguard
-from jaxtyping import Float, Int, jaxtyped
+from jaxtyping import Float
+from jaxtyping import Int
+from jaxtyping import jaxtyped
 from projectaria_tools.core import mps
 from projectaria_tools.core.mps.utils import get_nearest_wrist_and_palm_pose
 from torch import Tensor
 
 from .tensor_dataclass import TensorDataclass
-from .transforms import SE3, SO3
+from .transforms import SE3
+from .transforms import SO3
 
 
 class SingleHandHamerOutputWrtCamera(TypedDict):
@@ -86,7 +91,7 @@ class CorrespondedAriaHandWristPoseDetections(TensorDataclass):
             wrist_and_palm_normal_device: WristAndPalmNormals
 
         wp_poses = mps.hand_tracking.read_wrist_and_palm_poses(
-            str(wrist_and_palm_poses_csv_path)
+            str(wrist_and_palm_poses_csv_path),
         )
         detections_left = list[OneSide]()
         detections_right = list[OneSide]()
@@ -110,7 +115,8 @@ class CorrespondedAriaHandWristPoseDetections(TensorDataclass):
                 detections_right.append(wp_pose.right_hand)
 
         def form_detections_concat(
-            detections: list[OneSide], indices: list[int]
+            detections: list[OneSide],
+            indices: list[int],
         ) -> AriaHandWristPoseWrtWorld | None:
             assert len(detections) == len(indices)
             if len(indices) == 0:
@@ -118,24 +124,25 @@ class CorrespondedAriaHandWristPoseDetections(TensorDataclass):
 
             Tslice_world_device = SE3(
                 torch.from_numpy(Ts_world_device[np.array(indices), :]).to(
-                    dtype=torch.float32
-                )
+                    dtype=torch.float32,
+                ),
             )
             Rslice_world_device = SO3(
                 torch.from_numpy(Ts_world_device[np.array(indices), :4]).to(
-                    dtype=torch.float32
-                )
+                    dtype=torch.float32,
+                ),
             )
 
             return AriaHandWristPoseWrtWorld(
                 confidence=torch.from_numpy(
-                    np.array([d.confidence for d in detections])
+                    np.array([d.confidence for d in detections]),
                 ),
                 wrist_position=Tslice_world_device
                 @ torch.from_numpy(
                     np.array(
-                        [d.wrist_position_device for d in detections], dtype=np.float32
-                    )
+                        [d.wrist_position_device for d in detections],
+                        dtype=np.float32,
+                    ),
                 ),
                 wrist_normal=Rslice_world_device
                 @ torch.from_numpy(
@@ -145,13 +152,14 @@ class CorrespondedAriaHandWristPoseDetections(TensorDataclass):
                             for d in detections
                         ],
                         dtype=np.float32,
-                    )
+                    ),
                 ),
                 palm_position=Tslice_world_device
                 @ torch.from_numpy(
                     np.array(
-                        [d.palm_position_device for d in detections], dtype=np.float32
-                    )
+                        [d.palm_position_device for d in detections],
+                        dtype=np.float32,
+                    ),
                 ),
                 palm_normal=Rslice_world_device
                 @ torch.from_numpy(
@@ -161,17 +169,19 @@ class CorrespondedAriaHandWristPoseDetections(TensorDataclass):
                             for d in detections
                         ],
                         dtype=np.float32,
-                    )
+                    ),
                 ),
                 indices=torch.from_numpy(np.array(indices, dtype=np.int64)),
             )
 
         return CorrespondedAriaHandWristPoseDetections(
             detections_left_concat=form_detections_concat(
-                detections_left, indices_left
+                detections_left,
+                indices_left,
             ),
             detections_right_concat=form_detections_concat(
-                detections_right, indices_right
+                detections_right,
+                indices_right,
             ),
         )
 
@@ -228,10 +238,10 @@ class CorrespondedHamerDetections(TensorDataclass):
             T_cpf_cam=self.T_cpf_cam,
             focal_length=self.focal_length,
             detections_left_concat=_get_detections_in_window(
-                self.detections_left_concat
+                self.detections_left_concat,
             ),
             detections_right_concat=_get_detections_in_window(
-                self.detections_right_concat
+                self.detections_right_concat,
             ),
         )
 
@@ -275,11 +285,11 @@ class CorrespondedHamerDetections(TensorDataclass):
                     for time_ns in detections_wrt_cam.keys()
                     if time_ns / 1e9 >= target_timestamps_sec[0] - 1 / est_fps
                     and time_ns / 1e9 <= target_timestamps_sec[-1] + 1 / est_fps
-                ]
+                ],
             )
             delta_matrix = np.abs(
                 np.array(target_timestamps_sec)[:, None]
-                - np.array(detect_ns)[None, :] / 1e9
+                - np.array(detect_ns)[None, :] / 1e9,
             )
 
             # For each target, which is the closest detection?
@@ -299,10 +309,10 @@ class CorrespondedHamerDetections(TensorDataclass):
             return out
 
         detections_left = match_detections_to_targets(
-            hamer_out["detections_left_wrt_cam"]
+            hamer_out["detections_left_wrt_cam"],
         )
         detections_right = match_detections_to_targets(
-            hamer_out["detections_right_wrt_cam"]
+            hamer_out["detections_right_wrt_cam"],
         )
         assert (
             len(detections_left) == len(detections_right) == len(target_timestamps_sec)
@@ -345,7 +355,8 @@ class CorrespondedHamerDetections(TensorDataclass):
                     )
                     assert dist_matrix.shape == (num_d, num_d_other)
                     keep_mask = np.logical_and(
-                        keep_mask, np.all(dist_matrix > 0.1, axis=-1)
+                        keep_mask,
+                        np.all(dist_matrix > 0.1, axis=-1),
                     )
 
                 if keep_mask.sum() == 0:
@@ -355,7 +366,7 @@ class CorrespondedHamerDetections(TensorDataclass):
                         cast(
                             SingleHandHamerOutputWrtCamera,
                             {k: cast(np.ndarray, v)[keep_mask] for k, v in d.items()},
-                        )
+                        ),
                     )
             del detections_side
 
@@ -376,8 +387,8 @@ class CorrespondedHamerDetections(TensorDataclass):
                             d["verts"][0]
                             for d in detections_side_filtered
                             if d is not None
-                        ]
-                    )
+                        ],
+                    ),
                 ).to(torch.float32),
                 keypoints_3d=torch.from_numpy(
                     np.stack(
@@ -386,8 +397,8 @@ class CorrespondedHamerDetections(TensorDataclass):
                             d["keypoints_3d"][0]
                             for d in detections_side_filtered
                             if d is not None
-                        ]
-                    )
+                        ],
+                    ),
                 ).to(torch.float32),
                 mano_hand_global_orient=torch.from_numpy(
                     np.stack(
@@ -396,8 +407,8 @@ class CorrespondedHamerDetections(TensorDataclass):
                             d["mano_hand_global_orient"][0]
                             for d in detections_side_filtered
                             if d is not None
-                        ]
-                    )
+                        ],
+                    ),
                 ).to(torch.float32),
                 single_hand_quats=SO3.from_matrix(
                     torch.from_numpy(
@@ -407,9 +418,9 @@ class CorrespondedHamerDetections(TensorDataclass):
                                 d["mano_hand_pose"][0]
                                 for d in detections_side_filtered
                                 if d is not None
-                            ]
-                        )
-                    ).to(torch.float32)
+                            ],
+                        ),
+                    ).to(torch.float32),
                 ).wxyz,
                 indices=torch.from_numpy(valid_detection_indices),
             )
@@ -417,19 +428,21 @@ class CorrespondedHamerDetections(TensorDataclass):
 
         return CorrespondedHamerDetections(
             mano_faces_right=torch.from_numpy(
-                hamer_out["mano_faces_right"].astype(np.int64)
+                hamer_out["mano_faces_right"].astype(np.int64),
             ),
             mano_faces_left=torch.from_numpy(
-                hamer_out["mano_faces_left"].astype(np.int64)
+                hamer_out["mano_faces_left"].astype(np.int64),
             ),
             detections_left_tuple=tuple(detections_left),
             detections_right_tuple=tuple(detections_right),
             T_cpf_cam=torch.from_numpy(hamer_out["T_cpf_cam"]).to(torch.float32),
             focal_length=450,
             detections_left_concat=make_concat_detections(
-                detections_left, detections_right
+                detections_left,
+                detections_right,
             ),
             detections_right_concat=make_concat_detections(
-                detections_right, detections_left
+                detections_right,
+                detections_left,
             ),
         )

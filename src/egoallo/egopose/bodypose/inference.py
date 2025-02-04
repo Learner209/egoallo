@@ -1,13 +1,15 @@
-import json
-import os.path
-import logging
 import argparse
+import json
+import logging
+import os.path
+
 import numpy as np
-from utils import utils_logger
-from torch.utils.data import DataLoader
-from utils import utils_option as option
-from data.select_dataset import define_Dataset
 from models.select_model import define_Model
+from torch.utils.data import DataLoader
+from utils import utils_logger
+from utils import utils_option as option
+
+from data.select_dataset import define_Dataset
 
 
 def main(json_path="options/inference_egoexo.json"):
@@ -19,7 +21,10 @@ def main(json_path="options/inference_egoexo.json"):
 
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "-opt", type=str, default=json_path, help="Path to option JSON file."
+        "-opt",
+        type=str,
+        default=json_path,
+        help="Path to option JSON file.",
     )
 
     opt = option.parse(parser.parse_args().opt, is_train=True)
@@ -38,7 +43,8 @@ def main(json_path="options/inference_egoexo.json"):
     # ----------------------------------------
     # -->-->-->-->-->-->-->-->-->-->-->-->-->-
     init_iter, init_path_G = option.find_last_checkpoint(
-        opt["path"]["models"], net_type="G"
+        opt["path"]["models"],
+        net_type="G",
     )
     opt["path"]["pretrained_netG"] = init_path_G
     current_step = init_iter
@@ -60,7 +66,8 @@ def main(json_path="options/inference_egoexo.json"):
     # ----------------------------------------
     logger_name = "test"
     utils_logger.logger_info(
-        logger_name, os.path.join(opt["path"]["log"], logger_name + ".log")
+        logger_name,
+        os.path.join(opt["path"]["log"], logger_name + ".log"),
     )
     logger = logging.getLogger(logger_name)
 

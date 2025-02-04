@@ -17,7 +17,10 @@ lightning_logs/
 outputs/
 blendify_assets/
 wandb/
+node_modules/
 
+package.json
+package-lock.json
 # vim.
 tags
 

@@ -5,22 +5,23 @@ import os.path as osp
 import pickle
 from contextlib import redirect_stdout
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
+from typing import Dict
+from typing import List
 
-# Third-party imports
 import torch
-from yacs.config import CfgNode as CN
-from egoallo.config import CONFIG_FILE, make_cfg
+from egoallo.config import CONFIG_FILE
+from egoallo.config import make_cfg
 from egoallo.egopose.bodypose.bodypose_dataloader import body_pose_anno_loader
 from egoallo.egopose.handpose.data_preparation.utils.config import (
     create_egopose_processing_argparse,
 )
-from egoallo.utils.utils import debug_on_error
 from egoallo.utils.setup_logger import setup_logger
-from egoallo.utils.smpl_mapping.mapping import (
-    EGOEXO4D_EGOPOSE_BODYPOSE_MAPPINGS,
-    EGOEXO4D_EGOPOSE_HANDPOSE_MAPPINGS,
-)
+from egoallo.utils.smpl_mapping.mapping import EGOEXO4D_EGOPOSE_BODYPOSE_MAPPINGS
+from egoallo.utils.smpl_mapping.mapping import EGOEXO4D_EGOPOSE_HANDPOSE_MAPPINGS
+from egoallo.utils.utils import debug_on_error
+from yacs.config import CfgNode as CN
+# Third-party imports
 
 
 # Set environment variables for threading
@@ -51,7 +52,10 @@ NUM_OF_JOINTS = NUM_OF_BODY_JOINTS + NUM_OF_HAND_JOINTS * 2
 
 
 def save_stats_collector(
-    stats_collector, output_path: str, split: str, anno_type: str
+    stats_collector,
+    output_path: str,
+    split: str,
+    anno_type: str,
 ) -> None:
     """Save stats collector to disk"""
     save_path = Path(output_path) / f"stats_collector_{split}_{anno_type}.pkl"
@@ -101,7 +105,8 @@ def analyze_preprocessing_pipeline(args, output_path: str) -> None:
             if split in ["train", "val"]:
                 with open(
                     osp.join(
-                        gt_anno_output_dir, f"ego_pose_gt_anno_{split}_public.json"
+                        gt_anno_output_dir,
+                        f"ego_pose_gt_anno_{split}_public.json",
                     ),
                     "w",
                 ) as f:
@@ -112,7 +117,8 @@ def analyze_preprocessing_pipeline(args, output_path: str) -> None:
                 else:
                     with open(
                         osp.join(
-                            gt_anno_output_dir, f"ego_pose_gt_anno_{split}_public.json"
+                            gt_anno_output_dir,
+                            f"ego_pose_gt_anno_{split}_public.json",
                         ),
                         "w",
                     ) as f:
@@ -120,22 +126,25 @@ def analyze_preprocessing_pipeline(args, output_path: str) -> None:
 
 
 def log_analysis_results(
-    stats: Dict[str, Any], split: str, anno_type: str, logger
+    stats: Dict[str, Any],
+    split: str,
+    anno_type: str,
+    logger,
 ) -> None:
     """Log detailed analysis results with enhanced filtering statistics"""
     logger.info(
-        f"\n=== BODY POSE PREPROCESSING ANALYSIS {split.upper()} {anno_type.upper()} ===\n"
+        f"\n=== BODY POSE PREPROCESSING ANALYSIS {split.upper()} {anno_type.upper()} ===\n",
     )
 
     # Overall statistics
     logger.info("Overall Statistics:")
     logger.info(f"Total Takes Processed: {stats['total_takes']}")
     logger.info(
-        f"Valid Takes: {stats['valid_takes']} ({stats['valid_takes'] / stats['total_takes'] * 100:.2f}%)"
+        f"Valid Takes: {stats['valid_takes']} ({stats['valid_takes'] / stats['total_takes'] * 100:.2f}%)",
     )
     logger.info(f"Total Frames: {stats['total_frames']}")
     logger.info(
-        f"Valid Frames: {stats['valid_frames']} ({stats['valid_frames'] / stats['total_frames'] * 100:.2f}%)"
+        f"Valid Frames: {stats['valid_frames']} ({stats['valid_frames'] / stats['total_frames'] * 100:.2f}%)",
     )
 
     # Keypoint filtering breakdown
@@ -144,7 +153,7 @@ def log_analysis_results(
     logger.info("Filtering Breakdown (% of total keypoints):")
     logger.info(f"├── Missing Annotations: {percentages['missing_annotation']:.2f}%")
     logger.info(
-        f"├── Biomechanical Invalid: {percentages['biomechanical_invalid']:.2f}%"
+        f"├── Biomechanical Invalid: {percentages['biomechanical_invalid']:.2f}%",
     )
     logger.info(f"├── Visibility Invalid: {percentages['visibility_invalid']:.2f}%")
     logger.info(f"├── Projection Error: {percentages['projection_error']:.2f}%")
@@ -163,7 +172,7 @@ def log_analysis_results(
             percentage = (count / total_valid) * 100
             keypoint_name = EGOEXO4D_EGOPOSE_BODYPOSE_MAPPINGS[idx]
             logger.info(
-                f"Keypoint {idx:2d} ({keypoint_name:12s}): {count:6d} occurrences ({percentage:5.2f}%)"
+                f"Keypoint {idx:2d} ({keypoint_name:12s}): {count:6d} occurrences ({percentage:5.2f}%)",
             )
 
     # Validation criteria explanation
@@ -200,7 +209,9 @@ def create_body_gt_anno(args):
 
 
 def print_saved_stats(
-    output_path: str, splits: List[str], anno_types: List[str]
+    output_path: str,
+    splits: List[str],
+    anno_types: List[str],
 ) -> None:
     """Print summary statistics from saved stats collectors"""
     logger = setup_logger(output=output_path, name="saved_stats_analysis")
@@ -214,18 +225,20 @@ def print_saved_stats(
                 # Get and log summary stats
                 summary_stats = stats_collector.get_summary_stats()
                 logger.info(
-                    f"\nLoaded statistics for {split} split with {anno_type} annotations:"
+                    f"\nLoaded statistics for {split} split with {anno_type} annotations:",
                 )
                 log_analysis_results(summary_stats, split, anno_type, logger)
 
             except FileNotFoundError:
                 logger.warning(
-                    f"No saved stats found for {split} split with {anno_type} annotations"
+                    f"No saved stats found for {split} split with {anno_type} annotations",
                 )
 
 
 def extract_ground_heights(
-    splits: List[str], anno_types: List[str], output_path: str
+    splits: List[str],
+    anno_types: List[str],
+    output_path: str,
 ) -> None:
     """
     Extract ground heights from saved annotation files and create a mapping JSON.
@@ -252,7 +265,9 @@ def extract_ground_heights(
                 )
             else:
                 gt_anno_path = osp.join(
-                    output_path, "annotation", f"ego_pose_gt_anno_{split}_public.json"
+                    output_path,
+                    "annotation",
+                    f"ego_pose_gt_anno_{split}_public.json",
                 )
 
             # Read annotation file if it exists

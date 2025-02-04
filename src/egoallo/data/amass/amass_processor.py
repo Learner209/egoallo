@@ -3,19 +3,24 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
+from typing import Dict
+from typing import Optional
 
 import numpy as np
 import torch
-from torch import Tensor
-from jaxtyping import Float, jaxtyped
-from numpy import ndarray as Array
 import typeguard
-
-from egoallo.utils.setup_logger import setup_logger
 from egoallo.data.motion_processing import MotionProcessor
-from egoallo.fncsmpl import SmplhModel, SmplhShaped, SmplhShapedAndPosed
-from egoallo.transforms import SE3, SO3
+from egoallo.fncsmpl import SmplhModel
+from egoallo.fncsmpl import SmplhShaped
+from egoallo.fncsmpl import SmplhShapedAndPosed
+from egoallo.transforms import SE3
+from egoallo.transforms import SO3
+from egoallo.utils.setup_logger import setup_logger
+from jaxtyping import Float
+from jaxtyping import jaxtyped
+from numpy import ndarray as Array
+from torch import Tensor
 
 logger = setup_logger(output="logs/amass_processor", name=__name__)
 
@@ -92,7 +97,8 @@ class AMASSProcessor:
         """Convert rotation representations."""
         # Convert root orientation and translation to SE(3)
         T_world_root = SE3.from_rotation_and_translation(
-            rotation=SO3.exp(root_orient), translation=trans
+            rotation=SO3.exp(root_orient),
+            translation=trans,
         ).parameters()  # (..., 7)
 
         # Convert body pose to quaternions (21 joints)
@@ -108,7 +114,9 @@ class AMASSProcessor:
         return T_world_root, body_quats, left_hand_quats, right_hand_quats
 
     def process_sequence(
-        self, seq_path: Path, min_frames: int = 30
+        self,
+        seq_path: Path,
+        min_frames: int = 30,
     ) -> Optional[Dict[str, Any]]:
         """Process a single AMASS sequence."""
         required_keys = ["mocap_framerate", "poses", "betas", "trans"]
@@ -160,7 +168,10 @@ class AMASSProcessor:
             fps_ratio = float(self.target_fps) / fps
             new_num_frames = int(fps_ratio * num_frames)
             downsamp_inds = np.linspace(
-                0, num_frames - 1, num=new_num_frames, dtype=int
+                0,
+                num_frames - 1,
+                num=new_num_frames,
+                dtype=int,
             )
 
             poses = poses[downsamp_inds]
@@ -191,7 +202,6 @@ class AMASSProcessor:
             right_hand_quats=right_hand_quats,
         )
         # mesh: SmplMesh = posed.lbs()
-        # import ipdb; ipdb.set_trace()
 
         # Extract joint positions (22 SMPL-H joints)
         joints = (
@@ -214,10 +224,16 @@ class AMASSProcessor:
 
         # Process floor height and contacts
         floor_height, contacts = self.motion_processor.process_floor_and_contacts(
-            joints, self.joint_indices
+            joints,
+            self.joint_indices,
         )
         contacts: Float[Array, "*batch timesteps 22"] = contacts[..., :22]
-        # import ipdb; ipdb.set_trace()
+
+        # Adjust heights
+        trans[:, 2] -= floor_height
+        joints[..., 2] -= floor_height
+
+        # Compute velociti
 
         # Adjust heights
         trans[:, 2] -= floor_height
@@ -236,12 +252,13 @@ class AMASSProcessor:
             )
 
             trans_vel = self.motion_processor.compute_joint_velocity(
-                trans.cpu().numpy()
+                trans.cpu().numpy(),
             )
 
             root_orient_mat = SO3.exp(root_orient).as_matrix().detach().cpu().numpy()
             root_ang_vel = self.motion_processor.compute_angular_velocity(
-                root_orient_mat, dt
+                root_orient_mat,
+                dt,
             )
 
             velocities = {
@@ -266,7 +283,7 @@ class AMASSProcessor:
             "fps": fps,
             "joints": joints,
             "contacts": contacts.astype(
-                np.float32
+                np.float32,
             ),  # contacts server as a boolean label, but for compatiblity with `load_from_npz` function, convert it to flaot32
             "pose_hand": hand_pose.cpu().numpy(),
             "root_orient": root_orient.cpu().numpy(),

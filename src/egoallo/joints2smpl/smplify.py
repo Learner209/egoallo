@@ -1,17 +1,16 @@
-import torch
 import os
 import pickle
-import smplx
-from torch import Tensor
-from jaxtyping import Float, jaxtyped
-import typeguard
 
-from egoallo.joints2smpl.customloss import (
-    camera_fitting_loss_3d,
-    body_fitting_loss_3d,
-)
-from egoallo.joints2smpl.prior import MaxMixturePrior
+import smplx
+import torch
+import typeguard
 from egoallo.joints2smpl import joints2smpl_config
+from egoallo.joints2smpl.customloss import body_fitting_loss_3d
+from egoallo.joints2smpl.customloss import camera_fitting_loss_3d
+from egoallo.joints2smpl.prior import MaxMixturePrior
+from jaxtyping import Float
+from jaxtyping import jaxtyped
+from torch import Tensor
 
 
 @torch.no_grad()
@@ -140,7 +139,10 @@ class SMPLify3D:
             search_tree = BVH(max_collisions=8)
 
             pen_distance = collisions_loss.DistanceFieldPenetrationLoss(
-                sigma=0.5, point2plane=False, vectorized=True, penalize_outside=True
+                sigma=0.5,
+                point2plane=False,
+                vectorized=True,
+                penalize_outside=True,
             )
 
             if self.part_segm_fn:
@@ -164,12 +166,16 @@ class SMPLify3D:
 
         # use guess 3d to get the initial
         smpl_output = self.smpl(
-            global_orient=global_orient, body_pose=body_pose, betas=betas
+            global_orient=global_orient,
+            body_pose=body_pose,
+            betas=betas,
         )
         model_joints = smpl_output.joints
 
         init_cam_t = guess_init_3d(
-            model_joints, j3d, self.joints_category
+            model_joints,
+            j3d,
+            self.joints_category,
         ).detach()  # get the triangle distance averaged over four joints between initiial estimates and current joints cooridnate.
         camera_translation = init_cam_t.clone()
 
@@ -195,7 +201,9 @@ class SMPLify3D:
                 def closure():
                     camera_optimizer.zero_grad()
                     smpl_output = self.smpl(
-                        global_orient=global_orient, body_pose=body_pose, betas=betas
+                        global_orient=global_orient,
+                        body_pose=body_pose,
+                        betas=betas,
                     )
                     model_joints = smpl_output.joints
 
@@ -212,12 +220,16 @@ class SMPLify3D:
                 camera_optimizer.step(closure)
         else:
             camera_optimizer = torch.optim.Adam(
-                camera_opt_params, lr=self.step_size, betas=(0.9, 0.999)
+                camera_opt_params,
+                lr=self.step_size,
+                betas=(0.9, 0.999),
             )
 
             for i in range(20):
                 smpl_output = self.smpl(
-                    global_orient=global_orient, body_pose=body_pose, betas=betas
+                    global_orient=global_orient,
+                    body_pose=body_pose,
+                    betas=betas,
                 )
                 model_joints = smpl_output.joints
 
@@ -259,7 +271,9 @@ class SMPLify3D:
                 def closure():
                     body_optimizer.zero_grad()
                     smpl_output = self.smpl(
-                        global_orient=global_orient, body_pose=body_pose, betas=betas
+                        global_orient=global_orient,
+                        body_pose=body_pose,
+                        betas=betas,
                     )
                     model_joints = smpl_output.joints
                     model_vertices = smpl_output.vertices
@@ -288,12 +302,16 @@ class SMPLify3D:
                 body_optimizer.step(closure)
         else:
             body_optimizer = torch.optim.Adam(
-                body_opt_params, lr=self.step_size, betas=(0.9, 0.999)
+                body_opt_params,
+                lr=self.step_size,
+                betas=(0.9, 0.999),
             )
 
             for i in range(self.num_iters):
                 smpl_output = self.smpl(
-                    global_orient=global_orient, body_pose=body_pose, betas=betas
+                    global_orient=global_orient,
+                    body_pose=body_pose,
+                    betas=betas,
                 )
                 model_joints = smpl_output.joints
                 model_vertices = smpl_output.vertices

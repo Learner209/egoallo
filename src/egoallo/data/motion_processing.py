@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from typing import Dict
+from typing import Tuple
+
 import numpy as np
-from typing import Dict, Tuple
-from sklearn.cluster import DBSCAN
 from jaxtyping import Float
+from sklearn.cluster import DBSCAN
 
 
 class MotionProcessor:
@@ -39,7 +41,9 @@ class MotionProcessor:
         self.contact_ankle_height_thresh = contact_ankle_height_thresh
 
     def process_floor_and_contacts(
-        self, joints: Float[np.ndarray, "*batch 3"], joint_indices: Dict[str, int]
+        self,
+        joints: Float[np.ndarray, "*batch 3"],
+        joint_indices: Dict[str, int],
     ) -> Tuple[float, Float[np.ndarray, "*batch 3"]]:
         """Process floor height and contact labels from joint positions.
 
@@ -107,7 +111,9 @@ class MotionProcessor:
         return floor_height, contacts
 
     def detect_floor_height(
-        self, joints: Float[np.ndarray, "*batch 3"], foot_joints: list[int]
+        self,
+        joints: Float[np.ndarray, "*batch 3"],
+        foot_joints: list[int],
     ) -> float:
         """Detect floor height using DBSCAN clustering on foot joint positions.
 
@@ -126,7 +132,7 @@ class MotionProcessor:
             [
                 self.compute_joint_velocity(joints[:, joint_idx])
                 for joint_idx in foot_joints
-            ]
+            ],
         )
 
         # Find static frames
@@ -147,14 +153,17 @@ class MotionProcessor:
 
             # Stratified sampling to preserve distribution
             indices = np.random.choice(
-                len(static_heights), size=MAX_SAMPLES, p=weights, replace=False
+                len(static_heights),
+                size=MAX_SAMPLES,
+                p=weights,
+                replace=False,
             )
             static_heights = static_heights[indices]
 
         # Cluster heights using DBSCAN
         # TODO: Make eps a parameter tailored to the dataset: AMASS, RICH, HPS.
         clustering = DBSCAN(eps=0.00005, min_samples=3).fit(
-            static_heights.reshape(-1, 1)
+            static_heights.reshape(-1, 1),
         )
         valid_clusters = np.unique(clustering.labels_[clustering.labels_ != -1])
 
@@ -188,7 +197,8 @@ class MotionProcessor:
 
     @staticmethod
     def compute_angular_velocity(
-        rot_mats: Float[np.ndarray, "*batch 3 3"], dt: float = 1.0 / 30
+        rot_mats: Float[np.ndarray, "*batch 3 3"],
+        dt: float = 1.0 / 30,
     ) -> Float[np.ndarray, "*batch 3"]:
         """Compute angular velocities from rotation matrices.
 
@@ -234,7 +244,8 @@ class MotionProcessor:
 
     @staticmethod
     def compute_alignment_rotation(
-        forward_dir: np.ndarray, up_dir: np.ndarray = np.array([0, 1, 0])
+        forward_dir: np.ndarray,
+        up_dir: np.ndarray = np.array([0, 1, 0]),
     ) -> np.ndarray:
         """Compute rotation to align motion with canonical frame.
 

@@ -1,11 +1,11 @@
 from pathlib import Path
 from typing import Literal
+from typing import Tuple
 
 import numpy as np
+from egoallo.utils.setup_logger import setup_logger
 from projectaria_tools.core import mps
 from projectaria_tools.core.mps.utils import filter_points_from_confidence
-from typing import Tuple
-from egoallo.utils.setup_logger import setup_logger
 
 logger = setup_logger(output=None, name=__name__)
 
@@ -40,11 +40,13 @@ def load_point_cloud_and_find_ground(
             points_data = None
 
         logger.debug(
-            "Loading pre-filtered points from %s", filtered_points_npz_cache_path
+            "Loading pre-filtered points from %s",
+            filtered_points_npz_cache_path,
         )
         filtered_points_data = np.load(filtered_points_npz_cache_path)["points"]
         logger.debug(
-            "Loading pre-filtered points from %s", less_filtered_points_npz_cache_path
+            "Loading pre-filtered points from %s",
+            less_filtered_points_npz_cache_path,
         )
         less_filtered_points_data = np.load(less_filtered_points_npz_cache_path)[
             "points"
@@ -65,24 +67,27 @@ def load_point_cloud_and_find_ground(
             threshold_dep=0.05,
         )
         filtered_points_data = np.array(
-            [x.position_world for x in filtered_points_data]
+            [x.position_world for x in filtered_points_data],
         )  # type: ignore
         less_filtered_points_data = np.array(
-            [x.position_world for x in less_filtered_points_data]
+            [x.position_world for x in less_filtered_points_data],
         )
 
         # Only save cache files if caching is enabled
         if cache_files:
             filtered_points_npz_cache_path.parent.mkdir(exist_ok=True, parents=True)
             np.savez_compressed(
-                filtered_points_npz_cache_path, points=filtered_points_data
+                filtered_points_npz_cache_path,
+                points=filtered_points_data,
             )
             logger.debug("Cached filtered points to %s", filtered_points_npz_cache_path)
             np.savez_compressed(
-                less_filtered_points_npz_cache_path, points=less_filtered_points_data
+                less_filtered_points_npz_cache_path,
+                points=less_filtered_points_data,
             )
             logger.debug(
-                "Cached less filtered points to %s", less_filtered_points_npz_cache_path
+                "Cached less filtered points to %s",
+                less_filtered_points_npz_cache_path,
             )
 
     assert filtered_points_data.shape == (filtered_points_data.shape[0], 3)

@@ -1,11 +1,8 @@
 import collections
 
 import torch
-
-from torch.utils.data._utils.collate import (
-    np_str_obj_array_pattern,
-    default_collate_err_msg_format,
-)
+from torch.utils.data._utils.collate import default_collate_err_msg_format
+from torch.utils.data._utils.collate import np_str_obj_array_pattern
 
 
 def extended_collate[T](batch: list[T]) -> T:

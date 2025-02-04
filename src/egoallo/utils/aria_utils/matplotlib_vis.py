@@ -1,6 +1,5 @@
 import matplotlib.pyplot as plt
 import numpy as np
-
 from egoallo.utils.smpl_mapping.mapping import (
     EGOEXO4D_EGOPOSE_BODYPOSE_MAPPINGS,
 )
@@ -18,7 +17,7 @@ def draw_err(error):
     error_y = error[:, :, 1]  # Shape: (500, 17)
     error_z = error[:, :, 2]  # Shape: (500, 17)
     error_overall = np.sqrt(
-        error_x**2 + error_y**2 + error_z**2
+        error_x**2 + error_y**2 + error_z**2,
     )  # Euclidean norm for overall error
 
     # Create a figure and a 2x2 grid of subplots

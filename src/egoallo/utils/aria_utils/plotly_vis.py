@@ -7,21 +7,17 @@
 #
 # Note that because of Jupyter and Plotly issues, sometimes the code may stuck at visualization. We recommend **restart the kernels** and try again to see if the issue is resolved.
 #
-
 # from projectaria_tools.utils.vrs_to_mp4_utils import get_timestamp_from_mp4
-import numpy as np
-import plotly.graph_objs as go
-
-from egoallo.utils.setup_logger import setup_logger
-
-from egoallo.config import make_cfg, CONFIG_FILE
 from typing import List
 
+import numpy as np
+import plotly.graph_objs as go
+from egoallo.config import CONFIG_FILE
+from egoallo.config import make_cfg
+from egoallo.smpl.smplh_utils import EGOEXO4D_EGOPOSE_BODYPOSE_MAPPINGS
+from egoallo.smpl.smplh_utils import SMPL_JOINT_NAMES
+from egoallo.utils.setup_logger import setup_logger
 from egoallo.utils.utils import NDArray
-from egoallo.smpl.smplh_utils import (
-    SMPL_JOINT_NAMES,
-    EGOEXO4D_EGOPOSE_BODYPOSE_MAPPINGS,
-)
 
 local_config_file = CONFIG_FILE
 CFG = make_cfg(config_name="defaults", config_file=local_config_file, cli_args=[])
@@ -55,7 +51,7 @@ def build_cam_frustum_w_extr(T_world_cam):
                 [-0.5, 0.5, 1, 1],
                 [-0.5, -0.5, 1, 1],
                 [0.5, -0.5, 1, 1],
-            ]
+            ],
         )
         * CFG.plotly.camera_frustum.scale
     )
@@ -214,7 +210,8 @@ def draw_smpl_kinematic_tree(smpl_kpts):
 
 
 def draw_camera_pose(
-    T: NDArray, colors: List[str] = ["red", "green", "blue"]
+    T: NDArray,
+    colors: List[str] = ["red", "green", "blue"],
 ) -> List[go.Scatter3d]:
     """
     Draw an RGB 3D coordinate system based on a 3x4 camera pose matrix.
@@ -253,6 +250,6 @@ def draw_camera_pose(
                 ),
                 name=label,
                 visible=False,
-            )
+            ),
         )
     return axes

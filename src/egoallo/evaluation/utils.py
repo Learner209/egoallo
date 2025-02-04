@@ -1,10 +1,11 @@
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional
+from typing import Tuple
 
 import torch
+from egoallo.types import Device
+from egoallo.types import PathLike
 from torch import Tensor
-
-from egoallo.types import Device, PathLike
 
 
 def get_device(device: Optional[Device] = None) -> torch.device:

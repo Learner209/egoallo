@@ -1,14 +1,14 @@
+import json
+import os
 import os.path as osp
 from collections import defaultdict
 from glob import glob
+
 import joblib
-import json
 import numpy as np
+from egoallo.config import CONFIG_FILE
+from egoallo.config import make_cfg
 from egoallo.utils.setup_logger import setup_logger
-import os
-
-
-from egoallo.config import make_cfg, CONFIG_FILE
 
 local_config_file = CONFIG_FILE
 CFG = make_cfg(config_name="defaults", config_file=local_config_file, cli_args=[])
@@ -120,10 +120,10 @@ class EgoExoUtils:
         traj_dirs = list(
             filter(
                 lambda traj_dir: os.path.exists(
-                    os.path.join(traj_dir, "gopro_calibs.csv")
+                    os.path.join(traj_dir, "gopro_calibs.csv"),
                 ),
                 traj_dirs,
-            )
+            ),
         )
         # print(f"Total takes with gopro_calibs.csv: {len(traj_dirs)}")
         [os.path.join(traj_dir, "gopro_calibs.csv") for traj_dir in traj_dirs]
@@ -145,7 +145,7 @@ class EgoExoUtils:
                 for take_uid in self.all_take_uids
                 if take_uid in self.take_uids_to_benchmark_as_list
                 and "ego_hand_pose" in self.take_uids_to_benchmark[take_uid]
-            ]
+            ],
         )
         self.all_take_uids_for_ego_body_pose_benchmarks = set(
             [
@@ -153,29 +153,29 @@ class EgoExoUtils:
                 for take_uid in self.all_take_uids
                 if take_uid in self.take_uids_to_benchmark_as_list
                 and "ego_body_pose" in self.take_uids_to_benchmark[take_uid]
-            ]
+            ],
         )
 
         self.take_uids_for_ego_hand_pose_benchmarks = {
             "train": self.all_take_uids_for_ego_hand_pose_benchmarks.intersection(
-                set(self.all_train_uids)
+                set(self.all_train_uids),
             ),
             "val": self.all_take_uids_for_ego_hand_pose_benchmarks.intersection(
-                set(self.all_val_uids)
+                set(self.all_val_uids),
             ),
             "test": self.all_take_uids_for_ego_hand_pose_benchmarks.intersection(
-                set(self.all_test_uids)
+                set(self.all_test_uids),
             ),
         }
         self.take_uids_for_ego_body_pose_benchmarks = {
             "train": self.all_take_uids_for_ego_body_pose_benchmarks.intersection(
-                set(self.all_train_uids)
+                set(self.all_train_uids),
             ),
             "val": self.all_take_uids_for_ego_body_pose_benchmarks.intersection(
-                set(self.all_val_uids)
+                set(self.all_val_uids),
             ),
             "test": self.all_take_uids_for_ego_body_pose_benchmarks.intersection(
-                set(self.all_test_uids)
+                set(self.all_test_uids),
             ),
         }
 
@@ -223,7 +223,8 @@ class EgoExoUtils:
         Get egoexo exported data output path
         """
         all_exported_data_paths = self.get_egoexo_exported_data_output_path(
-            anno_types, splits
+            anno_types,
+            splits,
         )
         all_exported_data = {}
         for _, exported_data_path in enumerate(all_exported_data_paths):
@@ -243,7 +244,9 @@ class EgoExoUtils:
             if anno_type not in preprocess_cfg.all_anno_types:
                 raise ValueError("Invalid anno_type:{0}".format(anno_type))
             this_type_egoexo_train_data_output_dir = os.path.join(
-                self._egoexo_train_data_output_dir, "annotation", anno_type
+                self._egoexo_train_data_output_dir,
+                "annotation",
+                anno_type,
             )
             for _, split in enumerate(splits):
                 if split not in preprocess_cfg.all_splits:
@@ -265,7 +268,7 @@ class EgoExoUtils:
             or split not in self.raw_gt_anno_[anno_type].keys()
         ):
             self.raw_gt_anno_[anno_type][split] = json.load(
-                open(self.raw_gt_anno_paths[anno_type][split])
+                open(self.raw_gt_anno_paths[anno_type][split]),
             )
         gt_anno = self.raw_gt_anno_[anno_type][split]
         take_uids_w_gt_anno = list(gt_anno.keys())
@@ -281,7 +284,7 @@ class EgoExoUtils:
             or split not in self.raw_gt_anno_[anno_type].keys()
         ):
             self.raw_gt_anno_[anno_type][split] = json.load(
-                open(self.raw_gt_anno_paths[anno_type][split])
+                open(self.raw_gt_anno_paths[anno_type][split]),
             )
         gt_anno = self.raw_gt_anno_[anno_type][split]
         take_uids_w_gt_anno = list(gt_anno.keys())
@@ -490,14 +493,18 @@ class EgoExoUtils:
         take_name = self.find_take_name_from_take_uid(take_uid)
         split = self.egoexo_metadata["splits"]["take_uid_to_split"][take_uid]
         aria_img_output_root = os.path.join(
-            self._aria_img_output_dir, "image", "undistorted", split, take_name
+            self._aria_img_output_dir,
+            "image",
+            "undistorted",
+            split,
+            take_name,
         )
         undistorted_aria_imgs_paths = sorted(
-            glob(osp.join(aria_img_output_root, "*.png"))
+            glob(osp.join(aria_img_output_root, "*.png")),
         )
         if len(undistorted_aria_imgs_paths) == 0:
             logger.warning(
-                f"Take_name: {take_name} do not has any undistorted Aria images in {aria_img_output_root}"
+                f"Take_name: {take_name} do not has any undistorted Aria images in {aria_img_output_root}",
             )
 
         aria_img_frame_nums = [
@@ -507,7 +514,8 @@ class EgoExoUtils:
         undistorted_aria_imgs_dict = {
             frame_num: img_path
             for frame_num, img_path in zip(
-                aria_img_frame_nums, undistorted_aria_imgs_paths
+                aria_img_frame_nums,
+                undistorted_aria_imgs_paths,
             )
         }
 
@@ -605,7 +613,11 @@ class EgoExoUtils:
         """
         take_name = self.take_uid_to_take_names[take_uid]
         open_loop_traj_path = osp.join(
-            self.root_path, "takes", take_name, "trajectory", "open_loop_trajectory.csv"
+            self.root_path,
+            "takes",
+            take_name,
+            "trajectory",
+            "open_loop_trajectory.csv",
         )
         return osp.exists(open_loop_traj_path)
 
@@ -647,7 +659,11 @@ class EgoExoUtils:
         """
         take_name = self.take_uid_to_take_names[take_uid]
         gopro_calibs_path = osp.join(
-            self.root_path, "takes", take_name, "trajectory", "gopro_calibs.csv"
+            self.root_path,
+            "takes",
+            take_name,
+            "trajectory",
+            "gopro_calibs.csv",
         )
         return osp.exists(gopro_calibs_path)
 
@@ -691,7 +707,11 @@ class EgoExoUtils:
         """
         take_name = self.take_uid_to_take_names[take_uid]
         online_calib_json_path = osp.join(
-            self.root_path, "takes", take_name, "trajectory", "online_calibration.jsonl"
+            self.root_path,
+            "takes",
+            take_name,
+            "trajectory",
+            "online_calibration.jsonl",
         )
         return osp.exists(online_calib_json_path)
 
@@ -712,7 +732,10 @@ class EgoExoUtils:
         take = self.find_take_from_take_uid(take_uid)
         ego_cam_name = EgoExoUtils.get_ego_aria_cam_name(take)
         vrs_path = osp.join(
-            self.root_path, "takes", take_name, "{}.vrs".format(ego_cam_name)
+            self.root_path,
+            "takes",
+            take_name,
+            "{}.vrs".format(ego_cam_name),
         )
         return osp.exists(vrs_path)
 
@@ -779,7 +802,11 @@ class EgoExoUtils:
         """
         take_name = self.take_uid_to_take_names[take_uid]
         open_loop_traj_path = osp.join(
-            self.root_path, "takes", take_name, "trajectory", "open_loop_trajectory.csv"
+            self.root_path,
+            "takes",
+            take_name,
+            "trajectory",
+            "open_loop_trajectory.csv",
         )
         return open_loop_traj_path
 
@@ -821,7 +848,11 @@ class EgoExoUtils:
         """
         take_name = self.take_uid_to_take_names[take_uid]
         gopro_calibs_path = osp.join(
-            self.root_path, "takes", take_name, "trajectory", "gopro_calibs.csv"
+            self.root_path,
+            "takes",
+            take_name,
+            "trajectory",
+            "gopro_calibs.csv",
         )
         return gopro_calibs_path
 
@@ -865,7 +896,11 @@ class EgoExoUtils:
         """
         take_name = self.take_uid_to_take_names[take_uid]
         online_calib_json_path = osp.join(
-            self.root_path, "takes", take_name, "trajectory", "online_calibration.jsonl"
+            self.root_path,
+            "takes",
+            take_name,
+            "trajectory",
+            "online_calibration.jsonl",
         )
         return online_calib_json_path
 
@@ -886,7 +921,10 @@ class EgoExoUtils:
         take = self.find_take_from_take_uid(take_uid)
         ego_cam_name = EgoExoUtils.get_ego_aria_cam_name(take)
         vrs_path = osp.join(
-            self.root_path, "takes", take_name, "{}.vrs".format(ego_cam_name)
+            self.root_path,
+            "takes",
+            take_name,
+            "{}.vrs".format(ego_cam_name),
         )
         return vrs_path
 
@@ -954,6 +992,10 @@ class EgoExoUtils:
         take_name = self.take_uid_to_take_names[take_uid]
         self.find_take_from_take_uid(take_uid)
         semidense_pts_path = osp.join(
-            self.root_path, "takes", take_name, "trajectory", "semidense_points.csv.gz"
+            self.root_path,
+            "takes",
+            take_name,
+            "trajectory",
+            "semidense_points.csv.gz",
         )
         return semidense_pts_path
