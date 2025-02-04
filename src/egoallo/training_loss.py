@@ -181,21 +181,30 @@ class TrainingLossComputer:
             )
             # Add joint position loss calculation
             # Get predicted joint positions through forward kinematics
-            x_0_posed = x_0_pred.apply_to_body(
+            x_0_pred_posed = x_0_pred.apply_to_body(
                 unwrapped_model.body_model.to(device),
             )  # (b, t, 22, 3)
             pred_joints = torch.cat(
                 [
-                    x_0_posed.T_world_root[..., 4:7].unsqueeze(dim=-2),
-                    x_0_posed.Ts_world_joint[..., : num_joints - 1, 4:7],
+                    x_0_pred_posed.T_world_root[..., 4:7].unsqueeze(dim=-2),
+                    x_0_pred_posed.Ts_world_joint[..., : num_joints - 1, 4:7],
                 ],
                 dim=-2,
             )  # (b, t, 22, 3)
             assert pred_joints.shape == (batch, time, num_joints, 3)
 
             # Get ground truth joints from training batch
+            x_0_posed = x_0.apply_to_body(
+                unwrapped_model.body_model.to(device),
+            )  # (b, t, 22, 3)
+            gt_joints = torch.cat(
+                [
+                    x_0_posed.T_world_root[..., 4:7].unsqueeze(dim=-2),
+                    x_0_posed.Ts_world_joint[..., : num_joints - 1, 4:7],
+                ],
+                dim=-2,
+            )  # (b, t, 22, 3)
 
-            gt_joints = train_batch.joints_wrt_world  # (b, t, 22, 3)
             assert gt_joints.shape == (batch, time, num_joints, 3)
 
             # Calculate joint position loss with masking
