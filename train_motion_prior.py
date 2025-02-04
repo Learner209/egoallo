@@ -133,7 +133,6 @@ def run_training(
         drop_last=True,
     )
 
-    # breakpoint()
     optim = torch.optim.AdamW(  # type: ignore
         model.parameters(),
         lr=config.learning_rate,
@@ -406,5 +405,4 @@ def test_run_training_cli():
 
 
 if __name__ == "__main__":
-    # breakpoint()
     tyro.cli(run_training)

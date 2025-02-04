@@ -306,7 +306,6 @@ def run_sampling_with_masked_data(
         .to(torch.float32)
     )
 
-    # breakpoint()
     for i in range(len(ts) - 1):
         t = ts[i]
         t_next = ts[i + 1]
@@ -481,7 +480,6 @@ def run_sampling_with_masked_data_ddpm(
         .to(torch.float32)
     )
 
-    # breakpoint()
     for i in tqdm(
         range(len(ts) - 1),
         total=len(ts) - 1,
@@ -572,7 +570,6 @@ def run_sampling_with_masked_data_ddpm(
             ),
         )
 
-    # breakpoint()
     if guidance_mode != "off" and guidance_post:
         constrained_traj = x_t_list[-1]
         constrained_traj, _ = do_guidance_optimization(

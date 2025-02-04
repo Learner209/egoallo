@@ -267,7 +267,6 @@ def create_masked_training_data(
     masked_joints_str = ", ".join(SMPLH_BODY_JOINTS[i] for i in masked_indices.tolist())
     logger.debug(f"Masked joints: {masked_joints_str}")
 
-    # breakpoint()
     # Get joints in CPF frame
     joints_wrt_cpf = (
         tf.SE3(Ts_world_cpf[..., None, :]).inverse() @ joints_wrt_world

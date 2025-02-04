@@ -98,7 +98,7 @@ class SequenceProcessor:
     ) -> Tuple[DenoiseTrajType, DenoiseTrajType]:
         """Process a single sequence and return denoised trajectory."""
         # Run denoising with guidance
-        # breakpoint()
+
         denoised_traj = run_sampling_with_masked_data(
             denoiser_network=denoiser,
             body_model=self.body_model,
@@ -249,7 +249,6 @@ class TestRunner:
                 self.device,
             )
 
-            # breakpoint()
             if gt_trajs is None:
                 gt_trajs = gt_traj
             else:
@@ -282,7 +281,7 @@ class TestRunner:
                 # import ipdb; ipdb.set_trace()
                 denoised_traj = denoised_traj[seq_idx]
                 # joints2smpl_fit_seq(Joints2SmplFittingConfig(), self.body_model, denoised_traj.joints.shape[0], denoised_traj.joints.cpu(), output_dir)
-                # breakpoint()
+
                 fit_seq_data: "EgoTrainingData" = joints2smpl_fit_seq(
                     Joints2SmplFittingConfig(),
                     self.body_model,
@@ -444,7 +443,6 @@ class TestRunner:
                 device=self.device,
             )
             metrics = EgoAlloEvaluationMetrics(**metrics)
-            # breakpoint()
 
         return metrics
 

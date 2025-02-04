@@ -194,7 +194,7 @@ class TrainingLossComputer:
             assert pred_joints.shape == (batch, time, num_joints, 3)
 
             # Get ground truth joints from training batch
-            # breakpoint()
+
             gt_joints = train_batch.joints_wrt_world  # (b, t, 22, 3)
             assert gt_joints.shape == (batch, time, num_joints, 3)
 
@@ -245,7 +245,6 @@ class TrainingLossComputer:
             # Compute foot skating loss for each foot joint
             foot_skating_losses = []
             for i in range(len(foot_indices)):
-                # breakpoint()
                 foot_loss = x_0_pred._weight_and_mask_loss(
                     foot_velocities[..., i, :].pow(2),  # (batch, time-1, 3)
                     bt_mask=foot_skating_mask[..., i],  # (batch, time-1)

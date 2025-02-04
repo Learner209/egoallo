@@ -206,7 +206,7 @@ class SmplhModel(TensorDataclass):
         )
         assert isinstance(root_and_joints_pred, Float[Tensor, "*batch jointsp1 xyz"])
         root_offset = root_and_joints_pred[..., 0:1, :]  # shape: (*batch 1 xyz)
-        # breakpoint()
+
         return SmplhShaped(
             body_model=self,
             root_offset=root_offset.squeeze(-2),

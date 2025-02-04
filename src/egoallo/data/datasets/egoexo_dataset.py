@@ -313,7 +313,6 @@ class EgoExoDataset(torch.utils.data.Dataset[EgoTrainingData]):
             joints_cam_tensor = smplh_cam
             visible_tensor = smplh_visible
 
-        # breakpoint()
         if debug_vis:
             ps.init()
             # Visualize first frame joints in world coordinates
