@@ -4,10 +4,8 @@ from __future__ import annotations
 
 import os
 
-from .hand_detection_structs import (
-    CorrespondedAriaHandWristPoseDetections,
-    CorrespondedHamerDetections,
-)
+from .hand_detection_structs import CorrespondedAriaHandWristPoseDetections
+from .hand_detection_structs import CorrespondedHamerDetections
 
 # Need to play nice with PyTorch!
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
@@ -23,23 +21,25 @@ import jaxlie
 import jaxls
 import numpy as onp
 import torch
+import typeguard
 from jax import numpy as jnp
-from jaxtyping import Float, Int
+from jaxtyping import Float, Int, jaxtyped
 from torch import Tensor
 
 from . import fncsmpl, fncsmpl_jax, network
 from .transforms._so3 import SO3
 
 
+@jaxtyped(typechecker=typeguard.typechecked)
 def do_guidance_optimization(
-    Ts_world_cpf: Float[Tensor, "time 7"],
-    traj: network.EgoDenoiseTraj,
+    T_world_root: Float[Tensor, "time 7"],
+    traj: network.AbsoluteDenoiseTraj,
     body_model: fncsmpl.SmplhModel,
     guidance_mode: GuidanceMode,
     phase: Literal["inner", "post"],
     hamer_detections: None | CorrespondedHamerDetections,
     aria_detections: None | CorrespondedAriaHandWristPoseDetections,
-) -> tuple[network.EgoDenoiseTraj, dict]:
+) -> tuple[network.AbsoluteDenoiseTraj, dict]:
     """Run an optimizer to apply foot contact constraints."""
 
     assert traj.hand_rotmats is not None
@@ -56,14 +56,12 @@ def do_guidance_optimization(
             v_template=cast(jax.Array, body_model.v_template.numpy(force=True)),
             shapedirs=cast(jax.Array, body_model.shapedirs.numpy(force=True)),
         ),
-        Ts_world_cpf=cast(jax.Array, Ts_world_cpf.numpy(force=True)),
+        T_world_root=cast(jax.Array, T_world_root.numpy(force=True)),
         betas=cast(jax.Array, traj.betas.numpy(force=True)),
         body_rotmats=cast(jax.Array, traj.body_rotmats.numpy(force=True)),
         hand_rotmats=cast(jax.Array, traj.hand_rotmats.numpy(force=True)),
         contacts=cast(jax.Array, traj.contacts.numpy(force=True)),
         guidance_params=guidance_params,
-        # The hand detections are a torch tensors in a TensorDataclass form. We
-        # use dictionaries to convert to pytrees.
         hamer_detections=None
         if hamer_detections is None
         else hamer_detections.as_nested_dict(numpy=True),
@@ -74,7 +72,7 @@ def do_guidance_optimization(
     rotmats = SO3(
         torch.from_numpy(onp.array(quats))
         .to(traj.body_rotmats.dtype)
-        .to(traj.body_rotmats.device)
+        .to(traj.body_rotmats.device),
     ).as_matrix()
 
     print(f"Constraint optimization finished in {time.time() - start_time}sec")
@@ -88,7 +86,8 @@ def do_guidance_optimization(
 class _SmplhBodyPosesVar(
     jaxls.Var[jax.Array],
     default_factory=lambda: jnp.concatenate(
-        [jnp.ones((21, 1)), jnp.zeros((21, 3))], axis=-1
+        [jnp.ones((21, 1)), jnp.zeros((21, 3))],
+        axis=-1,
     ),
     retract_fn=lambda val, delta: (
         jaxlie.SO3(val) @ jaxlie.SO3.exp(delta.reshape(21, 3))
@@ -101,7 +100,8 @@ class _SmplhBodyPosesVar(
 class _SmplhSingleHandPosesVar(
     jaxls.Var[jax.Array],
     default_factory=lambda: jnp.concatenate(
-        [jnp.ones((15, 1)), jnp.zeros((15, 3))], axis=-1
+        [jnp.ones((15, 1)), jnp.zeros((15, 3))],
+        axis=-1,
     ),
     retract_fn=lambda val, delta: (
         jaxlie.SO3(val) @ jaxlie.SO3.exp(delta.reshape(15, 3))
@@ -113,7 +113,7 @@ class _SmplhSingleHandPosesVar(
 
 @jdc.jit
 def _optimize_vmapped(
-    Ts_world_cpf: jax.Array,
+    T_world_root: jax.Array,
     body: fncsmpl_jax.SmplhModel,
     betas: jax.Array,
     body_rotmats: jax.Array,
@@ -126,12 +126,12 @@ def _optimize_vmapped(
     return jax.vmap(
         partial(
             _optimize,
-            Ts_world_cpf=Ts_world_cpf,
+            T_world_root=T_world_root,
             body=body,
             guidance_params=guidance_params,
             hamer_detections=hamer_detections,
             aria_detections=aria_detections,
-        )
+        ),
     )(
         betas=betas,
         body_rotmats=body_rotmats,
@@ -297,7 +297,7 @@ class JaxGuidanceParams:
 
 
 def _optimize(
-    Ts_world_cpf: jax.Array,
+    T_world_root: jax.Array,
     body: fncsmpl_jax.SmplhModel,
     betas: jax.Array,
     body_rotmats: jax.Array,
@@ -310,34 +310,23 @@ def _optimize(
     """Apply constraints using Levenberg-Marquardt optimizer. Returns updated
     body_rotmats and hand_rotmats matrices."""
     timesteps = body_rotmats.shape[0]
-    assert Ts_world_cpf.shape == (timesteps, 7)
     assert body_rotmats.shape == (timesteps, 21, 3, 3)
     assert hand_rotmats.shape == (timesteps, 30, 3, 3)
     assert contacts.shape == (timesteps, 21)
     assert betas.shape == (timesteps, 16)
 
     init_quats = jaxlie.SO3.from_matrix(
-        # body_rotmats
-        jnp.concatenate([body_rotmats, hand_rotmats], axis=1)
+        jnp.concatenate([body_rotmats, hand_rotmats], axis=1),
     ).wxyz
     assert init_quats.shape == (timesteps, 51, 4)
 
     # Assume body shape is time-invariant.
     shaped_body = body.with_shape(jnp.mean(betas, axis=0))
-    T_head_cpf = shaped_body.get_T_head_cpf()
-    T_cpf_head = jaxlie.SE3(T_head_cpf).inverse().parameters()
-    assert T_cpf_head.shape == (7,)
 
     init_posed = shaped_body.with_pose(
-        jaxlie.SE3.identity(batch_axes=(timesteps,)).wxyz_xyz, init_quats
+        T_world_root=T_world_root,
+        local_quats=init_quats,
     )
-    T_world_head = jaxlie.SE3(Ts_world_cpf) @ jaxlie.SE3(T_cpf_head)
-    T_root_head = jaxlie.SE3(init_posed.Ts_world_joint[:, 14])
-    init_posed = init_posed.with_new_T_world_root(
-        (T_world_head @ T_root_head.inverse()).wxyz_xyz
-    )
-    del T_world_head
-    del T_root_head
 
     foot_joint_indices = jnp.array([6, 7, 9, 10])
     num_foot_joints = foot_joint_indices.shape[0]
@@ -350,7 +339,7 @@ def _optimize(
     # We'll populate a list of factors (cost terms).
     factors = list[jaxls.Factor]()
 
-    CostArgs = TypeVar("CostArgs")
+    _CostArgs = TypeVar("_CostArgs")
 
     def cost_with_args(
         *args: Any,
@@ -388,22 +377,15 @@ def _optimize(
             posed = shaped_body.with_pose(
                 T_world_root=jaxlie.SE3.identity().wxyz_xyz,
                 local_quats=jnp.concatenate(
-                    [vals[var], vals[left_hand], vals[right_hand]], axis=-2
+                    [vals[var], vals[left_hand], vals[right_hand]],
+                    axis=-2,
                 ),
             )
         else:
             assert False
 
         if output_frame == "world":
-            T_world_root = (
-                # T_world_cpf
-                jaxlie.SE3(Ts_world_cpf[var.id, :])
-                # T_cpf_head
-                @ jaxlie.SE3(T_cpf_head)
-                # T_head_root
-                @ jaxlie.SE3(posed.Ts_world_joint[14]).inverse()
-            )
-            return posed.with_new_T_world_root(T_world_root.wxyz_xyz)
+            return posed.with_new_T_world_root(T_world_root[var.id, :])
         elif output_frame == "root":
             return posed
 
@@ -593,11 +575,11 @@ def _optimize(
                     (T_cam_wrist.inverse() @ obs_T_cam_wrist).log()
                     * jnp.array(
                         [guidance_params.hamer_abspos_weight] * 3
-                        + [guidance_params.hamer_ori_weight] * 3
+                        + [guidance_params.hamer_ori_weight] * 3,
                     ),
                     guidance_params.hand_reproj_weight
                     * (mano_uv_wrt_cam - obs_uv_wrt_cam).flatten(),
-                ]
+                ],
             )
     elif (
         hamer_detections is not None
@@ -668,7 +650,7 @@ def _optimize(
             )
             return (T_cam_wrist.inverse() @ obs_T_cam_wrist).log() * jnp.array(
                 [guidance_params.hamer_abspos_weight] * 3
-                + [guidance_params.hamer_ori_weight] * 3
+                + [guidance_params.hamer_ori_weight] * 3,
             )
 
     # Wrist pose cost.
@@ -738,7 +720,7 @@ def _optimize(
                         jnp.cross(palm_normal, palm_forward),
                     ],
                     axis=1,
-                )
+                ),
             )
             R_world_wrist = jaxlie.SO3(T_world_wrist[:4])
             ori_cost = (estimatedR_world_wrist.inverse() @ R_world_wrist).log()
@@ -747,7 +729,7 @@ def _optimize(
                 [
                     guidance_params.aria_wrist_pos_weight * pos_cost,
                     guidance_params.aria_wrist_ori_weight * ori_cost,
-                ]
+                ],
             )
 
     # Per-frame regularization cost.
@@ -776,7 +758,7 @@ def _optimize(
                     posed.Ts_world_joint[torso_indices, 4:7]
                     - init_posed.Ts_world_joint[pose.id, torso_indices, 4:7]
                 ).flatten(),
-            ]
+            ],
         )
 
     @cost_with_args(
@@ -789,10 +771,10 @@ def _optimize(
         next: _SmplhBodyPosesVar,
     ) -> jax.Array:
         curdelt = jaxlie.SO3(vals[current]).inverse() @ jaxlie.SO3(
-            init_quats[current.id, :21, :]
+            init_quats[current.id, :21, :],
         )
         nexdelt = jaxlie.SO3(vals[next]).inverse() @ jaxlie.SO3(
-            init_quats[next.id, :21, :]
+            init_quats[next.id, :21, :],
         )
         return jnp.concatenate(
             [
@@ -802,7 +784,7 @@ def _optimize(
                 * (jaxlie.SO3(vals[current]).inverse() @ jaxlie.SO3(vals[next]))
                 .log()
                 .flatten(),
-            ]
+            ],
         )
 
     @cost_with_args(
@@ -850,20 +832,22 @@ def _optimize(
     vars_body_pose = _SmplhBodyPosesVar(jnp.arange(timesteps))
     vars_hand_pose = _SmplhSingleHandPosesVar(jnp.arange(timesteps * 2))
     graph = jaxls.FactorGraph.make(
-        factors=factors, variables=[vars_body_pose, vars_hand_pose], use_onp=False
+        factors=factors,
+        variables=[vars_body_pose, vars_hand_pose],
+        use_onp=False,
     )
     solutions = graph.solve(
         initial_vals=jaxls.VarValues.make(
             [
                 vars_body_pose.with_value(init_quats[:, :21, :]),
                 vars_hand_pose.with_value(
-                    init_quats[:, 21:51, :].reshape((timesteps * 2, 15, 4))
+                    init_quats[:, 21:51, :].reshape((timesteps * 2, 15, 4)),
                 ),
-            ]
+            ],
         ),
         linear_solver="conjugate_gradient",
         trust_region=jaxls.TrustRegionConfig(
-            lambda_initial=guidance_params.lambda_initial
+            lambda_initial=guidance_params.lambda_initial,
         ),
         termination=jaxls.TerminationConfig(max_iterations=guidance_params.max_iters),
     )
@@ -886,5 +870,5 @@ def _get_mano_from_openpose_indices(include_tips: bool) -> Int[onp.ndarray, "21"
         mano_idx: openpose_idx for openpose_idx, mano_idx in enumerate(mano_to_openpose)
     }
     return onp.array(
-        [openpose_from_mano_idx[i] for i in range(21 if include_tips else 16)]
+        [openpose_from_mano_idx[i] for i in range(21 if include_tips else 16)],
     )

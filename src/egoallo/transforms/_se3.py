@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Union, cast
-from overrides import overrides
+from typing import cast
+from typing import Union
 
 import numpy as np
 import torch
@@ -10,7 +10,8 @@ from torch import Tensor
 
 from . import _base
 from ._so3 import SO3
-from .utils import get_epsilon, register_lie_group
+from .utils import get_epsilon
+from .utils import register_lie_group
 
 
 def _skew(omega: Tensor) -> Tensor:
@@ -80,8 +81,10 @@ class SE3(_base.SEBase[SO3]):
     def identity(cls, device: Union[torch.device, str], dtype: torch.dtype) -> SE3:
         return SE3(
             wxyz_xyz=torch.tensor(
-                [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], device=device, dtype=dtype
-            )
+                [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                device=device,
+                dtype=dtype,
+            ),
         )
 
     @classmethod
@@ -148,7 +151,9 @@ class SE3(_base.SEBase[SO3]):
             (
                 torch.eye(3, device=device, dtype=dtype)
                 + ((1.0 - torch.cos(theta_safe)) / (theta_squared_safe))[
-                    ..., None, None
+                    ...,
+                    None,
+                    None,
                 ]
                 * skew_omega
                 + (
@@ -206,7 +211,8 @@ class SE3(_base.SEBase[SO3]):
             ),
         )
         return torch.cat(
-            [torch.einsum("...ij,...j->...i", V_inv, self.translation()), omega], dim=-1
+            [torch.einsum("...ij,...j->...i", V_inv, self.translation()), omega],
+            dim=-1,
         )
 
     @overrides

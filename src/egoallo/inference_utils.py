@@ -2,39 +2,76 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 import torch
+import typeguard
 import yaml
+from egoallo.config import CONFIG_FILE
+from egoallo.config import make_cfg
+from egoallo.config.train.train_config import EgoAlloTrainConfig
+from egoallo.utils.setup_logger import setup_logger
 from jaxtyping import Float
+from jaxtyping import jaxtyped
 from projectaria_tools.core import mps  # type: ignore
 from projectaria_tools.core.data_provider import create_vrs_data_provider
 from safetensors import safe_open
 from torch import Tensor
 
-from .network import EgoDenoiser, EgoDenoiserConfig
+from . import fncsmpl
+from . import transforms as tf
+from .data.dataclass import EgoTrainingData
+from .mapping import SMPLH_BODY_JOINTS
+from .network import EgoDenoiser
+from .network import EgoDenoiserConfig
 from .tensor_dataclass import TensorDataclass
 from .transforms import SE3
 
+logger = setup_logger(output=None, name=__name__, level=logging.INFO)
 
-def load_denoiser(checkpoint_dir: Path) -> EgoDenoiser:
+
+local_config_file = CONFIG_FILE
+CFG = make_cfg(config_name="defaults", config_file=local_config_file, cli_args=[])
+
+
+def load_denoiser(
+    checkpoint_dir: Path,
+    runtime_config: EgoAlloTrainConfig,
+) -> tuple[EgoDenoiser, EgoDenoiserConfig]:
     """Load a denoiser model."""
     checkpoint_dir = checkpoint_dir.absolute()
     experiment_dir = checkpoint_dir.parent
 
-    config = yaml.load(
-        (experiment_dir / "model_config.yaml").read_text(), Loader=yaml.Loader
+    model_config = yaml.load(
+        (experiment_dir / "model_config.yaml").read_text(),
+        Loader=yaml.Loader,
     )
-    assert isinstance(config, EgoDenoiserConfig)
+    assert isinstance(model_config, EgoDenoiserConfig)
 
-    model = EgoDenoiser(config)
+    model = EgoDenoiser(
+        runtime_config.model,
+        modality_dims=runtime_config.denoising.fetch_modality_dict(
+            runtime_config.model.include_hands,
+        ),
+    )
     with safe_open(checkpoint_dir / "model.safetensors", framework="pt") as f:  # type: ignore
         state_dict = {k: f.get_tensor(k) for k in f.keys()}
     model.load_state_dict(state_dict)
 
-    return model
+    return model, model_config
+
+
+def load_runtime_config(checkpoint_dir: Path) -> EgoAlloTrainConfig:
+    experiment_dir = checkpoint_dir.parent
+    config = yaml.load(
+        (experiment_dir / "run_config.yaml").read_text(),
+        Loader=yaml.Loader,
+    )
+    assert isinstance(config, EgoAlloTrainConfig)
+    return config
 
 
 @dataclass(frozen=True)
@@ -62,13 +99,9 @@ class InferenceTrajectoryPaths:
     splat_path: Path | None
 
     @staticmethod
-    def find(traj_root: Path, output_dir: Path | None = None, soft_link=False) -> InferenceTrajectoryPaths:
+    def find(traj_root: Path) -> InferenceTrajectoryPaths:
         vrs_files = tuple(traj_root.glob("**/aria01.vrs"))
-        assert len(vrs_files) == 1, f"Found {len(vrs_files)} VRS files, {vrs_files}!"
-        if output_dir is not None and output_dir.exists() and soft_link:
-            vrs_file = output_dir / vrs_files[0].name
-            if not vrs_file.exists():
-                vrs_file.symlink_to(vrs_files[0])
+        assert len(vrs_files) == 1, f"Found {len(vrs_files)} VRS files!"
 
         points_paths = tuple(traj_root.glob("**/semidense_points.csv.gz"))
         assert len(points_paths) <= 1, f"Found multiple points files! {points_paths}"
@@ -94,27 +127,18 @@ class InferenceTrajectoryPaths:
         if len(wrist_and_palm_poses_csv) == 0:
             wrist_and_palm_poses_csv = None
         else:
-            assert (
-                len(wrist_and_palm_poses_csv) == 1
-            ), "Found multiple wrist and palm poses files!"
-            if output_dir is not None and output_dir.exists() and soft_link:
-                wrist_and_palm_poses_csv_path = output_dir / wrist_and_palm_poses_csv[0].name
-                if not wrist_and_palm_poses_csv_path.exists():
-                    wrist_and_palm_poses_csv_path.symlink_to(wrist_and_palm_poses_csv[0])
-        wrist_and_palm_poses_csv_path = None
+            assert len(wrist_and_palm_poses_csv) == 1, (
+                "Found multiple wrist and palm poses files!"
+            )
 
         splat_path = traj_root / "splat.ply"
         if not splat_path.exists():
             splat_path = traj_root / "scene.splat"
         if not splat_path.exists():
-            print("No scene splat found.")
+            logger.warning("No scene splat found.")
             splat_path = None
         else:
-            print("Found splat at", splat_path)
-            if output_dir is not None and output_dir.exists() and soft_link:
-                splat_path = output_dir / splat_path.name
-                if not splat_path.exists():
-                    splat_path.symlink_to(splat_path)
+            logger.info(f"Found splat at {splat_path}")
 
         return InferenceTrajectoryPaths(
             vrs_file=vrs_files[0],
@@ -128,6 +152,7 @@ class InferenceTrajectoryPaths:
         )
 
 
+@jaxtyped(typechecker=typeguard.typechecked)
 class InferenceInputTransforms(TensorDataclass):
     """Some relevant transforms for inference."""
 
@@ -159,7 +184,7 @@ class InferenceInputTransforms(TensorDataclass):
             - closed_loop_traj[0].tracking_timestamp.total_seconds()
         )
         num_poses = len(closed_loop_traj)
-        print(f"Loaded {num_poses=} with {aria_fps=}, visualizing at {fps=}")
+        logger.info(f"Loaded {num_poses=} with {aria_fps=}, visualizing at {fps=}")
         Ts_world_device = []
         Ts_world_cpf = []
         out_timestamps_secs = []
@@ -169,7 +194,7 @@ class InferenceInputTransforms(TensorDataclass):
             Ts_world_device.append(T_world_device)
             Ts_world_cpf.append(T_world_device @ T_device_cpf)
             out_timestamps_secs.append(
-                closed_loop_traj[i].tracking_timestamp.total_seconds()
+                closed_loop_traj[i].tracking_timestamp.total_seconds(),
             )
 
         return InferenceInputTransforms(
@@ -181,3 +206,94 @@ class InferenceInputTransforms(TensorDataclass):
             .to(torch.float32),
             pose_timesteps=tuple(out_timestamps_secs),
         )
+
+
+@jaxtyped(typechecker=typeguard.typechecked)
+def create_masked_training_data(
+    body_model: fncsmpl.SmplhModel,
+    data: EgoTrainingData,
+    mask_ratio: float = 0.3,
+    device: torch.device = torch.device("cuda"),
+) -> EgoTrainingData:
+    """Create EgoTrainingData with MAE-style masking from posed SMPL-H model.
+
+    Args:
+        body_model: SMPL-H body model
+        data: Input EgoTrainingData
+        mask_ratio: Ratio of joints to mask (default: 0.3)
+        device: Device to run computations on
+
+    Returns:
+        EgoTrainingData with masked joints
+    """
+    # Move tensors to device
+    Ts_world_cpf = data.T_world_cpf.to(device)
+    Ts_world_root = data.T_world_root.to(device)
+    body_quats = data.body_quats.to(device)
+    contacts = data.contacts.to(device)
+    betas = data.betas.to(device)
+
+    # Handle hand quaternions
+    if data.hand_quats is not None:
+        hand_quats = data.hand_quats.to(device)
+        left_hand_quats = hand_quats[..., :15, :]
+        right_hand_quats = hand_quats[..., 15:30, :]
+    else:
+        batch_shape = body_quats.shape[:-2]
+        left_hand_quats = torch.zeros(*batch_shape, 15, 4, device=device)
+        left_hand_quats[..., 0] = 1.0
+        right_hand_quats = torch.zeros(*batch_shape, 15, 4, device=device)
+        right_hand_quats[..., 0] = 1.0
+
+    # Create posed data
+    local_quats = torch.cat([body_quats, left_hand_quats, right_hand_quats], dim=-2)
+    shaped_model = body_model.with_shape(betas)
+    posed = shaped_model.with_pose(Ts_world_root, local_quats)
+
+    batch_size, timesteps = posed.local_quats.shape[:2]
+    num_joints = CFG.smplh.num_joints  # Number of body joints
+
+    # Get joint positions in world frame
+    root_pos = posed.T_world_root[..., 4:7].unsqueeze(-2)  # (*batch, timesteps, 1, 3)
+    joints_wrt_world = torch.cat(
+        [root_pos, posed.Ts_world_joint[..., : num_joints - 1, 4:7]],
+        dim=-2,
+    )  # (*batch, timesteps, num_joints, 3)
+
+    # Generate random mask for sequence
+    num_masked = int(num_joints * mask_ratio)
+    visible_joints_mask = torch.ones(
+        (batch_size, timesteps, num_joints),
+        dtype=torch.bool,
+        device=device,
+    )
+
+    # Randomly select joints to mask
+    rand_indices = torch.randperm(num_joints)
+    masked_indices = rand_indices[:num_masked]
+    visible_joints_mask[..., masked_indices] = False
+
+    # Print masked joints
+    masked_joints_str = ", ".join(SMPLH_BODY_JOINTS[i] for i in masked_indices.tolist())
+    logger.debug(f"Masked joints: {masked_joints_str}")
+
+    # Get joints in CPF frame
+    joints_wrt_cpf = (
+        tf.SE3(Ts_world_cpf[..., None, :]).inverse() @ joints_wrt_world
+    )  # (*batch, timesteps, num_joints, 3)
+
+    return EgoTrainingData(
+        T_world_root=tf.SE3(posed.T_world_root).parameters(),
+        contacts=contacts,
+        betas=betas,
+        joints_wrt_world=joints_wrt_world,
+        body_quats=posed.local_quats[..., :21, :],
+        T_world_cpf=Ts_world_cpf,
+        height_from_floor=Ts_world_cpf[..., 6:7],
+        joints_wrt_cpf=joints_wrt_cpf,
+        mask=torch.ones((batch_size, timesteps), dtype=torch.bool, device=device),
+        hand_quats=posed.local_quats[..., 21:51, :]
+        if data.hand_quats is not None
+        else None,
+        visible_joints_mask=visible_joints_mask,
+    )

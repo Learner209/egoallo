@@ -10,23 +10,19 @@ import numpy as np
 import torch
 import tyro
 import viser
-from projectaria_tools.core.data_provider import (
-    VrsDataProvider,
-    create_vrs_data_provider,
-)
-from projectaria_tools.core.sensor_data import TimeDomain
-from tqdm import tqdm
-
 from egoallo import fncsmpl
 from egoallo.data.aria_mps import load_point_cloud_and_find_ground
-from egoallo.hand_detection_structs import (
-    CorrespondedAriaHandWristPoseDetections,
-    CorrespondedHamerDetections,
-)
+from egoallo.hand_detection_structs import CorrespondedAriaHandWristPoseDetections
+from egoallo.hand_detection_structs import CorrespondedHamerDetections
 from egoallo.inference_utils import InferenceTrajectoryPaths
-from egoallo.network import EgoDenoiseTraj
-from egoallo.transforms import SE3, SO3
+from egoallo.network import AbsoluteDenoiseTraj
+from egoallo.transforms import SE3
+from egoallo.transforms import SO3
 from egoallo.vis_helpers import visualize_traj_and_hand_detections
+from projectaria_tools.core.data_provider import create_vrs_data_provider
+from projectaria_tools.core.data_provider import VrsDataProvider
+from projectaria_tools.core.sensor_data import TimeDomain
+from tqdm import tqdm
 
 
 def main(
@@ -65,7 +61,9 @@ def main(
     trajectory_folder = server.gui.add_folder("Trajectory")
 
     current_file = "None"
-    loop_cb = lambda: None
+
+    def loop_cb():
+        return None
 
     while True:
         loop_cb()
@@ -93,7 +91,7 @@ def main(
                     if args.exists():
                         with server.gui.add_folder("Args"):
                             server.gui.add_markdown(
-                                "```\n" + args.read_text() + "\n```"
+                                "```\n" + args.read_text() + "\n```",
                             )
 
 
@@ -127,9 +125,9 @@ def load_and_visualize(
         "frame_nums",
         "timestamps_ns",
     ]
-    assert all(
-        key in outputs for key in expected_keys
-    ), f"Missing keys in NPZ file. Expected: {expected_keys}, Found: {list(outputs.keys())}"
+    assert all(key in outputs for key in expected_keys), (
+        f"Missing keys in NPZ file. Expected: {expected_keys}, Found: {list(outputs.keys())}"
+    )
     (num_samples, timesteps, _, _) = outputs["body_quats"].shape
 
     # We assume the directory structure is:
@@ -143,8 +141,8 @@ def load_and_visualize(
     device_calib = provider.get_device_calibration()
     T_device_cpf = SE3(
         torch.from_numpy(
-            device_calib.get_transform_device_cpf().to_quat_and_translation()
-        )
+            device_calib.get_transform_device_cpf().to_quat_and_translation(),
+        ),
     )
     assert T_device_cpf.wxyz_xyz.shape == (1, 7)
     pose_timestamps_sec = outputs["timestamps_ns"] / 1e9
@@ -180,10 +178,12 @@ def load_and_visualize(
 
     # Get point cloud + floor.
     points_data, floor_z = load_point_cloud_and_find_ground(
-        points_path=paths.points_path, return_points= "filtered", cached_pts_path=traj_dir
+        points_path=paths.points_path,
+        return_points="filtered",
+        cached_pts_path=traj_dir,
     )
 
-    traj = EgoDenoiseTraj(
+    traj = AbsoluteDenoiseTraj(
         betas=torch.from_numpy(outputs["betas"]).to(device),
         body_rotmats=SO3(
             torch.from_numpy(outputs["body_quats"]),
@@ -202,8 +202,8 @@ def load_and_visualize(
                         outputs["right_hand_quats"],
                     ],
                     axis=-2,
-                )
-            ).to(device)
+                ),
+            ).to(device),
         ).as_matrix(),
     )
     Ts_world_cpf = torch.from_numpy(outputs["Ts_world_cpf"]).to(device)
@@ -235,7 +235,9 @@ def load_and_visualize(
             image_data = provider.get_image_data_by_index(rgb_stream_id, i)[0]
             image_array = image_data.to_numpy_array().copy()
             image_array = cv2.resize(
-                image_array, (800, 800), interpolation=cv2.INTER_AREA
+                image_array,
+                (800, 800),
+                interpolation=cv2.INTER_AREA,
             )
             image_array = cv2.rotate(image_array, cv2.ROTATE_90_CLOCKWISE)
             frames.append(image_array)

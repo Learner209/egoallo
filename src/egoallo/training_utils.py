@@ -1,26 +1,25 @@
 """Utilities for writing training scripts."""
 
 import dataclasses
-import pdb
-import ipdb
 import signal
 import subprocess
 import sys
 import time
 import traceback as tb
 from pathlib import Path
-from typing import (
-    Any,
-    Dict,
-    Generator,
-    Iterable,
-    Protocol,
-    Sized,
-    get_type_hints,
-    overload,
-)
+from typing import Any
+from typing import Dict
+from typing import Generator
+from typing import get_type_hints
+from typing import Iterable
+from typing import Optional
+from typing import overload
+from typing import Protocol
+from typing import Sized
 
 import torch
+from accelerate import Accelerator
+
 
 def get_experiment_dir(experiment_name: str, version: int = 0) -> Path:
     """Creates a directory to put experiment files in, suffixed with a version
@@ -36,8 +35,10 @@ def get_experiment_dir(experiment_name: str, version: int = 0) -> Path:
     else:
         return experiment_dir
 
+
 def flattened_hparam_dict_from_dataclass(
-    dataclass: Any, prefix: str | None = None
+    dataclass: Any,
+    prefix: str | None = None,
 ) -> Dict[str, Any]:
     """Convert a config object in the form of a nested dataclass into a
     flattened dictionary, for use with Tensorboard hparams."""
@@ -65,7 +66,7 @@ def flattened_hparam_dict_from_dataclass(
         return {f"{prefix}.{k}": v for k, v in output.items()}
 
 
-def pdb_safety_net():
+def ipdb_safety_net():
     """Attaches a "safety net" for unexpected errors in a Python script.
 
     When called, PDB will be automatically opened when either (a) the user hits Ctrl+C
@@ -75,40 +76,16 @@ def pdb_safety_net():
 
     # Open PDB on Ctrl+C
     def handler(sig, frame):
-        pdb.set_trace()
+        ipdb.set_trace()
 
     signal.signal(signal.SIGINT, handler)
 
     # Open PDB when we encounter an uncaught exception
     def excepthook(type_, value, traceback):  # pragma: no cover (impossible to test)
         tb.print_exception(type_, value, traceback, limit=100)
-        pdb.post_mortem(traceback)
-
-    sys.excepthook = excepthook
-
-
-def ipdb_safety_net():
-    """Attaches a "safety net" for unexpected errors in a Python script.
-
-    When called, IPDB will be automatically opened when either (a) the user hits Ctrl+C
-    or (b) we encounter an uncaught exception. Helpful for bypassing minor errors,
-    diagnosing problems, and rescuing unsaved models.
-    """
-
-    # Open IPDB on Ctrl+C
-    def handler(sig, frame):
-        ipdb.set_trace()
-
-    signal.signal(signal.SIGINT, handler)
-
-    # Open IPDB when we encounter an uncaught exception
-    def excepthook(type_, value, traceback):  # pragma: no cover (impossible to test)
-        tb.print_exception(type_, value, traceback, limit=100)
         ipdb.post_mortem(traceback)
 
     sys.excepthook = excepthook
-
-
 
 
 class SizedIterable[ContainedType](Iterable[ContainedType], Sized, Protocol):
@@ -124,6 +101,15 @@ class LoopMetrics:
     counter: int
     iterations_per_sec: float
     time_elapsed: float
+    batch_time: float = 0.0
+    gpu_memory_used: list[float] = dataclasses.field(default_factory=list)
+    gpu_utilization: list[float] = dataclasses.field(default_factory=list)
+    forward_time: float = 0.0
+    backward_time: float = 0.0
+    optimizer_time: float = 0.0
+    num_gpus: int = 1
+    per_gpu_batch_size: int = 0
+    total_batch_size: int = 0
 
 
 @overload
@@ -136,7 +122,10 @@ def range_with_metrics(start: int, stop: int, /) -> SizedIterable[LoopMetrics]: 
 
 @overload
 def range_with_metrics(
-    start: int, stop: int, step: int, /
+    start: int,
+    stop: int,
+    step: int,
+    /,
 ) -> SizedIterable[LoopMetrics]: ...
 
 
@@ -159,39 +148,87 @@ class _RangeWithMetrics:
         return len(range(*self.args))
 
 
-def loop_metric_generator(counter_init: int = 0) -> Generator[LoopMetrics, None, None]:
-    """Generator for computing loop metrics.
+def loop_metric_generator(
+    counter_init: int = 0,
+    accelerator: Optional[Accelerator] = None,
+) -> Generator[LoopMetrics, None, None]:
+    """Enhanced generator for computing detailed training loop metrics.
 
-    Note that the first `iteration_per_sec` metric will be 0.0.
-
-    Example usage:
-    ```
-    # Note that this is an infinite loop.
-    for metric in loop_metric_generator():
-        time.sleep(1.0)
-        print(metric)
-    ```
-
-    or:
-    ```
-    loop_metrics = loop_metric_generator()
-    while True:
-        time.sleep(1.0)
-        print(next(loop_metrics).iterations_per_sec)
-    ```
+    Args:
+        counter_init: Initial counter value
+        accelerator: HuggingFace Accelerator instance for multi-GPU info
     """
-
     counter = counter_init
-    del counter_init
     time_start = time.time()
     time_prev = time_start
+
+    # Track timing for different training phases
+    time.time()
+    forward_time = 0.0
+    backward_time = 0.0
+    optimizer_time = 0.0
+
     while True:
         time_now = time.time()
-        yield LoopMetrics(
+        batch_time = time_now - time_prev
+
+        # Get GPU metrics if available
+        gpu_memory = []
+        gpu_util = []
+        num_gpus = 1
+
+        if torch.cuda.is_available():
+            num_gpus = torch.cuda.device_count()
+            for i in range(num_gpus):
+                memory_used, memory_total = torch.cuda.mem_get_info(i)
+                gpu_memory.append(
+                    (memory_total - memory_used) / 1024**3,
+                )  # Convert to GB
+
+                # Note: This requires nvidia-smi
+                try:
+                    gpu_util.append(
+                        float(
+                            subprocess.check_output(
+                                [
+                                    "nvidia-smi",
+                                    "--query-gpu=utilization.gpu",
+                                    "--format=csv,noheader,nounits",
+                                    "-i",
+                                    str(i),
+                                ],
+                            ),
+                        ),
+                    )
+                except Exception as _:
+                    gpu_util.append(0.0)
+
+        # Calculate effective batch sizes
+        if accelerator is not None:
+            per_gpu_batch = accelerator.gradient_accumulation_steps
+            total_batch = per_gpu_batch * accelerator.num_processes
+        else:
+            per_gpu_batch = 0
+            total_batch = 0
+
+        metrics = LoopMetrics(
             counter=counter,
-            iterations_per_sec=1.0 / (time_now - time_prev) if counter > 0 else 0.0,
+            iterations_per_sec=1.0 / batch_time if counter > 0 else 0.0,
             time_elapsed=time_now - time_start,
+            batch_time=batch_time,
+            gpu_memory_used=gpu_memory,
+            gpu_utilization=gpu_util,
+            forward_time=forward_time,
+            backward_time=backward_time,
+            optimizer_time=optimizer_time,
+            num_gpus=num_gpus,
+            per_gpu_batch_size=per_gpu_batch,
+            total_batch_size=total_batch,
         )
+
+        yield metrics
+
+        # Reset timing trackers
         time_prev = time_now
         counter += 1
 

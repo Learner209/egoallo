@@ -17,25 +17,43 @@ classifiers = [
 dependencies = [
     "torch>2.2",
     "viser>=0.2.11",
-    "typeguard",
-    "jaxtyping",
+    "typeguard==2.13.3",
+    "jaxtyping>=0.2.29",
     "einops",
     "rotary-embedding-torch",
     "h5py",
     "tensorboard",
-    "projectaria_tools",
     "accelerate",
     "tensorboardX",
-    "projectaria-tools[all]",
+    "loguru",
+    "projectaria-tools",
     "opencv-python",
     "gdown",
-    "termcolor",
-    "videoio",
     "yacs",
+    "termcolor",
+    "jax[cuda12]",
+    "beartype",
+    "PyOpenGL==3.1.5",
+    "videoio",
+    "wandb",
+    "nvitop",
+    "glm",
+    "jax_dataclasses",
+    "jaxlie",
+    "ipdb",
+    "git+https://github.com/brentyi/jaxls.git",
+    "smplx",
+    "joblib",
+    "pre-commit",
 ]
 
 [tool.setuptools.package-data]
 egoallo = ["py.typed"]
+
+[tool.ruff]
+exclude = [
+    "third_party",
+]
 
 [tool.ruff.lint]
 select = [
@@ -64,13 +82,5 @@ ignore = [
     "PLW2901",  # For loop variable overwritten.
 ]
 
-[tool.pyright]
-include = ["src"]
-exclude = [
-    "**/node_modules",
-    "**/__pycache__",
-    "assets/",
-]
-ignore = [
-    "third_party",
-]
+[tool.pytest.ini_options]
+addopts = "--jaxtyping-packages=egoallo,typeguard.typechecked"

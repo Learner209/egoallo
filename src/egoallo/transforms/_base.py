@@ -1,15 +1,14 @@
+from __future__ import annotations
+
 import abc
-from typing import (
-    ClassVar,
-    Generic,
-    Tuple,
-    Type,
-    TypeVar,
-    Union,
-    final,
-    overload,
-)
-from overrides import overrides
+from typing import ClassVar
+from typing import final
+from typing import Generic
+from typing import overload
+from typing import Tuple
+from typing import Type
+from typing import TypeVar
+from typing import Union
 
 import numpy as onp
 import torch
@@ -58,7 +57,8 @@ class MatrixLieGroup(abc.ABC):
     def __matmul__(self, other: Tensor) -> Tensor: ...
 
     def __matmul__(
-        self: GroupType, other: Union[GroupType, Tensor]
+        self: GroupType,
+        other: Union[GroupType, Tensor],
     ) -> Union[GroupType, Tensor]:
         """Overload for the `@` operator.
 
@@ -78,7 +78,9 @@ class MatrixLieGroup(abc.ABC):
     @classmethod
     @abc.abstractmethod
     def identity(
-        cls: Type[GroupType], device: Union[torch.device, str], dtype: torch.dtype
+        cls: Type[GroupType],
+        device: Union[torch.device, str],
+        dtype: torch.dtype,
     ) -> GroupType:
         """Returns identity element.
 

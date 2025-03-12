@@ -1,10 +1,5 @@
-third_party/hamer
-third_party/hps_toolkit
-third_party/humor
-third_party/egoego
-third_party/slowfast
-
-/data
-/datasets
-/assets
-/wandb
+/third_party/
+/assets/
+/datasets/
+/myenv/
+/wandb/

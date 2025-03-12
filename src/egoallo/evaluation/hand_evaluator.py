@@ -1,31 +1,33 @@
 import json
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import as_completed
+from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict
+from typing import List
+from typing import Optional
+from typing import Tuple
 
 import numpy as np
 import torch
+import typeguard
 import yaml
-from tqdm import tqdm
-
 from egoallo import fncsmpl
-from egoallo.guidance_optimizer_jax import GuidanceMode
+from egoallo.constants import EGOEXO_NAMES_LEFT
+from egoallo.constants import EGOEXO_NAMES_RIGHT
+from egoallo.constants import VERTEX_IDS
+from egoallo.types import EvalMode
+from egoallo.types import FloatArray
+from egoallo.types import HandSide
+from egoallo.types import MetricsDict
+from egoallo.types import ModelType
+from egoallo.types import PathLike
+from egoallo.types import ProcrustesMode
+from egoallo.types import ProcrustesOutput
 from egoallo.utilities import procrustes_align
-from egoallo.setup_logger import setup_logger
+from egoallo.utils.setup_logger import setup_logger
 
 from .base import BaseEvaluator
-from .constants import EGOEXO_NAMES_LEFT, EGOEXO_NAMES_RIGHT, VERTEX_IDS
-from .types import (
-    EvalMode, 
-    FloatArray,
-    HandSide,
-    MetricsDict,
-    ModelType,
-    PathLike,
-    ProcrustesMode,
-    ProcrustesOutput,
-)
 
 
 logger = setup_logger(output="logs/evaluation", name=__name__)
@@ -54,20 +56,37 @@ class HandEvaluator(BaseEvaluator):
     def get_mano_from_openpose_indices(include_tips: bool = True) -> FloatArray:
         """Get indices mapping from MANO joints to OpenPose format."""
         mano_to_openpose = [
-            0, 13, 14, 15, 16, 1, 2, 3, 17,
-            4, 5, 6, 18, 10, 11, 12, 19,
-            7, 8, 9, 20
+            0,
+            13,
+            14,
+            15,
+            16,
+            1,
+            2,
+            3,
+            17,
+            4,
+            5,
+            6,
+            18,
+            10,
+            11,
+            12,
+            19,
+            7,
+            8,
+            9,
+            20,
         ]
         if not include_tips:
             mano_to_openpose = mano_to_openpose[:16]
         openpose_from_mano_idx = {
-            mano_idx: openpose_idx 
+            mano_idx: openpose_idx
             for openpose_idx, mano_idx in enumerate(mano_to_openpose)
         }
-        indices = np.array([
-            openpose_from_mano_idx[i] 
-            for i in range(len(mano_to_openpose))
-        ])
+        indices = np.array(
+            [openpose_from_mano_idx[i] for i in range(len(mano_to_openpose))],
+        )
         return indices
 
     def tips_from_vertices(
@@ -80,8 +99,7 @@ class HandEvaluator(BaseEvaluator):
         side_short = "" if model_type == "mano" else side[0]
         tip_names = ["thumb", "index", "middle", "ring", "pinky"]
         tips_idxs = [
-            VERTEX_IDS[model_type][side_short + tip_name] 
-            for tip_name in tip_names
+            VERTEX_IDS[model_type][side_short + tip_name] for tip_name in tip_names
         ]
         finger_tips = vertices[..., tips_idxs, :]
         return finger_tips
@@ -135,34 +153,40 @@ class HandEvaluator(BaseEvaluator):
         """Subtract two sets of keypoints after Procrustes alignment."""
         if a.shape[0] == 1:
             return np.zeros_like(a)
-            
+
         a_tensor = torch.tensor(a, dtype=torch.float64, device=self.device)
         b_tensor = torch.tensor(b, dtype=torch.float64, device=self.device)
-        
-        aligned_b = procrustes_align(
-            points_y=a_tensor,
-            points_x=b_tensor,
-            fix_scale=False,
-        )[0].cpu().numpy()
-        
+
+        aligned_b = (
+            procrustes_align(
+                points_y=a_tensor,
+                points_x=b_tensor,
+                fix_scale=False,
+            )[0]
+            .cpu()
+            .numpy()
+        )
+
         return a - aligned_b
 
+    @jaxtyped(typechecker=typeguard.typechecked)
     def procrustes_align(
         self,
-        points_y: torch.Tensor,
-        points_x: torch.Tensor,
+        points_y: Float[Tensor, "*batch time 3"],
+        points_x: Float[Tensor, "*batch time 3"],
         output: ProcrustesMode,
         fix_scale: bool = False,
     ) -> ProcrustesOutput:
         """Perform Procrustes alignment between point sets."""
         s, R, t = procrustes_align(points_y, points_x, fix_scale)
-        
+
         if output == "transforms":
             return s, R, t
         elif output == "aligned_x":
-            aligned_x = s[..., None, :] * torch.einsum(
-                "...ij,...nj->...ni", R, points_x
-            ) + t[..., None, :]
+            aligned_x = (
+                s[..., None, :] * torch.einsum("...ij,...nj->...ni", R, points_x)
+                + t[..., None, :]
+            )
             return aligned_x
 
     def evaluate_take(
@@ -170,7 +194,13 @@ class HandEvaluator(BaseEvaluator):
         take_index: int,
         eval_mode: EvalMode,
         hamer_frames_only: bool,
-    ) -> Tuple[int, Dict[str, Dict[int, Tuple[float, ...]]], Dict[str, Dict[int, Tuple[float, ...]]], int, int]:
+    ) -> Tuple[
+        int,
+        Dict[str, Dict[int, Tuple[float, ...]]],
+        Dict[str, Dict[int, Tuple[float, ...]]],
+        int,
+        int,
+    ]:
         """Evaluate a single take."""
         mpjpes = {}
         pampjpes = {}
@@ -196,25 +226,30 @@ class HandEvaluator(BaseEvaluator):
 
                 # Get predicted keypoints based on eval mode
                 pred_kpts = self._get_predicted_keypoints(
-                    take_index, frame, side, eval_mode, hamer_frames_only
+                    take_index,
+                    frame,
+                    side,
+                    eval_mode,
+                    hamer_frames_only,
                 )
                 if pred_kpts is None:
                     continue
 
                 # Compute metrics
                 mpjpe = np.linalg.norm(gt_kpts - pred_kpts, axis=1) * 1000.0
-                pampjpe = np.linalg.norm(
-                    self.aligned_subtract(gt_kpts, pred_kpts), axis=1
-                ) * 1000.0
+                pampjpe = (
+                    np.linalg.norm(self.aligned_subtract(gt_kpts, pred_kpts), axis=1)
+                    * 1000.0
+                )
 
                 # Store results
                 if take_index not in mpjpes:
                     mpjpes[take_index] = {}
                     pampjpes[take_index] = {}
-                
+
                 mpjpes[take_index][frame] = tuple(mpjpe[gt_mask])
                 pampjpes[take_index][frame] = tuple(pampjpe[gt_mask])
-                
+
                 matched_kp += gt_mask.sum()
                 total_kp += len(gt_mask)
 
@@ -276,9 +311,13 @@ class HandEvaluator(BaseEvaluator):
 
                 stats = {
                     "mpjpe": float(np.mean(mpjpe_values)),
-                    "mpjpe_stderr": float(np.std(mpjpe_values) / np.sqrt(len(mpjpe_values))),
+                    "mpjpe_stderr": float(
+                        np.std(mpjpe_values) / np.sqrt(len(mpjpe_values)),
+                    ),
                     "pampjpe": float(np.mean(pampjpe_values)),
-                    "pampjpe_stderr": float(np.std(pampjpe_values) / np.sqrt(len(pampjpe_values))),
+                    "pampjpe_stderr": float(
+                        np.std(pampjpe_values) / np.sqrt(len(pampjpe_values)),
+                    ),
                     "matched": matched_kp,
                     "total": total_kp,
                 }

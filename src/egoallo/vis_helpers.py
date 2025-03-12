@@ -1,23 +1,26 @@
 import time
 from pathlib import Path
-from typing import Callable, TypedDict
+from typing import Callable
+from typing import TypedDict
 
 import numpy as np
 import numpy.typing as npt
 import torch
 import trimesh
+import typeguard
 import viser
 import viser.transforms as vtf
 from jaxtyping import Float
+from jaxtyping import jaxtyped
 from plyfile import PlyData
 from torch import Tensor
 
-from . import fncsmpl, fncsmpl_extensions, network
-from .hand_detection_structs import (
-    CorrespondedAriaHandWristPoseDetections,
-    CorrespondedHamerDetections,
-)
-from .transforms import SE3, SO3
+from . import fncsmpl
+from . import network
+from .hand_detection_structs import CorrespondedAriaHandWristPoseDetections
+from .hand_detection_structs import CorrespondedHamerDetections
+from .transforms import SE3
+from .transforms import SO3
 
 
 class SplatArgs(TypedDict):
@@ -51,19 +54,22 @@ def load_splat_file(splat_path: Path, center: bool = False) -> SplatArgs:
 
     # Reinterpret cast to dtypes that we want to extract.
     splat_uint8 = np.frombuffer(splat_buffer, dtype=np.uint8).reshape(
-        (num_gaussians, bytes_per_gaussian)
+        (num_gaussians, bytes_per_gaussian),
     )
     scales = splat_uint8[:, 12:24].copy().view(np.float32)
     wxyzs = splat_uint8[:, 28:32] / 255.0 * 2.0 - 1.0
     Rs = vtf.SO3(wxyzs).as_matrix()
     covariances = np.einsum(
-        "nij,njk,nlk->nil", Rs, np.eye(3)[None, :, :] * scales[:, None, :] ** 2, Rs
+        "nij,njk,nlk->nil",
+        Rs,
+        np.eye(3)[None, :, :] * scales[:, None, :] ** 2,
+        Rs,
     )
     centers = splat_uint8[:, 0:12].copy().view(np.float32)
     if center:
         centers -= np.mean(centers, axis=0, keepdims=True)
     print(
-        f"Splat file with {num_gaussians=} loaded in {time.time() - start_time} seconds"
+        f"Splat file with {num_gaussians=} loaded in {time.time() - start_time} seconds",
     )
     return {
         "centers": centers,
@@ -91,14 +97,17 @@ def load_ply_file(ply_file_path: Path, center: bool = False) -> SplatArgs:
 
     Rs = vtf.SO3(wxyzs).as_matrix()
     covariances = np.einsum(
-        "nij,njk,nlk->nil", Rs, np.eye(3)[None, :, :] * scales[:, None, :] ** 2, Rs
+        "nij,njk,nlk->nil",
+        Rs,
+        np.eye(3)[None, :, :] * scales[:, None, :] ** 2,
+        Rs,
     )
     if center:
         positions -= np.mean(positions, axis=0, keepdims=True)
 
     num_gaussians = len(v)
     print(
-        f"PLY file with {num_gaussians=} loaded in {time.time() - start_time} seconds"
+        f"PLY file with {num_gaussians=} loaded in {time.time() - start_time} seconds",
     )
     return {
         "centers": positions,
@@ -109,7 +118,9 @@ def load_ply_file(ply_file_path: Path, center: bool = False) -> SplatArgs:
 
 
 def add_splat_to_viser(
-    splat_or_ply_path: Path, server: viser.ViserServer, z_offset: float = 0.0
+    splat_or_ply_path: Path,
+    server: viser.ViserServer,
+    z_offset: float = 0.0,
 ) -> None:
     """Add some Gaussian splats to the Viser server."""
     if splat_or_ply_path.suffix.lower() == ".ply":
@@ -128,10 +139,11 @@ def add_splat_to_viser(
     )
 
 
+@jaxtyped(typechecker=typeguard.typechecked)
 def visualize_traj_and_hand_detections(
     server: viser.ViserServer,
-    Ts_world_cpf: Float[Tensor, "timesteps 7"],
-    traj: network.EgoDenoiseTraj | None,
+    T_world_root: Float[Tensor, "timesteps 7"],
+    traj: network.AbsoluteDenoiseTraj | None,
     body_model: fncsmpl.SmplhModel,
     hamer_detections: CorrespondedHamerDetections | None = None,
     aria_detections: CorrespondedAriaHandWristPoseDetections | None = None,
@@ -141,10 +153,10 @@ def visualize_traj_and_hand_detections(
     show_joints: bool = False,
     get_ego_video: Callable[[int, int, float], bytes] | None = None,
 ) -> Callable[[], int]:
-    """Chaotic mega-function for visualization. Returns a callback that should
-    be called repeatedly in a loop."""
+    """Visualization function for trajectories and hand detections.
+    Returns a callback that should be called repeatedly in a loop."""
 
-    timesteps = Ts_world_cpf.shape[0]
+    timesteps = T_world_root.shape[0]
 
     server.scene.add_grid(
         "/ground",
@@ -165,7 +177,11 @@ def visualize_traj_and_hand_detections(
             point_shape="sparkle",
         )
         size_slider = server.gui.add_slider(
-            "Point cloud size", min=0.001, max=0.05, step=0.001, initial_value=0.005
+            "Point cloud size",
+            min=0.001,
+            max=0.05,
+            step=0.001,
+            initial_value=0.005,
         )
 
         @size_slider.on_update
@@ -177,14 +193,15 @@ def visualize_traj_and_hand_detections(
         add_splat_to_viser(splat_path, server)  # , z_offset=-floor_z)
 
     if traj is not None:
+        # import ipdb; ipdb.set_trace()
         betas = traj.betas
         timesteps = betas.shape[1]
         sample_count = betas.shape[0]
         assert betas.shape == (sample_count, timesteps, 16)
         body_quats = SO3.from_matrix(traj.body_rotmats).wxyz
         assert body_quats.shape == (sample_count, timesteps, 21, 4)
-        device = body_quats.device
 
+        traj.hand_rotmats = None
         if traj.hand_rotmats is not None:
             hand_quats = SO3.from_matrix(traj.hand_rotmats).wxyz
             left_hand_quats = hand_quats[..., :15, :]
@@ -194,23 +211,12 @@ def visualize_traj_and_hand_detections(
             right_hand_quats = None
 
         shaped = body_model.with_shape(torch.mean(betas, dim=1, keepdim=True))
-        fk_outputs = shaped.with_pose_decomposed(
-            T_world_root=SE3.identity(
-                device=device, dtype=body_quats.dtype
-            ).parameters(),
+        fk_outputs: fncsmpl.SmplhShapedAndPosed = shaped.with_pose_decomposed(
+            T_world_root=T_world_root[None, ...],
             body_quats=body_quats,
             left_hand_quats=left_hand_quats,
             right_hand_quats=right_hand_quats,
         )
-
-        assert Ts_world_cpf.shape == (timesteps, 7)
-        T_world_root = fncsmpl_extensions.get_T_world_root_from_cpf_pose(
-            # Batch axes of fk_outputs are (num_samples, time).
-            # Batch axes of Ts_world_cpf are (time,).
-            fk_outputs,
-            Ts_world_cpf[None, ...],
-        )
-        fk_outputs = fk_outputs.with_new_T_world_root(T_world_root)
     else:
         shaped = None
         fk_outputs = None
@@ -236,9 +242,9 @@ def visualize_traj_and_hand_detections(
     timestep_handles: list[viser.FrameHandle] = []
     hamer_handles: list[viser.MeshHandle | viser.PointCloudHandle] = []
     aria_handles: list[viser.SceneNodeHandle] = []
-    for t in range(Ts_world_cpf.shape[0]):
+    for t in range(T_world_root.shape[0]):
         timestep_handles.append(
-            server.scene.add_frame(f"/timesteps/{t}", show_axes=False)
+            server.scene.add_frame(f"/timesteps/{t}", show_axes=False),
         )
 
         # Joints.
@@ -252,17 +258,17 @@ def visualize_traj_and_hand_detections(
                     server.scene.add_point_cloud(
                         f"/timesteps/{t}/joints",
                         points=fk_outputs.Ts_world_joint[j, t, :21, 4:7].numpy(
-                            force=True
+                            force=True,
                         ),
                         colors=joints_colors,
                         point_shape="circle",
                         point_size=0.02,
-                    )
+                    ),
                 )
 
         # Visualize HaMeR outputs.
         if hamer_detections is not None:
-            T_world_cam = SE3(Ts_world_cpf[t]) @ SE3(hamer_detections.T_cpf_cam)
+            T_world_cam = SE3(T_world_root[t]) @ SE3(hamer_detections.T_cpf_cam)
             server.scene.add_frame(
                 f"/timesteps/{t}/cpf/cam",
                 show_axes=True,
@@ -281,7 +287,7 @@ def visualize_traj_and_hand_detections(
                             vertices=hands_l["verts"][j],
                             faces=hamer_detections.mano_faces_left.numpy(force=True),
                             visible=False,
-                        )
+                        ),
                     )
                     hamer_handles.append(
                         server.scene.add_point_cloud(
@@ -291,7 +297,7 @@ def visualize_traj_and_hand_detections(
                             point_size=0.008,
                             point_shape="square",
                             visible=False,
-                        )
+                        ),
                     )
             if hands_r is not None:
                 for j in range(hands_r["verts"].shape[0]):
@@ -301,7 +307,7 @@ def visualize_traj_and_hand_detections(
                             vertices=hands_r["verts"][j],
                             faces=hamer_detections.mano_faces_right.numpy(force=True),
                             visible=False,
-                        )
+                        ),
                     )
                     hamer_handles.append(
                         server.scene.add_point_cloud(
@@ -311,7 +317,7 @@ def visualize_traj_and_hand_detections(
                             point_size=0.008,
                             point_shape="square",
                             visible=False,
-                        )
+                        ),
                     )
 
         # Visualize Aria detections.
@@ -333,12 +339,12 @@ def visualize_traj_and_hand_detections(
                                 [
                                     detections.wrist_position[index].numpy(force=True),
                                     detections.palm_position[index].numpy(force=True),
-                                ]
+                                ],
                             ),
                             line_width=3.0,
                             color=(255, 0, 0) if side == "left" else (0, 255, 0),
                             visible=False,
-                        )
+                        ),
                     )
 
     body_handles = (
@@ -348,7 +354,7 @@ def visualize_traj_and_hand_detections(
                 vertices=shaped.verts_zero[i, 0, :, :].numpy(force=True),
                 faces=body_model.faces.numpy(force=True),
                 bone_wxyzs=vtf.SO3.identity(
-                    batch_axes=(body_model.get_num_joints() + 1,)
+                    batch_axes=(body_model.get_num_joints() + 1,),
                 ).wxyz,
                 bone_positions=np.concatenate(
                     [
@@ -376,10 +382,18 @@ def visualize_traj_and_hand_detections(
     gui_show_cpf_axes = server.gui.add_checkbox("Show CPF axes", initial_value=False)
     gui_wireframe = server.gui.add_checkbox("Wireframe", initial_value=False)
     gui_smpl_opacity = server.gui.add_slider(
-        "SMPL Opacity", initial_value=1.0, min=0.0, max=1.0, step=0.01
+        "SMPL Opacity",
+        initial_value=1.0,
+        min=0.0,
+        max=1.0,
+        step=0.01,
     )
     gui_hamer_opacity = server.gui.add_slider(
-        "HaMeR Opacity", initial_value=1.0, min=0.0, max=1.0, step=0.01
+        "HaMeR Opacity",
+        initial_value=1.0,
+        min=0.0,
+        max=1.0,
+        step=0.01,
     )
 
     @gui_smpl_opacity.on_update
@@ -394,10 +408,12 @@ def visualize_traj_and_hand_detections(
                 handle.opacity = gui_hamer_opacity.value
 
     gui_show_hamer_hands = server.gui.add_checkbox(
-        "Show HaMeR hands", initial_value=False
+        "Show HaMeR hands",
+        initial_value=False,
     )
     gui_show_aria_hands = server.gui.add_checkbox(
-        "Show wrist detections", initial_value=False
+        "Show wrist detections",
+        initial_value=False,
     )
     gui_body_color = server.gui.add_rgb("Body color", initial_value=(152, 93, 229))
 
@@ -464,10 +480,15 @@ def visualize_traj_and_hand_detections(
         gui_prev_frame = server.gui.add_button("Prev Frame", disabled=True)
         gui_playing = server.gui.add_checkbox("Playing", True)
         gui_framerate = server.gui.add_slider(
-            "FPS", min=1, max=60, step=0.1, initial_value=15
+            "FPS",
+            min=1,
+            max=60,
+            step=0.1,
+            initial_value=15,
         )
         gui_framerate_options = server.gui.add_button_group(
-            "FPS options", ("10", "20", "30", "60")
+            "FPS options",
+            ("10", "20", "30", "60"),
         )
 
     # Frame step buttons.
@@ -491,12 +512,12 @@ def visualize_traj_and_hand_detections(
     def _(_) -> None:
         gui_framerate.value = int(gui_framerate_options.value)
 
-    Ts_world_cpf_numpy = Ts_world_cpf.numpy(force=True)
+    T_world_root_numpy = T_world_root.numpy(force=True)
 
     def do_update() -> None:
         t = gui_timestep.value
-        cpf_handle.wxyz = Ts_world_cpf_numpy[t, :4]
-        cpf_handle.position = Ts_world_cpf_numpy[t, 4:7]
+        cpf_handle.wxyz = T_world_root_numpy[t, :4]
+        cpf_handle.position = T_world_root_numpy[t, 4:7]
 
         if gui_attach.value:
             for client in server.get_clients().values():
@@ -504,7 +525,7 @@ def visualize_traj_and_hand_detections(
                     vtf.SO3(cpf_handle.wxyz) @ vtf.SO3.from_z_radians(np.pi)
                 ).wxyz
                 client.camera.position = cpf_handle.position - vtf.SO3(
-                    cpf_handle.wxyz
+                    cpf_handle.wxyz,
                 ) @ np.array([0.0, 0.0, gui_attach_dist.value])
 
         if fk_outputs is not None:
@@ -514,9 +535,14 @@ def visualize_traj_and_hand_detections(
                         bone_transform = fk_outputs.T_world_root[i, t].numpy(force=True)
                     else:
                         bone_transform = fk_outputs.Ts_world_joint[i, t, b - 1].numpy(
-                            force=True
+                            force=True,
                         )
+                    # Check if the destination array is writable
+                    # if not bone_handle.wxyz.flags["WRITEABLE"]:
+                    #     bone_handle.wxyz.setflags(write=True)  # Make it writable
                     bone_handle.wxyz = bone_transform[:4]
+                    # if not bone_handle.position.flags["WRITEABLE"]:
+                    #     bone_handle.position.setflags(write=True)  # Make it writable
                     bone_handle.position = bone_transform[4:7]
 
         for ii, timestep_frame in enumerate(timestep_handles):
@@ -531,7 +557,10 @@ def visualize_traj_and_hand_detections(
         def _(event: viser.GuiEvent) -> None:
             assert event.client is not None
             notif = event.client.add_notification(
-                "Getting video...", body="", loading=True, with_close_button=False
+                "Getting video...",
+                body="",
+                loading=True,
+                with_close_button=False,
             )
             ego_video_bytes = get_ego_video(
                 gui_start_end.value[0],
@@ -574,7 +603,8 @@ def visualize_traj_and_hand_detections(
             if gui_timestep.value == start:
                 get_viser_file.value = False
                 server.send_file_download(
-                    "recording.viser", content=handle.end_and_serialize()
+                    "recording.viser",
+                    content=handle.end_and_serialize(),
                 )
                 handle = None
 

@@ -7,6 +7,7 @@ __pycache__
 .coverage
 htmlcov
 .mypy_cache
+.ruff_cache
 .dmypy.json
 .hypothesis
 .envrc
@@ -15,18 +16,36 @@ htmlcov
 .envrc
 lightning_logs/
 outputs/
-experiments/
 blendify_assets/
 wandb/
+node_modules/
+
+package.json
+package-lock.json
+# vim.
+tags
+
+diff.bak
+
+**/*.mp4
+**/*.ply
+**/*.pkl
+**/*.npz
+**/*.npy
+**/*.pt
+
+/experiments
+/exp
+/assets
+/datasets
+/data
+/wandb
 
 test_results/
 logs/
-/assets
 
-/datasets
 myenv/
 
-/data
 egoallo_checkpoint_*
 egoallo_example_*
 
@@ -192,3 +211,5 @@ cython_debug/
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
+.aider*
+exp

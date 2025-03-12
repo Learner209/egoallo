@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Union
-from overrides import overrides
 
 import numpy as np
 import torch
 from torch import Tensor
 
 from . import _base
-from .utils import get_epsilon, register_lie_group
+from .utils import get_epsilon
+from .utils import register_lie_group
 
 
 @register_lie_group(
@@ -121,47 +121,47 @@ class SO3(_base.SOBase):
     @staticmethod
     def from_rot6d(rot6d: Tensor) -> SO3:
         """Construct a rotation from a 6D rotation representation.
-        
+
         Args:
             rot6d: 6D rotation representation. Shape should be (..., 6).
-            
+
         Returns:
             SO3 instance.
         """
         assert rot6d.shape[-1] == 6
-        
+
         # Reshape to (..., 3, 2)
         rot6d = rot6d.reshape(*rot6d.shape[:-1], 3, 2)
-        
+
         # Get first two columns
         x_raw = rot6d[..., 0]
         y_raw = rot6d[..., 1]
-        
+
         # Normalize first vector
         x = x_raw / torch.norm(x_raw, dim=-1, keepdim=True)
-        
+
         # Make second vector orthogonal to first and normalize
         z = torch.cross(x, y_raw, dim=-1)
         z = z / torch.norm(z, dim=-1, keepdim=True)
-        
+
         # Recompute y to ensure orthogonality
         y = torch.cross(z, x, dim=-1)
-        
+
         # Stack into rotation matrix
         rotation_matrix = torch.stack([x, y, z], dim=-1)
-        
+
         # Convert to SO3 using existing from_matrix
         return SO3.from_matrix(rotation_matrix)
 
     def as_rot6d(self) -> Tensor:
         """Convert SO3 to 6D rotation representation.
-        
+
         Returns:
             6D rotation representation. Shape will be (..., 6).
         """
         # Get rotation matrix
         matrix = self.as_matrix()
-        
+
         # Extract first two columns and reshape
         rot6d = matrix[..., :, :2]
         return rot6d.reshape(*matrix.shape[:-2], 6)
@@ -327,7 +327,7 @@ class SO3(_base.SOBase):
                 use_taylor,
                 torch.ones_like(theta_squared),  # Any constant value should do here.
                 theta_squared,
-            )
+            ),
         )
         safe_half_theta = 0.5 * safe_theta
 
@@ -350,7 +350,7 @@ class SO3(_base.SOBase):
                     imaginary_factor[..., None] * tangent,
                 ],
                 dim=-1,
-            )
+            ),
         )
 
     @overrides
@@ -367,7 +367,7 @@ class SO3(_base.SOBase):
                 use_taylor,
                 torch.ones_like(norm_sq),  # Any non-zero value should do here.
                 norm_sq,
-            )
+            ),
         )
         w_safe = torch.where(use_taylor, w, torch.ones_like(w))
         atan_n_over_w = torch.atan2(
@@ -399,4 +399,3 @@ class SO3(_base.SOBase):
     @overrides
     def normalize(self) -> SO3:
         return SO3(wxyz=self.wxyz / torch.linalg.norm(self.wxyz, dim=-1, keepdim=True))
-

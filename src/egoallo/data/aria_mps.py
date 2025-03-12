@@ -1,48 +1,62 @@
 from pathlib import Path
 from typing import Literal
+from typing import Tuple
 
 import numpy as np
+from egoallo.utils.setup_logger import setup_logger
 from projectaria_tools.core import mps
 from projectaria_tools.core.mps.utils import filter_points_from_confidence
+
+logger = setup_logger(output=None, name=__name__)
 
 
 def load_point_cloud_and_find_ground(
     points_path: Path,
     return_points: Literal["all", "filtered", "less_filtered"] = "less_filtered",
-    cached_pts_path: Path | None = None,
-) -> tuple[np.ndarray, float]:
-    """Load an Aria MPS point cloud and find the ground plane."""
+    cache_files: bool = True,
+) -> Tuple[np.ndarray, float]:
+    """Load an Aria MPS point cloud and find the ground plane.
 
-    if cached_pts_path is None:
-        filtered_points_npz_cache_path = points_path.parent / "_cached_filtered_points.npz"
-        less_filtered_points_npz_cache_path = (
-            points_path.parent / "_cached_less_filtered_points.npz"
-        )
-    else:
-        filtered_points_npz_cache_path = cached_pts_path / "_cached_filtered_points.npz"
-        less_filtered_points_npz_cache_path = cached_pts_path / "_cached_less_filtered_points.npz"
+    Args:
+        points_path: Path to the point cloud file
+        return_points: Which set of points to return ("all", "filtered", or "less_filtered")
+        cache_files: Whether to cache filtered points to disk for faster future loading
+    """
+    filtered_points_npz_cache_path = points_path.parent / "_cached_filtered_points.npz"
+    less_filtered_points_npz_cache_path = (
+        points_path.parent / "_cached_less_filtered_points.npz"
+    )
 
-    # Read world points as an Nx3 array.
-    if (
+    # Check if we should use cached files
+    use_cache = cache_files and (
         filtered_points_npz_cache_path.exists()
         and less_filtered_points_npz_cache_path.exists()
-    ):
+    )
+
+    if use_cache:
         if return_points == "all":
             points_data = mps.read_global_point_cloud(str(points_path))  # type: ignore
         else:
             points_data = None
 
-        print("Loading pre-filtered points")
+        logger.debug(
+            "Loading pre-filtered points from %s",
+            filtered_points_npz_cache_path,
+        )
         filtered_points_data = np.load(filtered_points_npz_cache_path)["points"]
+        logger.debug(
+            "Loading pre-filtered points from %s",
+            less_filtered_points_npz_cache_path,
+        )
         less_filtered_points_data = np.load(less_filtered_points_npz_cache_path)[
             "points"
         ]
     else:
         points_data = mps.read_global_point_cloud(str(points_path))  # type: ignore
 
-        print("Loading + filtering points")
+        logger.debug("Loading + filtering points")
         assert points_path.exists()
-        filtered_points_daa = filter_points_from_confidence(
+        filtered_points_data = filter_points_from_confidence(
             points_data,
             threshold_invdep=0.0001,
             threshold_dep=0.005,
@@ -53,20 +67,28 @@ def load_point_cloud_and_find_ground(
             threshold_dep=0.05,
         )
         filtered_points_data = np.array(
-            [x.position_world for x in filtered_points_data]
+            [x.position_world for x in filtered_points_data],
         )  # type: ignore
         less_filtered_points_data = np.array(
-            [x.position_world for x in less_filtered_points_data]
+            [x.position_world for x in less_filtered_points_data],
         )
 
-        filtered_points_npz_cache_path.parent.mkdir(exist_ok=True, parents=True)
-
-        np.savez_compressed(filtered_points_npz_cache_path, points=filtered_points_data)
-        print("Cached filtered points to", filtered_points_npz_cache_path)
-        np.savez_compressed(
-            less_filtered_points_npz_cache_path, points=less_filtered_points_data
-        )
-        print("Cached less filtered points to", less_filtered_points_npz_cache_path)
+        # Only save cache files if caching is enabled
+        if cache_files:
+            filtered_points_npz_cache_path.parent.mkdir(exist_ok=True, parents=True)
+            np.savez_compressed(
+                filtered_points_npz_cache_path,
+                points=filtered_points_data,
+            )
+            logger.debug("Cached filtered points to %s", filtered_points_npz_cache_path)
+            np.savez_compressed(
+                less_filtered_points_npz_cache_path,
+                points=less_filtered_points_data,
+            )
+            logger.debug(
+                "Cached less filtered points to %s",
+                less_filtered_points_npz_cache_path,
+            )
 
     assert filtered_points_data.shape == (filtered_points_data.shape[0], 3)
 

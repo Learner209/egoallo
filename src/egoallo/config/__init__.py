@@ -1,5 +1,6 @@
-from .base_config import EgoAlloBaseConfig
-from .train_config import EgoAlloTrainConfig
-from .test_config import TestConfig
+# from .defaults import _C as default_cfg
+# from .defaults import get_cfg_defaults
+from .build import CONFIG_FILE
+from .build import make_cfg
 
-__all__ = ["EgoAlloBaseConfig", "EgoAlloTrainConfig", "TestConfig"] 
+__all__ = ["make_cfg", "CONFIG_FILE"]

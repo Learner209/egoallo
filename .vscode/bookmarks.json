@@ -1,24 +1,24 @@
 {
-	"files": [
-		{
-			"path": "src/egoallo/training_loss.py",
-			"bookmarks": [
-				{
-					"line": 81,
-					"column": 8,
-					"label": "compute_denoising_loss"
-				}
-			]
-		},
-		{
-			"path": "src/egoallo/network.py",
-			"bookmarks": [
-				{
-					"line": 249,
-					"column": 0,
-					"label": "make_cond"
-				}
-			]
-		}
-	]
+  "files": [
+    {
+      "path": "src/egoallo/training_loss.py",
+      "bookmarks": [
+        {
+          "line": 116,
+          "column": 8,
+          "label": "compute_denoising_loss"
+        }
+      ]
+    },
+    {
+      "path": "src/egoallo/network.py",
+      "bookmarks": [
+        {
+          "line": 829,
+          "column": 0,
+          "label": "make_cond"
+        }
+      ]
+    }
+  ]
 }
