@@ -82,6 +82,8 @@ def collate_tensor_only_dataclass[T](batch: list[T]) -> T:
             else:
                 collated[key] = None
 
+        elif key == "take_name":
+            collated[key] = tuple(values)
         else:
             # For non-tensor fields, keep first item's value
             collated[key] = values[0]

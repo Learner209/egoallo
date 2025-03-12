@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Dict, List, Literal, Optional, Tuple, Union
+from typing import Dict, Literal, Tuple, Union
 
 import numpy as np
 import torch
@@ -22,10 +22,10 @@ HandSide = Literal["left", "right"]
 GuidanceMode = Literal[
     "hamer",
     "no_hands",
-    "aria_wrist_only", 
+    "aria_wrist_only",
     "aria_hamer",
     "hamer_wrist",
-    "hamer_reproj2"
+    "hamer_reproj2",
 ]
 
 # Tensor types

@@ -35,7 +35,7 @@ def extended_collate[T](batch: list[T]) -> T:
         elif elem.shape == ():  # scalars
             return torch.as_tensor(batch)
     elif isinstance(elem, float):
-        return torch.tensor(batch, dtype=torch.float64)
+        return torch.tensor(batch, dtype=torch.float32)
     elif isinstance(elem, int):
         return torch.tensor(batch)
     elif isinstance(elem, str):

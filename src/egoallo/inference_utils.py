@@ -21,10 +21,6 @@ from projectaria_tools.core.data_provider import create_vrs_data_provider
 from safetensors import safe_open
 from torch import Tensor
 
-from . import fncsmpl
-from . import transforms as tf
-from .data.dataclass import EgoTrainingData
-from .mapping import SMPLH_BODY_JOINTS
 from .network import EgoDenoiser
 from .network import EgoDenoiserConfig
 from .tensor_dataclass import TensorDataclass
@@ -97,16 +93,17 @@ class InferenceTrajectoryPaths:
     hamer_outputs: Path | None
     wrist_and_palm_poses_csv: Path | None
     splat_path: Path | None
+    ego_preview_path: Path | None
 
     @staticmethod
     def find(traj_root: Path) -> InferenceTrajectoryPaths:
-        vrs_files = tuple(traj_root.glob("**/aria01.vrs"))
-        assert len(vrs_files) == 1, f"Found {len(vrs_files)} VRS files!"
+        vrs_files = sorted(tuple(traj_root.glob("**/*aria*.vrs")))
+        assert len(vrs_files) >= 1, f"Found {len(vrs_files)} VRS files!"
 
-        points_paths = tuple(traj_root.glob("**/semidense_points.csv.gz"))
+        points_paths = sorted(tuple(traj_root.glob("**/semidense_points.csv.gz")))
         assert len(points_paths) <= 1, f"Found multiple points files! {points_paths}"
         if len(points_paths) == 0:
-            points_paths = tuple(traj_root.glob("**/global_points.csv.gz"))
+            points_paths = sorted(tuple(traj_root.glob("**/global_points.csv.gz")))
         assert len(points_paths) == 1, f"Found {len(points_paths)} files!"
 
         if output_dir is not None and output_dir.exists() and soft_link:
@@ -140,6 +137,11 @@ class InferenceTrajectoryPaths:
         else:
             logger.info(f"Found splat at {splat_path}")
 
+        ego_preview_path = traj_root / "ego_preview.mp4"
+        assert ego_preview_path.exists(), (
+            f" Should found ego preview at {ego_preview_path}"
+        )
+
         return InferenceTrajectoryPaths(
             vrs_file=vrs_files[0],
             slam_root_dir=points_paths[0].parent,
@@ -149,6 +151,7 @@ class InferenceTrajectoryPaths:
             if wrist_and_palm_poses_csv
             else None,
             splat_path=splat_path,
+            ego_preview_path=ego_preview_path,
         )
 
 
@@ -206,94 +209,3 @@ class InferenceInputTransforms(TensorDataclass):
             .to(torch.float32),
             pose_timesteps=tuple(out_timestamps_secs),
         )
-
-
-@jaxtyped(typechecker=typeguard.typechecked)
-def create_masked_training_data(
-    body_model: fncsmpl.SmplhModel,
-    data: EgoTrainingData,
-    mask_ratio: float = 0.3,
-    device: torch.device = torch.device("cuda"),
-) -> EgoTrainingData:
-    """Create EgoTrainingData with MAE-style masking from posed SMPL-H model.
-
-    Args:
-        body_model: SMPL-H body model
-        data: Input EgoTrainingData
-        mask_ratio: Ratio of joints to mask (default: 0.3)
-        device: Device to run computations on
-
-    Returns:
-        EgoTrainingData with masked joints
-    """
-    # Move tensors to device
-    Ts_world_cpf = data.T_world_cpf.to(device)
-    Ts_world_root = data.T_world_root.to(device)
-    body_quats = data.body_quats.to(device)
-    contacts = data.contacts.to(device)
-    betas = data.betas.to(device)
-
-    # Handle hand quaternions
-    if data.hand_quats is not None:
-        hand_quats = data.hand_quats.to(device)
-        left_hand_quats = hand_quats[..., :15, :]
-        right_hand_quats = hand_quats[..., 15:30, :]
-    else:
-        batch_shape = body_quats.shape[:-2]
-        left_hand_quats = torch.zeros(*batch_shape, 15, 4, device=device)
-        left_hand_quats[..., 0] = 1.0
-        right_hand_quats = torch.zeros(*batch_shape, 15, 4, device=device)
-        right_hand_quats[..., 0] = 1.0
-
-    # Create posed data
-    local_quats = torch.cat([body_quats, left_hand_quats, right_hand_quats], dim=-2)
-    shaped_model = body_model.with_shape(betas)
-    posed = shaped_model.with_pose(Ts_world_root, local_quats)
-
-    batch_size, timesteps = posed.local_quats.shape[:2]
-    num_joints = CFG.smplh.num_joints  # Number of body joints
-
-    # Get joint positions in world frame
-    root_pos = posed.T_world_root[..., 4:7].unsqueeze(-2)  # (*batch, timesteps, 1, 3)
-    joints_wrt_world = torch.cat(
-        [root_pos, posed.Ts_world_joint[..., : num_joints - 1, 4:7]],
-        dim=-2,
-    )  # (*batch, timesteps, num_joints, 3)
-
-    # Generate random mask for sequence
-    num_masked = int(num_joints * mask_ratio)
-    visible_joints_mask = torch.ones(
-        (batch_size, timesteps, num_joints),
-        dtype=torch.bool,
-        device=device,
-    )
-
-    # Randomly select joints to mask
-    rand_indices = torch.randperm(num_joints)
-    masked_indices = rand_indices[:num_masked]
-    visible_joints_mask[..., masked_indices] = False
-
-    # Print masked joints
-    masked_joints_str = ", ".join(SMPLH_BODY_JOINTS[i] for i in masked_indices.tolist())
-    logger.debug(f"Masked joints: {masked_joints_str}")
-
-    # Get joints in CPF frame
-    joints_wrt_cpf = (
-        tf.SE3(Ts_world_cpf[..., None, :]).inverse() @ joints_wrt_world
-    )  # (*batch, timesteps, num_joints, 3)
-
-    return EgoTrainingData(
-        T_world_root=tf.SE3(posed.T_world_root).parameters(),
-        contacts=contacts,
-        betas=betas,
-        joints_wrt_world=joints_wrt_world,
-        body_quats=posed.local_quats[..., :21, :],
-        T_world_cpf=Ts_world_cpf,
-        height_from_floor=Ts_world_cpf[..., 6:7],
-        joints_wrt_cpf=joints_wrt_cpf,
-        mask=torch.ones((batch_size, timesteps), dtype=torch.bool, device=device),
-        hand_quats=posed.local_quats[..., 21:51, :]
-        if data.hand_quats is not None
-        else None,
-        visible_joints_mask=visible_joints_mask,
-    )

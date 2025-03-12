@@ -78,6 +78,61 @@ class TensorDataclass:
 
         return _map_impl(fn, self)
 
+    def reduce[T](self, fn: Callable[[T, T], T]) -> T:
+        """Reduce all tensors in the dataclass to a single value.
+
+        Also recurses into lists, tuples, and dictionaries.
+
+        Args:
+            fn: The reduction function to apply between tensors.
+                Should take two values and return a single value.
+
+        Returns:
+            The reduced value.
+        """
+
+        def _reduce_impl(
+            fn: Callable[[T, T], T],
+            val: Any,
+        ) -> torch.Tensor | None:
+            if isinstance(val, torch.Tensor):
+                return val
+            elif isinstance(val, TensorDataclass):
+                tensors = [_reduce_impl(fn, v) for v in vars(val).values()]
+                tensors = [t for t in tensors if t is not None]
+                if not tensors:
+                    return None
+                result = tensors[0]
+                for t in tensors[1:]:
+                    result = fn(result, t)
+                return result
+            elif isinstance(val, (list, tuple)):
+                tensors = [_reduce_impl(fn, v) for v in val]
+                tensors = [t for t in tensors if t is not None]
+                if not tensors:
+                    return None
+                result = tensors[0]
+                for t in tensors[1:]:
+                    result = fn(result, t)
+                return result
+            elif isinstance(val, dict):
+                assert type(val) is dict  # No subclass support.
+                tensors = [_reduce_impl(fn, v) for v in val.values()]
+                tensors = [t for t in tensors if t is not None]
+                if not tensors:
+                    return None
+                result = tensors[0]
+                for t in tensors[1:]:
+                    result = fn(result, t)
+                return result
+            else:
+                return None
+
+        result = _reduce_impl(fn, self)
+        if result is None:
+            raise ValueError("No tensors found in dataclass")
+        return result
+
     def _dict_map(self, fn: Callable[[str, torch.Tensor], torch.Tensor]) -> Self:
         """Apply a function to all tensors in the dataclass.
 

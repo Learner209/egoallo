@@ -84,7 +84,8 @@ def compute_foot_contact(
     foot_positions = pred_Ts_world_joint[:, :, foot_indices, 4:7]
 
     any_contact = torch.any(
-        torch.any(foot_positions[..., 2] < H_thresh, dim=-1), dim=-1
+        torch.any(foot_positions[..., 2] < H_thresh, dim=-1),
+        dim=-1,
     ).to(torch.float32)
     assert any_contact.shape == (num_samples,)
 
@@ -133,16 +134,21 @@ def compute_mpjpe(
 
     # Concatenate the world root to the joints.
     label_Ts_world_joint = torch.cat(
-        [label_T_world_root[..., None, :], label_Ts_world_joint], dim=-2
+        [label_T_world_root[..., None, :], label_Ts_world_joint],
+        dim=-2,
     )
     pred_Ts_world_joint = torch.cat(
-        [pred_T_world_root[..., None, :], pred_Ts_world_joint], dim=-2
+        [pred_T_world_root[..., None, :], pred_Ts_world_joint],
+        dim=-2,
     )
     del label_T_world_root, pred_T_world_root
 
     pred_joint_positions = pred_Ts_world_joint[:, :, :, 4:7]
     label_joint_positions = label_Ts_world_joint[None, :, :, 4:7].repeat(
-        num_samples, 1, 1, 1
+        num_samples,
+        1,
+        1,
+        1,
     )
 
     if per_frame_procrustes_align:
@@ -236,7 +242,8 @@ def procrustes_align(
         var = torch.sum(torch.square(x0), dim=(-1, -2), keepdim=True) / N  # (*, 1, 1)
         s = (
             torch.diagonal(torch.matmul(D, S), dim1=-2, dim2=-1).sum(
-                dim=-1, keepdim=True
+                dim=-1,
+                keepdim=True,
             )
             / var[..., 0]
         )  # (*, 1)
@@ -326,15 +333,15 @@ def main(
 
             gt_shaped = body_model.with_shape(
                 torch.from_numpy(relevant_outputs["groundtruth_betas"]).to(
-                    device=device
-                )
+                    device=device,
+                ),
             )
             gt_posed = gt_shaped.with_pose_decomposed(
                 T_world_root=torch.from_numpy(
-                    relevant_outputs["groundtruth_T_world_root"]
+                    relevant_outputs["groundtruth_T_world_root"],
                 ).to(device),
                 body_quats=torch.from_numpy(
-                    relevant_outputs["groundtruth_body_quats"]
+                    relevant_outputs["groundtruth_body_quats"],
                 ).to(device),
             )
 
@@ -343,14 +350,14 @@ def main(
                 if use_mean_body_shape
                 else torch.from_numpy(relevant_outputs["sampled_betas"])
                 .to(device=device)
-                .mean(dim=1, keepdim=True)
+                .mean(dim=1, keepdim=True),
             )
             sampled_posed = sampled_shaped.with_pose_decomposed(
                 T_world_root=torch.from_numpy(
-                    relevant_outputs["sampled_T_world_root"]
+                    relevant_outputs["sampled_T_world_root"],
                 ).to(device),
                 body_quats=torch.from_numpy(relevant_outputs["sampled_body_quats"]).to(
-                    device
+                    device,
                 ),
             )
             num_samples = relevant_outputs["sampled_T_world_root"].shape[0]
@@ -377,10 +384,12 @@ def main(
                         # num_samples happens to match the leading dimension of
                         # any tensors that aren't actually prefixed with the
                         # batch axes.
-                        lambda t: t[j] if t.shape[0] == num_samples else t
+                        lambda t: t[j] if t.shape[0] == num_samples else t,
                     ).lbs()
                     sampled_coco_single = torch.einsum(
-                        "ij,...jk->...ik", coco_regressor, sampled_mesh.verts
+                        "ij,...jk->...ik",
+                        coco_regressor,
+                        sampled_mesh.verts,
                     )
                     sampled_coco.append(sampled_coco_single)
 
@@ -389,7 +398,7 @@ def main(
                 assert sampled_coco.shape == (num_samples, sampled_coco.shape[1], 17, 3)
                 stats_per_subsequence["coco_mpjpe"][i] = torch.mean(
                     torch.linalg.norm(gt_coco - sampled_coco, dim=-1).reshape(
-                        (num_samples, -1)
+                        (num_samples, -1),
                     ),
                     dim=1,
                 ).numpy(force=True)
@@ -426,7 +435,7 @@ def main(
             if i % 10 == 0:
                 stat_strings = []
                 for k, v in stats_per_subsequence.items():
-                    stat_strings.append(f"{k}: {np.mean(v[:i+1]):.3f}")
+                    stat_strings.append(f"{k}: {np.mean(v[: i + 1]):.3f}")
                 pbar.set_postfix_str(", ".join(stat_strings))
 
     # Write core metrics.
@@ -443,7 +452,7 @@ def main(
                 "stderr_sample": float(np.std(v) / np.sqrt(len(v))),
             }
             for k, v in stats_per_subsequence.items()
-        }
+        },
     )
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     (out_yaml_path).write_text(f"# Written by {__file__} at {timestamp}\n\n" + summary)

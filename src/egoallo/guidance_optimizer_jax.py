@@ -32,7 +32,7 @@ from .transforms._so3 import SO3
 
 @jaxtyped(typechecker=typeguard.typechecked)
 def do_guidance_optimization(
-    T_world_root: Float[Tensor, "time 7"],
+    T_world_root: Float[Tensor, "*batch time 7"],
     traj: network.AbsoluteDenoiseTraj,
     body_model: fncsmpl.SmplhModel,
     guidance_mode: GuidanceMode,
@@ -42,7 +42,12 @@ def do_guidance_optimization(
 ) -> tuple[network.AbsoluteDenoiseTraj, dict]:
     """Run an optimizer to apply foot contact constraints."""
 
-    assert traj.hand_rotmats is not None
+    (*B, T, _) = T_world_root.shape
+
+    # assert traj.hand_rotmats is not None
+    _ = traj.hand_rotmats is None
+    if _:
+        traj.hand_rotmats = torch.eye(3).unsqueeze(0).repeat(*B, T, 30, 1, 1)
     guidance_params = JaxGuidanceParams.defaults(guidance_mode, phase)
 
     start_time = time.time()
@@ -56,11 +61,25 @@ def do_guidance_optimization(
             v_template=cast(jax.Array, body_model.v_template.numpy(force=True)),
             shapedirs=cast(jax.Array, body_model.shapedirs.numpy(force=True)),
         ),
-        T_world_root=cast(jax.Array, T_world_root.numpy(force=True)),
-        betas=cast(jax.Array, traj.betas.numpy(force=True)),
-        body_rotmats=cast(jax.Array, traj.body_rotmats.numpy(force=True)),
-        hand_rotmats=cast(jax.Array, traj.hand_rotmats.numpy(force=True)),
-        contacts=cast(jax.Array, traj.contacts.numpy(force=True)),
+        T_world_root=cast(
+            jax.Array,
+            T_world_root.mean(axis=tuple(range(len(T_world_root.shape) - 2))).numpy(
+                force=True,
+            ),
+        ),  # (*B, T, 7)
+        betas=cast(jax.Array, traj.betas.numpy(force=True)),  # (*B, T, 16)
+        body_rotmats=cast(
+            jax.Array,
+            traj.body_rotmats.numpy(force=True),
+        ),  # (*B, T, 21, 3, 3)
+        hand_rotmats=cast(
+            jax.Array,
+            traj.hand_rotmats.numpy(force=True),
+        ),  # (*B, T, 30, 3, 3)
+        contacts=cast(
+            jax.Array,
+            traj.contacts[..., :, 1:].numpy(force=True),
+        ),  # (*B, T, 22)
         guidance_params=guidance_params,
         hamer_detections=None
         if hamer_detections is None
@@ -79,7 +98,7 @@ def do_guidance_optimization(
     return dataclasses.replace(
         traj,
         body_rotmats=rotmats[:, :, :21, :],
-        hand_rotmats=rotmats[:, :, 21:, :],
+        hand_rotmats=rotmats[:, :, 21:, :] if not _ else None,
     ), debug_info
 
 
@@ -133,6 +152,7 @@ def _optimize_vmapped(
             aria_detections=aria_detections,
         ),
     )(
+        # NOTE: these are the batches inputs that needs to be optimmized.
         betas=betas,
         body_rotmats=body_rotmats,
         hand_rotmats=hand_rotmats,
@@ -187,6 +207,9 @@ class JaxGuidanceParams:
     # Optimization parameters.
     lambda_initial: float = 0.1
     max_iters: int = 20
+
+    # Add new parameter for angle prior weight
+    angle_prior_weight: float = 15.2
 
     @staticmethod
     def defaults(
@@ -828,6 +851,29 @@ def _optimize(
             guidance_params.skate_weight
             * (foot_contacts[:, None] * (footpos_current - footpos_next)).flatten()
         )
+
+    # Add new angle prior cost after the reg_cost
+    # FIXME: the angle prior cost fails to generate realistic poses now. maybe the sign is inverted?
+
+    # @cost_with_args(
+    #     _SmplhBodyPosesVar(jnp.arange(timesteps)),
+    # )
+    # def angle_prior_cost(
+    #     vals: jaxls.VarValues,
+    #     pose: _SmplhBodyPosesVar,
+    # ) -> jax.Array:
+    #     # Get the relevant joint angles (knees and elbows)
+    #     # Note: Adjusted indices for SMPL-H model joint ordering
+    #     local_quats_aa = jaxlie.SO3(vals[pose]).log().flatten()
+    #     assert local_quats_aa.ndim == 1 and local_quats_aa.shape[-1] == 63
+    #     # assert isinstance(local_quats_aa, Float[Tensor, "63"])
+
+    #     joint_angles = jnp.take(local_quats_aa, jnp.array([12, 15, 55, 58]))
+
+    #     # Apply direction-specific penalties using same pattern as customloss.py
+    #     signs = jnp.array([1., -1., -1., -1.])
+    #
+    #     return guidance_params.angle_prior_weight * (jnp.exp(joint_angles * signs) ** 2).flatten()
 
     vars_body_pose = _SmplhBodyPosesVar(jnp.arange(timesteps))
     vars_hand_pose = _SmplhSingleHandPosesVar(jnp.arange(timesteps * 2))

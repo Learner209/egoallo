@@ -1,8 +1,6 @@
 """Network definitions."""
 
 import dataclasses
-from abc import ABC
-from abc import abstractmethod
 from dataclasses import dataclass
 from functools import cache
 from functools import cached_property
@@ -32,9 +30,9 @@ from rotary_embedding_torch import RotaryEmbedding
 from torch import nn
 from torch import Tensor
 
+# Move type imports inside TYPE_CHECKING block to avoid circular imports
 if TYPE_CHECKING:
     from egoallo.types import DenoiseTrajType, JointCondMode
-    from egoallo.data.dataclass import EgoTrainingData
 
 from .fncsmpl import SmplhModel, SmplhShapedAndPosed
 from .tensor_dataclass import TensorDataclass
@@ -119,15 +117,15 @@ class DenoisingConfig:
         if self.loss_weights is None:
             # Default loss weights for absolute mode
             absolute_weights = {
-                "betas": 0.1,
+                "betas": 0.2,
                 "body_rotmats": 1.0,
                 "contacts": 0.1,
                 "hand_rotmats": 0.00,
-                "R_world_root": 0.45,
-                "t_world_root": 0.45,
-                "joints": 1.0,
-                "foot_skating": 0.1,
-                "velocity": 0.05,
+                "R_world_root": 2.0,
+                "t_world_root": 2.0,
+                "joints": 3.0,
+                "foot_skating": 0.3,
+                "velocity": 0.1,
             }
 
             # Additional weights for velocity mode
@@ -170,6 +168,17 @@ class DenoisingConfig:
     def is_velocity_mode(self) -> bool:
         """Check if we're using velocity-based denoising."""
         return self.denoising_mode == "velocity" or self.is_velocity_joint_cond()
+
+    def _repr_denoise_traj_type(self) -> str:
+        """Get the string representation of the denoising mode."""
+        if self.denoising_mode == "joints_only":
+            return "JointsOnlyTraj"
+        elif self.is_velocity_mode():
+            return "VelocityDenoiseTraj"
+        elif self.denoising_mode == "absolute":
+            return "AbsoluteDenoiseTraj"
+        else:
+            raise ValueError(f"Invalid denoising mode: {self.denoising_mode}")
 
     def create_trajectory(self, *args, **kwargs) -> "DenoiseTrajType":
         """Factory method to create appropriate trajectory object based on configuration."""
@@ -300,6 +309,13 @@ class DenoisingConfig:
         Returns:
             Appropriate trajectory object based on denoising mode
         """
+        from egoallo.data.dataclass import EgoTrainingData
+
+        assert ego_data.metadata.stage == "preprocessed", (
+            "EgoTrainingData should be preprocessed before being used to create trajectories. \
+            , The logic is traj should be sent to network so that the ego_data should be between pre and post."
+        )
+
         *batch, time, _ = ego_data.T_world_root.shape
 
         # Extract rotation and translation from T_world_root
@@ -340,6 +356,14 @@ class DenoisingConfig:
                 hand_rotmats=hand_rotmats,
                 R_world_root=R_world_root,
                 t_world_root=t_world_root,
+                joints_wrt_world=None,
+                visible_joints_mask=None,
+                metadata=EgoTrainingData.MetaData(
+                    take_name=ego_data.metadata.take_name,
+                    frame_keys=ego_data.metadata.frame_keys,
+                    scope=ego_data.metadata.scope,
+                    stage="raw",
+                ),
             )
 
 
@@ -413,7 +437,7 @@ class BaseDenoiseTraj(TensorDataclass, ABC, Generic[T]):
         """Encode trajectory into latent representation.
 
         Args:
-            encoders: Dictionary of encoder networks
+            encoders: Dictionary of encoder networksF
             batch: Batch size
             time: Sequence length
 
@@ -558,6 +582,8 @@ class JointsOnlyTraj(BaseDenoiseTraj):
 
 @dataclasses.dataclass
 class AbsoluteDenoiseTraj(BaseDenoiseTraj):
+    from egoallo.data.dataclass import EgoTrainingData
+
     """Denoising trajectory with absolute pose representation."""
 
     betas: Float[Tensor, "*batch timesteps 16"]
@@ -578,6 +604,17 @@ class AbsoluteDenoiseTraj(BaseDenoiseTraj):
 
     t_world_root: Float[Tensor, "*batch timesteps 3"]
     """Global translation vector of the root joint."""
+
+    joints_wrt_world: Float[Tensor, "*batch timesteps 22 3"] | None
+    """Joint positions in world frame."""
+
+    visible_joints_mask: Float[Tensor, "*batch timesteps 22"] | None
+    """Mask for visible joints."""
+
+    metadata: EgoTrainingData.MetaData = dataclasses.field(
+        default_factory=EgoTrainingData.MetaData,
+    )
+    """Metadata for the trajectory."""
 
     def compute_loss(
         self,
@@ -753,6 +790,8 @@ class AbsoluteDenoiseTraj(BaseDenoiseTraj):
             hand_rotmats=hand_rotmats,
             R_world_root=R_world_root,
             t_world_root=t_world_root,
+            joints_wrt_world=None,  # Set to None since we don't have joints data when unpacking
+            visible_joints_mask=None,  # Set to None since we don't have visibility data when unpacking
         )
 
     def encode(
@@ -784,10 +823,46 @@ class AbsoluteDenoiseTraj(BaseDenoiseTraj):
         """Compute metrics between this trajectory and another.
         Computes all relevant metrics since this class has complete pose data.
         """
+
+        other = other.to(device)
+        self = self.to(device)  # noqa
+        body_model = body_model.to(device)
+
+        self_has_nan = (
+            self.reduce(
+                lambda x, y: x.isnan().sum().item()
+                if isinstance(x, torch.Tensor)
+                else x + y.isnan().sum().item()
+                if isinstance(y, torch.Tensor)
+                else y,
+            )
+            > 0
+        )
+        other_has_nan = (
+            other.reduce(
+                lambda x, y: x.isnan().sum().item()
+                if isinstance(x, torch.Tensor)
+                else x + y.isnan().sum().item()
+                if isinstance(y, torch.Tensor)
+                else y,
+            )
+            > 0
+        )
+        if self_has_nan or other_has_nan:
+            logger.warning(
+                f"NaN values found in trajectory: {self_has_nan}, {other_has_nan}, skipping metrics computation",
+            )
+            # with warnings.catch_warnings():
+            # warnings.filterwarnings("ignore", message=".*NaN values found in trajectory.*", category=RuntimeWarning)
+            # raise RuntimeWarning(f"NaN values found in trajectory: {self_has_nan}, {other_has_nan}, skipping metrics computation")
+            return {}
+
         # TEMPORARY_FIX: import BodyEvaluator lazily to avoid circular imports
         from egoallo.evaluation.body_evaluator import BodyEvaluator
 
-        assert self.check_shapes(other), f"{self.check_shapes(other)}"
+        assert self.check_shapes(other), (
+            f"self's shpae: {self.check_shapes(other)}, other's shape: {other.check_shapes(self)}"
+        )
 
         metrics = {}
 
@@ -992,6 +1067,9 @@ class AbsoluteDenoiseTraj(BaseDenoiseTraj):
         #         torch.linalg.norm(gt_coco_joints - sampled_coco_joints, dim=-1) * 1000.0
         #     )
         #     metrics["coco_mpjpe"] = float(coco_errors.mean().item())
+        # https://pytorch.org/docs/stable/multiprocessing.html: section :sharing tensors.
+        del other
+        del body_model
 
         return metrics
 
@@ -1564,7 +1642,7 @@ class EgoDenoiserConfig:
 
     # Model settings
     activation: Literal["gelu", "relu"] = "gelu"
-    positional_encoding: Literal["transformer", "rope"] = "transformer"
+    positional_encoding: Literal["transformer", "rope"] = "rope"
     noise_conditioning: Literal["token", "film"] = "token"
     xattn_mode: Literal["kv_from_cond_q_from_x", "kv_from_x_q_from_cond"] = (
         "kv_from_cond_q_from_x"
@@ -1643,7 +1721,6 @@ class EgoDenoiserConfig:
 
         # !joints must be masked to prevent further motion information from being used
         masked_joints = joints.clone()
-        masked_joints[~visible_joints_mask] = 0
 
         # Create joint embeddings if enabled
         if self.use_joint_embeddings:
@@ -2205,7 +2282,7 @@ class TransformerBlock(nn.Module):
         self.rotary_emb = (
             RotaryEmbedding(
                 config.d_latent // config.n_heads,
-                learned_freq=False,
+                learned_freq=True,
             )
             if config.use_rope_embedding
             else None

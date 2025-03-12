@@ -19,6 +19,7 @@ if TYPE_CHECKING:
 from . import network
 from .data.dataclass import EgoTrainingData
 from .sampling import CosineNoiseScheduleConstants
+from .transforms import SO3
 
 local_config_file = CONFIG_FILE
 CFG = make_cfg(config_name="defaults", config_file=local_config_file, cli_args=[])
@@ -258,6 +259,15 @@ class TrainingLossComputer:
             project_rotmats=False,
         )
         # Compute loss using x_0_pred and x_0
+
+        # postprocessing
+
+        train_batch = train_batch.postprocess()
+        x_0_pred = train_batch._post_process(x_0_pred)
+        x_0_pred = train_batch._set_traj(x_0_pred)
+        x_0 = train_batch._post_process(x_0)
+        x_0 = train_batch._set_traj(x_0)
+
         loss_terms: dict[str, Tensor | float] = x_0_pred.compute_loss(
             other=x_0,
             mask=train_batch.mask,
@@ -286,17 +296,8 @@ class TrainingLossComputer:
             assert pred_joints.shape == (batch, time, num_joints, 3)
 
             # Get ground truth joints from training batch
-            x_0_posed = x_0.apply_to_body(
-                unwrapped_model.body_model.to(device),
-            )  # (b, t, 22, 3)
-            gt_joints = torch.cat(
-                [
-                    x_0_posed.T_world_root[..., 4:7].unsqueeze(dim=-2),
-                    x_0_posed.Ts_world_joint[..., : num_joints - 1, 4:7],
-                ],
-                dim=-2,
-            )  # (b, t, 22, 3)
 
+            gt_joints = train_batch.joints_wrt_world  # (b, t, 22, 3)
             assert gt_joints.shape == (batch, time, num_joints, 3)
 
             # Calculate joint position loss with masking
@@ -316,19 +317,17 @@ class TrainingLossComputer:
                     ((~train_batch.visible_joints_mask).sum(dim=-1) * 3)
                     + 1e-8  # Multiply by 3 for xyz channels
                 )  # Result: (b, t)
-
-                visible_joint_loss = (
-                    joint_loss
-                    * (
-                        train_batch.visible_joints_mask[..., None]
-                    )  # Use only visible joints
-                ).sum(dim=(-2, -1)) / (  # Sum over joints (22) and xyz (3)
-                    (train_batch.visible_joints_mask.sum(dim=-1) * 3)
-                    + 1e-8  # Multiply by 3 for xyz channels
-                )  # Result: (b, t)
+                vis_jnt_loss = (
+                    joint_loss * ((train_batch.visible_joints_mask)[..., None])
+                ).sum(dim=(-2, -1)) / (
+                    ((train_batch.visible_joints_mask).sum(dim=-1) * 3) + 1e-8
+                )
             else:
+                logger.warning(
+                    "No visible joints mask found, using all joints for loss calculation, there should be no scenarios when visible_joints_mask is None",
+                )
                 invisible_joint_loss = torch.zeros((batch, time), device=device)
-                visible_joint_loss = torch.zeros((batch, time), device=device)
+                vis_jnt_loss = joint_loss
 
             # Foot skating loss
             foot_indices = [7, 8, 10, 11]  # Indices for foot joints
@@ -372,6 +371,7 @@ class TrainingLossComputer:
 
             loss_terms.update(
                 {
+                    # empirically, invisible joints loss should be more important than visible joints loss.
                     "joints": x_0_pred._weight_and_mask_loss(
                         invisible_joint_loss.unsqueeze(-1),
                         train_batch.mask,
@@ -379,14 +379,19 @@ class TrainingLossComputer:
                         torch.sum(train_batch.mask),
                     )
                     + x_0_pred._weight_and_mask_loss(
-                        visible_joint_loss.unsqueeze(-1),
+                        vis_jnt_loss.unsqueeze(-1),
                         train_batch.mask,
                         weight_t,
                         torch.sum(train_batch.mask),
-                    ),
+                    )
+                    * 2.0,
                     "foot_skating": foot_skating_loss,
                     "velocity": x_0_pred._weight_and_mask_loss(
-                        (joint_velocities - gt_velocities).reshape(batch, time - 1, -1),
+                        ((joint_velocities - gt_velocities) ** 2).reshape(
+                            batch,
+                            time - 1,
+                            -1,
+                        ),
                         train_batch.mask[:, 1:],
                         weight_t,
                         torch.sum(train_batch.mask[:, 1:]),
@@ -460,4 +465,4 @@ class TrainingLossComputer:
         assert loss.shape == ()
         log_outputs["train_loss"] = loss
 
-        return total_loss, metrics
+        return loss, log_outputs

@@ -23,7 +23,7 @@ def get_epsilon(dtype: torch.dtype) -> float:
     """
     return {
         torch.float32: 1e-5,
-        torch.float64: 1e-10,
+        torch.float32: 1e-10,
     }[dtype]
 
 

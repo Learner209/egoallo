@@ -1,6 +1,7 @@
 """Training script for EgoAllo diffusion model using HuggingFace accelerate."""
 
 import os
+
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
@@ -9,15 +10,12 @@ os.environ["NUMEXPR_NUM_THREADS"] = "1"
 
 import shutil
 from pathlib import Path
-import deepspeed
 import tensorboardX
 import torch
 import yaml
 from accelerate import Accelerator, DataLoaderConfiguration
 from accelerate.utils import ProjectConfiguration
 from diffusers.training_utils import EMAModel
-from torch.cuda.amp import GradScaler
-from torch.cuda.amp import autocast
 
 from egoallo import network, training_loss, training_utils
 from egoallo.data.amass_dataset import EgoAmassHdf5Dataset
@@ -31,9 +29,10 @@ import math
 
 logger = setup_logger(output=None, name=__name__)
 
+
 class MotionPriorTrainer:
     """Handles the training of the Motion Prior model."""
-    
+
     def __init__(
         self,
         config: EgoAlloTrainConfig,
@@ -44,17 +43,17 @@ class MotionPriorTrainer:
         self.gradient_accumulation_steps = gradient_accumulation_steps
         self.use_ema = use_ema
         self.experiment_dir = get_experiment_dir(config.experiment_name)
-        
+
         # Initialize accelerator
         self.accelerator = self._setup_accelerator()
         self.device = self.accelerator.device
-                        
+
         # Calculate effective batch size and learning rate before other initialization
         self.total_batch_size = self._calculate_total_batch_size()
         self.learning_rate = self._calculate_scaled_learning_rate()
         # Initialize step counter before other components
         self.step = 0  # Initialize step to 0 by default
-        
+
         # Initialize components
         self.model = self._setup_model()
         self.train_loader = self._setup_dataloader()
@@ -63,17 +62,31 @@ class MotionPriorTrainer:
         self.ema = self._setup_ema() if config.use_ema else None
 
         # Prepare components including scaler
-        self.model, self.train_loader, self.optimizer, self.lr_scheduler, self.scaler = \
-            self.accelerator.prepare(
-                self.model, self.train_loader, self.optimizer, self.lr_scheduler, self.scaler
-            )
+        (
+            self.model,
+            self.train_loader,
+            self.optimizer,
+            self.lr_scheduler,
+            self.scaler,
+        ) = self.accelerator.prepare(
+            self.model,
+            self.train_loader,
+            self.optimizer,
+            self.lr_scheduler,
+            self.scaler,
+        )
 
         # Setup writer for main process
         self.writer = self._setup_writer()
-        
+
         # Initialize training components
-        self.loss_helper = training_loss.TrainingLossComputer(config.loss, device=self.device)
-        self.loop_metrics_gen = training_utils.loop_metric_generator(counter_init=self.step)
+        self.loss_helper = training_loss.TrainingLossComputer(
+            config.loss,
+            device=self.device,
+        )
+        self.loop_metrics_gen = training_utils.loop_metric_generator(
+            counter_init=self.step,
+        )
         self.prev_checkpoint_path = None
 
     def _setup_accelerator(self) -> Accelerator:
@@ -97,7 +110,7 @@ class MotionPriorTrainer:
             cache_files=True,
             slice_strategy=self.config.dataset_slice_strategy,
             random_variable_len_proportion=self.config.dataset_slice_random_variable_len_proportion,
-            random_variable_len_min=16
+            random_variable_len_min=16,
         )
         return torch.utils.data.DataLoader(
             dataset=train_dataset,
@@ -122,7 +135,7 @@ class MotionPriorTrainer:
         """Initialize the learning rate scheduler."""
         return torch.optim.lr_scheduler.LambdaLR(
             self.optimizer,
-            lr_lambda=lambda step: min(1.0, step / self.config.warmup_steps)
+            lr_lambda=lambda step: min(1.0, step / self.config.warmup_steps),
         )
 
     def _setup_ema(self) -> EMAModel | None:
@@ -141,10 +154,15 @@ class MotionPriorTrainer:
         """Initialize tensorboard writer for main process."""
         if not self.accelerator.is_main_process:
             return None
-            
-        writer = tensorboardX.SummaryWriter(logdir=str(self.experiment_dir), flush_secs=10)
+
+        writer = tensorboardX.SummaryWriter(
+            logdir=str(self.experiment_dir),
+            flush_secs=10,
+        )
         writer.add_hparams(
-            hparam_dict=training_utils.flattened_hparam_dict_from_dataclass(self.config),
+            hparam_dict=training_utils.flattened_hparam_dict_from_dataclass(
+                self.config,
+            ),
             metric_dict={},
             name=".",
         )
@@ -163,14 +181,18 @@ class MotionPriorTrainer:
         if self.accelerator.is_main_process:
             training_utils.ipdb_safety_net()
             self.experiment_dir.mkdir(exist_ok=True, parents=True)
-            
+
             # Save configs and git info
             (self.experiment_dir / "git_commit.txt").write_text(
-                training_utils.get_git_commit_hash()
+                training_utils.get_git_commit_hash(),
             )
-            (self.experiment_dir / "git_diff.txt").write_text(training_utils.get_git_diff())
+            (self.experiment_dir / "git_diff.txt").write_text(
+                training_utils.get_git_diff(),
+            )
             (self.experiment_dir / "run_config.yaml").write_text(yaml.dump(self.config))
-            (self.experiment_dir / "model_config.yaml").write_text(yaml.dump(self.config.model))
+            (self.experiment_dir / "model_config.yaml").write_text(
+                yaml.dump(self.config.model),
+            )
 
     def train(self) -> None:
         """Execute the training loop."""
@@ -181,15 +203,17 @@ class MotionPriorTrainer:
             self.accelerator.load_state(str(self.prev_checkpoint_path))
 
         self._save_initial_state()
-        self.accelerator.save_state(str(self.experiment_dir / f"checkpoints_{self.step}"))
+        self.accelerator.save_state(
+            str(self.experiment_dir / f"checkpoints_{self.step}"),
+        )
 
         while True:
             for train_batch in self.train_loader:
                 loop_metrics = next(self.loop_metrics_gen)
                 self.step = loop_metrics.counter
-                
+
                 loss, log_outputs = self._train_step(train_batch, loop_metrics)
-                
+
                 if self.accelerator.is_main_process:
                     self._handle_logging(log_outputs)
                     self._handle_checkpointing()
@@ -197,7 +221,7 @@ class MotionPriorTrainer:
     def _train_step(
         self,
         train_batch: EgoTrainingData,
-        loop_metrics: LoopMetrics
+        loop_metrics: LoopMetrics,
     ) -> tuple[torch.Tensor, dict[str, torch.Tensor | float]]:
         """Execute a single training step with mixed precision."""
         with self.accelerator.accumulate(self.model):
@@ -206,23 +230,26 @@ class MotionPriorTrainer:
                 unwrapped_model=self.accelerator.unwrap_model(self.model),
                 train_batch=train_batch,
             )
-            
+
             log_outputs["learning_rate"] = self.lr_scheduler.get_last_lr()[0]
             log_outputs["iterations_per_sec"] = loop_metrics.iterations_per_sec
-            
+
             self.accelerator.log(log_outputs, step=self.step)
-            
+
             self.accelerator.backward(loss)
             if self.accelerator.sync_gradients:
-                self.accelerator.clip_grad_norm_(self.model.parameters(), self.config.max_grad_norm)
-            
+                self.accelerator.clip_grad_norm_(
+                    self.model.parameters(),
+                    self.config.max_grad_norm,
+                )
+
             self.optimizer.step()
             self.lr_scheduler.step()
             self.optimizer.zero_grad(set_to_none=True)
 
             if self.ema is not None:
                 self.ema.step(self.model)
-            
+
         return loss, log_outputs
 
     def _handle_logging(self, log_outputs):
@@ -232,13 +259,13 @@ class MotionPriorTrainer:
                 self.writer.add_scalar(k, v, self.step)
 
         if self.step % 20 == 0:
-            iterations_per_sec = log_outputs['iterations_per_sec']
+            iterations_per_sec = log_outputs["iterations_per_sec"]
             mem_free, mem_total = torch.cuda.mem_get_info()
             logger.info(
                 f"step: {self.step} ({iterations_per_sec:.2f} it/sec)"
-                f" mem: {(mem_total-mem_free)/1024**3:.2f}/{mem_total/1024**3:.2f}G"
+                f" mem: {(mem_total - mem_free) / 1024**3:.2f}/{mem_total / 1024**3:.2f}G"
                 f" lr: {self.lr_scheduler.get_last_lr()[0]:.7e}"
-                f" loss: {log_outputs['train/total_loss'].item():.6e}"
+                f" loss: {log_outputs['train/total_loss'].item():.6e}",
             )
 
     def _handle_checkpointing(self):
@@ -251,20 +278,22 @@ class MotionPriorTrainer:
 
             if self.prev_checkpoint_path is not None:
                 shutil.rmtree(self.prev_checkpoint_path)
-            self.prev_checkpoint_path = None if self.step % 100_000 == 0 else checkpoint_path
+            self.prev_checkpoint_path = (
+                None if self.step % 100_000 == 0 else checkpoint_path
+            )
 
     def _calculate_total_batch_size(self) -> int:
         """Calculate the total effective batch size across all GPUs."""
         return (
-            self.config.batch_size *  # per-GPU batch size
-            torch.cuda.device_count() *  # number of GPUs
-            self.gradient_accumulation_steps  # gradient accumulation
+            self.config.batch_size  # per-GPU batch size
+            * torch.cuda.device_count()  # number of GPUs
+            * self.gradient_accumulation_steps  # gradient accumulation
         )
 
     def _calculate_scaled_learning_rate(self) -> float:
         """Calculate the scaled learning rate based on total batch size."""
         batch_size_ratio = self.total_batch_size / self.config.base_batch_size
-        
+
         if self.config.learning_rate_scaling == "sqrt":
             # Square root scaling (recommended for most cases)
             scale_factor = math.sqrt(batch_size_ratio)
@@ -274,17 +303,18 @@ class MotionPriorTrainer:
         else:  # "none"
             # No scaling
             scale_factor = 1.0
-        
+
         scaled_lr = self.config.base_learning_rate * scale_factor
-        
+
         if self.accelerator.is_main_process:
             logger.info(f"Base learning rate: {self.config.base_learning_rate}")
             logger.info(f"Total batch size: {self.total_batch_size}")
             logger.info(f"Batch size ratio: {batch_size_ratio}")
             logger.info(f"Learning rate scale factor: {scale_factor}")
             logger.info(f"Scaled learning rate: {scaled_lr}")
-            
+
         return scaled_lr
+
 
 def train_motion_prior(
     config: EgoAlloTrainConfig,
@@ -294,12 +324,14 @@ def train_motion_prior(
     trainer = MotionPriorTrainer(
         config=config,
         gradient_accumulation_steps=1,  # You can make this configurable if needed
-        use_ema=config.use_ema
+        use_ema=config.use_ema,
     )
     if restore_checkpoint_dir is not None:
         trainer.step = trainer._restore_checkpoint(restore_checkpoint_dir)
     trainer.train()
 
+
 if __name__ == "__main__":
     import tyro
+
     tyro.cli(train_motion_prior)

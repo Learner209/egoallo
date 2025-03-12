@@ -52,7 +52,7 @@ class EgoExoDataset(torch.utils.data.Dataset[EgoTrainingData]):
         self.config = config
         self._slice_strategy = config.dataset_slice_strategy
         self._subseq_len = config.subseq_len
-        self._mask_ratio = config.mask_ratio
+        # self._mask_ratio = config.mask_ratio
 
         # Load annotation files
         self._anno_dirs = config.bodypose_anno_dir
@@ -207,7 +207,9 @@ class EgoExoDataset(torch.utils.data.Dataset[EgoTrainingData]):
             # end_t = start_t + self._subseq_len
         # Load slice of data
         seq_len = end_t - start_t  # +1 for exclusive end
-        frame_keys = sorted([k for k in data.keys() if isinstance(k, int)])
+        frame_keys: tuple[int, ...] = tuple(
+            sorted([k for k in data.keys() if isinstance(k, int)]),
+        )
         slice_data = [
             data[frame_keys[t]] for t in range(start_t, end_t)
         ]  # Skip metadata key and get frame data
@@ -221,13 +223,12 @@ class EgoExoDataset(torch.utils.data.Dataset[EgoTrainingData]):
             num_joints=22 if return_smplh_joints else 17,
             debug_vis=False,
         )
-        masked_joints = joints_world.clone()
-        masked_joints[~visible_mask] = 0
         # T_world_root = self._process_camera_poses(slice_data)
+        take_name = f"name_{data['metadata']['take_name']}_uid_{data['metadata']['take_uid']}_t{start_t}_{end_t}"
 
         # Create EgoTrainingData object
-        return EgoTrainingData(
-            joints_wrt_world=masked_joints,
+        ret = EgoTrainingData(
+            joints_wrt_world=joints_world,
             joints_wrt_cpf=joints_cam,
             T_world_root=torch.zeros((seq_len, 7)),
             T_world_cpf=torch.zeros((seq_len, 7)),
@@ -239,7 +240,16 @@ class EgoExoDataset(torch.utils.data.Dataset[EgoTrainingData]):
             hand_quats=torch.zeros((seq_len, 30, 4)),  # No hand data
             contacts=torch.zeros((seq_len, 22)),  # Default contacts
             height_from_floor=torch.zeros((seq_len, 1)),  # Default height
+            metadata=EgoTrainingData.MetaData(  # raw data.
+                take_name=(take_name,),
+                frame_keys=frame_keys,  # type: ignore
+                stage="raw",
+                scope="test",
+                dataset_type="AriaDataset",
+            ),
         )
+        ret = ret.preprocess()
+        return ret
 
     def _process_joints(
         self,
@@ -353,8 +363,8 @@ class EgoExoDataset(torch.utils.data.Dataset[EgoTrainingData]):
 
         return torch.tensor(poses, dtype=torch.float32)
 
-    def _get_mask_ratio(self) -> float:
-        """Get mask ratio for MAE training."""
-        if self.config.random_sample_mask_ratio:
-            return np.random.uniform(self.config.mask_ratio / 4, self.config.mask_ratio)
-        return self.config.mask_ratio
+    # def _get_mask_ratio(self) -> float:
+    #     """Get mask ratio for MAE training."""
+    #     if self.config.random_sample_mask_ratio:
+    #         return np.random.uniform(self.config.mask_ratio / 4, self.config.mask_ratio)
+    #     return self.config.mask_ratio

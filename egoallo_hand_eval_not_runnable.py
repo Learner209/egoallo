@@ -1,7 +1,7 @@
 import json
-import os
 import pickle
 from functools import cache
+import builtins
 from pathlib import Path
 from typing import Literal, overload
 
@@ -181,14 +181,14 @@ def get_mano_from_openpose_indices(include_tips: bool) -> Int[onp.ndarray, "21"]
     # https://github.com/geopavlakos/hamer/blob/272d68f176e0ea8a506f761663dd3dca4a03ced0/hamer/models/mano_wrapper.py#L20
     # fmt: off
     mano_to_openpose = [
-        0, 13, 14, 15, 16, 1, 2, 3, 17, 4, 5, 6, 18, 10, 11, 12, 19, 7, 8, 9, 20
+        0, 13, 14, 15, 16, 1, 2, 3, 17, 4, 5, 6, 18, 10, 11, 12, 19, 7, 8, 9, 20,
     ]
     # fmt: on
     openpose_from_mano_idx = {
         mano_idx: openpose_idx for openpose_idx, mano_idx in enumerate(mano_to_openpose)
     }
     return onp.array(
-        [openpose_from_mano_idx[i] for i in range(21 if include_tips else 16)]
+        [openpose_from_mano_idx[i] for i in range(21 if include_tips else 16)],
     )
 
 
@@ -392,11 +392,11 @@ def main(
             stats = {
                 "mpjpe": float(np.mean(mpjpe_concat)),
                 "mpjpe_stderr": float(
-                    np.std(mpjpe_concat) / np.sqrt(len(mpjpe_concat))
+                    np.std(mpjpe_concat) / np.sqrt(len(mpjpe_concat)),
                 ),
                 "pampjpe": float(np.mean(pampjpe_concat)),
                 "pampjpe_stderr": float(
-                    np.std(mpjpe_concat) / np.sqrt(len(mpjpe_concat))
+                    np.std(mpjpe_concat) / np.sqrt(len(mpjpe_concat)),
                 ),
                 "matched": matched_kp,
                 "total": total_kp,
@@ -462,7 +462,7 @@ def eval_take(
 
     print("Load hand annotations")
     hamer_outputs: SavedHamerOutputs = cached_pickle_load(
-        (traj_dir / "hamer_outputs.pkl").open("rb")
+        (traj_dir / "hamer_outputs.pkl").open("rb"),
     )
     image_timestamps_ns = sorted(
         t for t in hamer_outputs["detections_left_wrt_cam"].keys()
@@ -478,7 +478,7 @@ def eval_take(
             T_world_cam = vtf.SE3(
                 get_nearest_pose(closed_loop_traj, image_timestamps_ns[frame_idx])
                 .transform_world_device.to_quat_and_translation()
-                .squeeze(axis=0)
+                .squeeze(axis=0),
             ) @ vtf.SE3(hamer_outputs["T_device_cam"])
             time_ns = image_timestamps_ns[frame_idx]
 
@@ -515,9 +515,9 @@ def eval_take(
                 "frame_nums",
                 "timestamps_ns",
             ]
-            assert all(
-                key in outputs for key in expected_keys
-            ), f"Missing keys in NPZ file. Expected: {expected_keys}, Found: {list(outputs.keys())}"
+            assert all(key in outputs for key in expected_keys), (
+                f"Missing keys in NPZ file. Expected: {expected_keys}, Found: {list(outputs.keys())}"
+            )
 
             # NOTE: this is because I had a bug when saving some of the frame_nums.
             if outputs["frame_nums"].shape[0] != outputs["body_quats"].shape[1]:
@@ -542,16 +542,19 @@ def eval_take(
         )
 
         body_quats = np.concatenate(
-            [s["body_quats"][sample_idx] for s in saved], axis=0
+            [s["body_quats"][sample_idx] for s in saved],
+            axis=0,
         )
         left_hand_quats = np.concatenate(
-            [s["left_hand_quats"][sample_idx] for s in saved], axis=0
+            [s["left_hand_quats"][sample_idx] for s in saved],
+            axis=0,
         )
         right_hand_quats = np.concatenate(
-            [s["right_hand_quats"][sample_idx] for s in saved], axis=0
+            [s["right_hand_quats"][sample_idx] for s in saved],
+            axis=0,
         )
         local_quats = torch.tensor(
-            np.concatenate([body_quats, left_hand_quats, right_hand_quats], axis=1)
+            np.concatenate([body_quats, left_hand_quats, right_hand_quats], axis=1),
         ).to(device)
         del body_quats
         del left_hand_quats
@@ -565,7 +568,7 @@ def eval_take(
             assert frame_nums.shape == betas.shape[:1]
             (indices,) = np.nonzero(frame_nums == frame_idx)
 
-            if indices.shape == () or indices.shape == (0,):
+            if indices.shape in ((), (0,)):
                 return None, None
 
             assert indices.shape == (1,)
@@ -591,13 +594,19 @@ def eval_take(
                 keypoints = np.concatenate(
                     [
                         mesh.posed_model.Ts_world_joint[
-                            idx, wrist_idx : wrist_idx + 1, 4:7
+                            idx,
+                            wrist_idx : wrist_idx + 1,
+                            4:7,
                         ].numpy(force=True),
                         mesh.posed_model.Ts_world_joint[
-                            idx, hand_start_idx : hand_start_idx + 15, 4:7
+                            idx,
+                            hand_start_idx : hand_start_idx + 15,
+                            4:7,
                         ].numpy(force=True),
                         tips_from_vertices(
-                            mesh.verts[idx, ...].numpy(force=True), "smplh", side
+                            mesh.verts[idx, ...].numpy(force=True),
+                            "smplh",
+                            side,
                         ),
                     ],
                     axis=0,
@@ -634,7 +643,7 @@ def eval_take(
     right_kp_label = []
 
     assert len(mano_anno["frames"].shape) == 1
-    for i, frame_idx in (pbar := tqdm(enumerate(mano_anno["frames"]))):
+    for i, frame_idx in (pbar := tqdm(enumerate(mano_anno["frames"]))):  # noqa
         left_anno = mano_anno["left_kpts"][i]
         right_anno = mano_anno["right_kpts"][i]
 
@@ -695,7 +704,7 @@ def eval_take(
                 # )
 
                 left_mpjpe_from_frame[frame_idx] = astup(
-                    np.linalg.norm((left_kp - left_anno), axis=1)[left_mask]
+                    np.linalg.norm((left_kp - left_anno), axis=1)[left_mask],
                 )
                 left_pampjpe_from_frame[frame_idx] = astup(
                     np.linalg.norm(
@@ -705,7 +714,7 @@ def eval_take(
                             device=device,
                         ),
                         axis=1,
-                    )
+                    ),
                 )
 
         if right_kp is not None and right_count > 0:
@@ -747,7 +756,7 @@ def eval_take(
                 matched_keypoints += right_count
 
                 right_mpjpe_from_frame[frame_idx] = astup(
-                    np.linalg.norm((right_kp - right_anno), axis=1)[right_mask]
+                    np.linalg.norm((right_kp - right_anno), axis=1)[right_mask],
                 )
                 right_pampjpe_from_frame[frame_idx] = astup(
                     np.linalg.norm(
@@ -757,7 +766,7 @@ def eval_take(
                             device=device,
                         ),
                         axis=1,
-                    )
+                    ),
                 )
 
     # point_clouds.extend(
@@ -816,7 +825,7 @@ def aligned_subtract(a: np.ndarray, b: np.ndarray, device: torch.device) -> np.n
     ).numpy(force=True)
 
     if np.any(np.isnan(aligned_b)):
-        breakpoint()
+        builtins.breakpoint()
 
     return a - aligned_b
 
@@ -894,7 +903,8 @@ def procrustes_align(
         )  # (*, 1, 1)
         s = (
             torch.diagonal(torch.matmul(D, S), dim1=-2, dim2=-1).sum(
-                dim=-1, keepdim=True
+                dim=-1,
+                keepdim=True,
             )
             / var[..., 0]
         )  # (*, 1)

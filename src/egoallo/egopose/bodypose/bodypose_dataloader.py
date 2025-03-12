@@ -291,7 +291,7 @@ class body_pose_anno_loader(hand_pose_anno_loader):
 
             try:
                 # Load point cloud and find ground
-                _, ground_height = load_point_cloud_and_find_ground(
+                _, _, ground_height = load_point_cloud_and_find_ground(
                     Path(point_cloud_path),
                     return_points="filtered",
                     cache_files=False,
@@ -467,7 +467,7 @@ class body_pose_anno_loader(hand_pose_anno_loader):
         self.stats_collector.mark_take_processed(take_uid, valid=take_valid)
 
         if take_valid:
-            ground_height = self._get_ground_height(take_uid)
+            # ground_height = self._get_ground_height(take_uid)
 
             curr_take_db["metadata"] = {
                 "take_uid": take_uid,
@@ -479,7 +479,7 @@ class body_pose_anno_loader(hand_pose_anno_loader):
                 "exo_camera_extrinsics": {
                     k: v.tolist() for k, v in curr_exo_extrs.items()
                 },
-                "ground_height": ground_height,
+                # "ground_height": ground_height,
             }
             logger.info(
                 f"Take {take_name} has {len(curr_take_db) - 1}/{len(anno.items())} valid frames.",
@@ -585,14 +585,14 @@ class body_pose_anno_loader(hand_pose_anno_loader):
         self.stats_collector.mark_take_processed(take_uid, valid=take_valid)
 
         if take_valid:
-            ground_height = self._get_ground_height(take_uid)
+            # ground_height = self._get_ground_height(take_uid)
             metadata = {
                 "take_uid": take_uid,
                 "take_name": take_name,
                 "exo_cam_names": exo_cam_names.tolist(),
                 "exo_camera_intrinsics": {k: v.tolist() for k, v in curr_intrs.items()},
                 "exo_camera_extrinsics": {k: v.tolist() for k, v in curr_extrs.items()},
-                "ground_height": ground_height,
+                # "ground_height": ground_height,
             }
             curr_take_db["metadata"] = metadata
         else:

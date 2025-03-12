@@ -5,6 +5,7 @@ from pathlib import Path
 
 from egoallo.guidance_optimizer_jax import GuidanceMode
 
+
 @dataclasses.dataclass
 class InferenceConfig:
     traj_root: Path = Path("./egoallo_example_trajectories/coffeemachine/")
@@ -42,4 +43,4 @@ class InferenceConfig:
     visualize_traj: bool = False
     """Whether to visualize the trajectory after sampling."""
     use_ipdb: bool = False
-    """Whether to use ipdb instead of pdb.""" 
+    """Whether to use ipdb instead of pdb."""

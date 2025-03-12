@@ -317,6 +317,7 @@ if __name__ == "__main__":
     preprocess_cfg = local_cfg.io.egoexo.preprocessing
     preprocess_cfg.merge_from_other_cfg(cli_opt_dict)
     preprocess_cfg.merge_from_file(cli_opt.config_file)
+    preprocess_cfg.valid_kpts_num_thresh = 4
     local_cfg.io.egoexo.preprocessing = preprocess_cfg
     local_cfg.freeze()
 

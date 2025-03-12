@@ -1,5 +1,4 @@
 import json
-import pickle
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
 from pathlib import Path
@@ -9,16 +8,11 @@ import numpy as np
 import torch
 import tyro
 import yaml
-from jaxtyping import Float, Int
-from projectaria_tools.core import mps  # type: ignore
-from projectaria_tools.core.mps.utils import get_nearest_pose
+from jaxtyping import Float
 from torch import Tensor
-from tqdm import tqdm
 
 from egoallo import fncsmpl
 from egoallo.guidance_optimizer_jax import GuidanceMode
-from egoallo.data.egopose_meta import TakeMeta
-from egoallo.hand_detection_structs import SavedHamerOutputs
 
 
 class HandEvaluator:
@@ -44,7 +38,9 @@ class HandEvaluator:
         """
         self.egoexo_dir = egoexo_dir
         self.egoexo_reorg_dir = egoexo_reorg_dir
-        self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = device or torch.device(
+            "cuda" if torch.cuda.is_available() else "cpu",
+        )
         self.body_model = fncsmpl.SmplModel.load(body_npz_path).to(self.device)
 
         # Define mappings and constants
@@ -126,16 +122,37 @@ class HandEvaluator:
             A NumPy array of indices.
         """
         mano_to_openpose = [
-            0, 13, 14, 15, 16, 1, 2, 3, 17,
-            4, 5, 6, 18, 10, 11, 12, 19,
-            7, 8, 9, 20
+            0,
+            13,
+            14,
+            15,
+            16,
+            1,
+            2,
+            3,
+            17,
+            4,
+            5,
+            6,
+            18,
+            10,
+            11,
+            12,
+            19,
+            7,
+            8,
+            9,
+            20,
         ]
         if not include_tips:
             mano_to_openpose = mano_to_openpose[:16]
         openpose_from_mano_idx = {
-            mano_idx: openpose_idx for openpose_idx, mano_idx in enumerate(mano_to_openpose)
+            mano_idx: openpose_idx
+            for openpose_idx, mano_idx in enumerate(mano_to_openpose)
         }
-        indices = np.array([openpose_from_mano_idx[i] for i in range(len(mano_to_openpose))])
+        indices = np.array(
+            [openpose_from_mano_idx[i] for i in range(len(mano_to_openpose))],
+        )
         return indices
 
     def tips_from_vertices(
@@ -157,7 +174,9 @@ class HandEvaluator:
         """
         side_short = "" if model_type == "mano" else side[0]
         tip_names = ["thumb", "index", "middle", "ring", "pinky"]
-        tips_idxs = [self.vertex_ids[model_type][side_short + tip_name] for tip_name in tip_names]
+        tips_idxs = [
+            self.vertex_ids[model_type][side_short + tip_name] for tip_name in tip_names
+        ]
         finger_tips = vertices[..., tips_idxs, :]
         return finger_tips
 
@@ -190,7 +209,9 @@ class HandEvaluator:
             return np.array(keypoints), np.array(mask)
 
         def batch_get_keypoints(side: str):
-            names = self.EGOEXO_NAMES_LEFT if side == "left" else self.EGOEXO_NAMES_RIGHT
+            names = (
+                self.EGOEXO_NAMES_LEFT if side == "left" else self.EGOEXO_NAMES_RIGHT
+            )
             hand_kpts, hand_masks = [], []
             for frame in frames:
                 frame_data = anno[str(frame)][0]["annotation3D"]
@@ -227,12 +248,16 @@ class HandEvaluator:
         """
         if a.shape[0] == 1:
             return np.zeros_like(a)
-        aligned_b = self.procrustes_align(
-            points_y=torch.tensor(a, dtype=torch.float64, device=self.device),
-            points_x=torch.tensor(b, dtype=torch.float64, device=self.device),
-            output="aligned_x",
-            fix_scale=False,
-        ).cpu().numpy()
+        aligned_b = (
+            self.procrustes_align(
+                points_y=torch.tensor(a, dtype=torch.float64, device=self.device),
+                points_x=torch.tensor(b, dtype=torch.float64, device=self.device),
+                output="aligned_x",
+                fix_scale=False,
+            )
+            .cpu()
+            .numpy()
+        )
         return a - aligned_b
 
     @overload
@@ -242,8 +267,7 @@ class HandEvaluator:
         points_x: Float[Tensor, "*batch N 3"],
         output: Literal["transforms"],
         fix_scale: bool = False,
-    ) -> Tuple[Tensor, Tensor, Tensor]:
-        ...
+    ) -> Tuple[Tensor, Tensor, Tensor]: ...
 
     @overload
     def procrustes_align(
@@ -252,8 +276,7 @@ class HandEvaluator:
         points_x: Float[Tensor, "*batch N 3"],
         output: Literal["aligned_x"],
         fix_scale: bool = False,
-    ) -> Tensor:
-        ...
+    ) -> Tensor: ...
 
     def procrustes_align(
         self,
@@ -298,15 +321,21 @@ class HandEvaluator:
         if fix_scale:
             s = torch.ones(*dims, 1, device=device, dtype=dtype)
         else:
-            var = torch.sum(x0 ** 2, dim=(-1, -2), keepdim=True) / N_tensor
-            s = (torch.sum(D * S.diagonal(dim1=-2, dim2=-1), dim=-1, keepdim=True) / var[..., 0])
+            var = torch.sum(x0**2, dim=(-1, -2), keepdim=True) / N_tensor
+            s = (
+                torch.sum(D * S.diagonal(dim1=-2, dim2=-1), dim=-1, keepdim=True)
+                / var[..., 0]
+            )
 
         t = my - s * torch.matmul(R, mx[..., None])[..., 0]
 
         if output == "transforms":
             return s, R, t
         elif output == "aligned_x":
-            aligned_x = s[..., None, :] * torch.einsum("...ij,...nj->...ni", R, points_x) + t[..., None, :]
+            aligned_x = (
+                s[..., None, :] * torch.einsum("...ij,...nj->...ni", R, points_x)
+                + t[..., None, :]
+            )
             return aligned_x
         else:
             assert_never(output)
@@ -382,9 +411,13 @@ class HandEvaluator:
 
                 stats = {
                     "mpjpe": float(np.mean(mpjpe_values)),
-                    "mpjpe_stderr": float(np.std(mpjpe_values) / np.sqrt(len(mpjpe_values))),
+                    "mpjpe_stderr": float(
+                        np.std(mpjpe_values) / np.sqrt(len(mpjpe_values)),
+                    ),
                     "pampjpe": float(np.mean(pampjpe_values)),
-                    "pampjpe_stderr": float(np.std(pampjpe_values) / np.sqrt(len(pampjpe_values))),
+                    "pampjpe_stderr": float(
+                        np.std(pampjpe_values) / np.sqrt(len(pampjpe_values)),
+                    ),
                     "matched": matched_kp,
                     "total": total_kp,
                 }

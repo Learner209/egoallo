@@ -3,6 +3,8 @@
 import os
 
 
+from egoallo.inference_utils import load_runtime_config
+
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
@@ -14,8 +16,6 @@ import shutil
 from pathlib import Path
 import time
 
-import sys
-from unittest.mock import patch
 
 import torch.optim.lr_scheduler
 import torch.utils.data
@@ -33,6 +33,7 @@ from egoallo.data import make_batch_collator, build_dataset
 from egoallo.config.train.train_config import EgoAlloTrainConfig
 
 import wandb
+from torch.amp import autocast
 import datetime
 import tempfile
 from egoallo.config.inference.inference_defaults import InferenceConfig
@@ -67,9 +68,23 @@ def run_training(
     # Set up experiment directory + HF accelerate.
     # We're getting to manage logging, checkpoint directories, etc manually,
     # and just use `accelerate` for distibuted training.
-    experiment_dir = get_experiment_dir(config.experiment_name)
-    assert not experiment_dir.exists()
+
+    if debug_mode:
+        import builtins
+
+        builtins.breakpoint()  # noqa
+
+    if restore_checkpoint_dir:
+        config: EgoAlloTrainConfig = load_runtime_config(restore_checkpoint_dir)
+        config.batch_size = 64  # FIXME: this is a temporary fix to distill a large model trained on thecluster to local machine.
+        # experiment_dir =  restore_checkpoint_dir.parent
+        experiment_dir = get_experiment_dir(config.experiment_name)
+    else:
+        experiment_dir = get_experiment_dir(config.experiment_name)
+        assert not experiment_dir.exists()
+
     config.experiment_dir = experiment_dir
+
     accelerator = Accelerator(
         project_config=ProjectConfiguration(project_dir=str(experiment_dir)),
         dataloader_config=DataLoaderConfiguration(split_batches=True),
@@ -87,12 +102,16 @@ def run_training(
 
         # Save experiment files
         experiment_dir.mkdir(exist_ok=True, parents=True)
-        (experiment_dir / "git_commit.txt").write_text(
-            training_utils.get_git_commit_hash(),
-        )
-        (experiment_dir / "git_diff.txt").write_text(training_utils.get_git_diff())
-        (experiment_dir / "run_config.yaml").write_text(yaml.dump(config))
-        (experiment_dir / "model_config.yaml").write_text(yaml.dump(config.model))
+        if not (experiment_dir / "git_commit.txt").exists():
+            (experiment_dir / "git_commit.txt").write_text(
+                training_utils.get_git_commit_hash(),
+            )
+        if not (experiment_dir / "git_diff.txt").exists():
+            (experiment_dir / "git_diff.txt").write_text(training_utils.get_git_diff())
+        if not (experiment_dir / "run_config.yaml").exists():
+            (experiment_dir / "run_config.yaml").write_text(yaml.dump(config))
+        if not (experiment_dir / "model_config.yaml").exists():
+            (experiment_dir / "model_config.yaml").write_text(yaml.dump(config.model))
 
     device = accelerator.device
 
@@ -101,12 +120,17 @@ def run_training(
 
         # Save various things that might be useful.
         experiment_dir.mkdir(exist_ok=True, parents=True)
-        (experiment_dir / "git_commit.txt").write_text(
-            training_utils.get_git_commit_hash(),
-        )
-        (experiment_dir / "git_diff.txt").write_text(training_utils.get_git_diff())
-        (experiment_dir / "run_config.yaml").write_text(yaml.dump(config))
-        (experiment_dir / "model_config.yaml").write_text(yaml.dump(config.model))
+
+        if not (experiment_dir / "git_commit.txt").exists():
+            (experiment_dir / "git_commit.txt").write_text(
+                training_utils.get_git_commit_hash(),
+            )
+        if not (experiment_dir / "git_diff.txt").exists():
+            (experiment_dir / "git_diff.txt").write_text(training_utils.get_git_diff())
+        if not (experiment_dir / "run_config.yaml").exists():
+            (experiment_dir / "run_config.yaml").write_text(yaml.dump(config))
+        if not (experiment_dir / "model_config.yaml").exists():
+            (experiment_dir / "model_config.yaml").write_text(yaml.dump(config.model))
 
         # source_code_log_dir = experiment_dir / "logs"
 
@@ -181,7 +205,7 @@ def run_training(
     epoch = 0
 
     while True:
-        for train_batch in train_loader:
+        for idx, train_batch in enumerate(train_loader):
             # Record batch loading time
             batch_load_time = time.time() - batch_start_time
             batch_start_time = time.time()
@@ -189,12 +213,16 @@ def run_training(
             loop_metrics = next(loop_metrics_gen)
             step = loop_metrics.counter
 
-            loss, log_outputs = loss_helper.compute_denoising_loss(
-                model,
-                unwrapped_model=accelerator.unwrap_model(model),
-                train_config=config,
-                train_batch=train_batch,
-            )
+            if step >= config.max_steps:
+                break
+
+            with autocast(device_type=device.type, dtype=torch.float32):
+                loss, log_outputs = loss_helper.compute_denoising_loss(
+                    model,
+                    unwrapped_model=accelerator.unwrap_model(model),
+                    train_config=config,
+                    train_batch=train_batch,
+                )
 
             # Add learning rate to outputs
             log_outputs["learning_rate"] = scheduler.get_last_lr()[0]
@@ -214,7 +242,7 @@ def run_training(
             if not accelerator.is_main_process:
                 continue
 
-            if step % 400 == 0:
+            if step % 200 == 0:
                 log_msg = (
                     f"step: {step} ({loop_metrics.iterations_per_sec:.2f} it/sec)"
                     f" epoch: {epoch} (time: {epoch_time:.1f}s)"
@@ -313,13 +341,12 @@ def run_training(
                 # Keep checkpoints from only every 100k steps
                 if prev_checkpoint_path is not None:
                     shutil.rmtree(prev_checkpoint_path)
-                prev_checkpoint_path = (
-                    None if step % steps_to_save == 0 else checkpoint_path
-                )
+                prev_checkpoint_path = None if step == 0 else checkpoint_path
 
             # Evaluation
             steps_to_eval = 1e4
-            if step % steps_to_eval == 0 and step != 0:
+            if step % steps_to_eval == 0:
+                # if step % steps_to_eval == 0 and step != 0:
                 # Create temporary directory for evaluation outputs
                 with tempfile.TemporaryDirectory() as temp_dir:
                     # Create inference config for evaluation
@@ -333,7 +360,7 @@ def run_training(
                         use_mean_body_shape=False,  # use_mean_body_shape would fail assertion
                     )
 
-                    # Run evaluation
+                    # Run evaluatin
                     try:
                         test_runner = TestRunner(inference_config)
                         # TODO: just for debugging.
@@ -358,6 +385,9 @@ def run_training(
 
                 del checkpoint_path
 
+        if step >= config.max_steps:
+            break
+
         # End of epoch
         epoch += 1
         epoch_time = time.time() - epoch_start_time
@@ -368,40 +398,6 @@ def run_training(
     # Finish wandb run
     if accelerator.is_main_process:
         wandb.finish()
-
-
-def test_run_training_cli():
-    # Store original argv
-    original_argv = sys.argv.copy()
-
-    try:
-        # Create test config directly instead of using CLI args
-        test_config = EgoAlloTrainConfig(
-            batch_size=64,
-            experiment_name="test_experiment",
-            learning_rate=1e-4,
-            dataset_hdf5_path=Path(
-                "./data/amass_rich_hps/processed_amass_rich_hps.hdf5",
-            ),
-            dataset_files_path=Path(
-                "./data/amass_rich_hps/processed_amass_rich_hps.txt",
-            ),
-            mask_ratio=0.0,
-            splits=("train", "val"),
-            joint_cond_mode="absrel",
-            use_fourier_in_masked_joints=False,
-            random_sample_mask_ratio=True,
-            data_collate_fn="TensorOnlyDataclassBatchCollator",
-        )
-
-        # Mock wandb to prevent actual wandb initialization
-        with patch("wandb.init"), patch("wandb.log"), patch("wandb.finish"):
-            # Run the main function
-            run_training(test_config)
-
-    finally:
-        # Restore original argv
-        sys.argv = original_argv
 
 
 if __name__ == "__main__":

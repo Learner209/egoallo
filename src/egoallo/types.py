@@ -57,6 +57,8 @@ DatasetType = Literal[
     "AdaptiveAmassHdf5Dataset",
     "VanillaEgoAmassHdf5Dataset",
     "EgoExoDataset",
+    "AriaDataset",
+    "AriaInferenceDataset",
 ]
 
 DatasetSliceStrategy = Literal[
@@ -80,3 +82,8 @@ JointCondMode = Literal[
 LossWeights = Dict[str, float]
 
 DenoiseTrajType = Union["AbsoluteDenoiseTraj", "JointsOnlyTraj", "VelocityDenoiseTraj"]
+DenoiseTrajTypeLiteral = Literal[
+    "AbsoluteDenoiseTraj",
+    "JointsOnlyTraj",
+    "VelocityDenoiseTraj",
+]

@@ -288,6 +288,8 @@ class SmplhShaped(TensorDataclass):
 
 @jaxtyped(typechecker=typeguard.typechecked)
 class SmplhShapedAndPosed(TensorDataclass):
+    """Outputs from the SMPL-H model."""
+
     shaped_model: SmplhShaped
     """Underlying shaped body model."""
 

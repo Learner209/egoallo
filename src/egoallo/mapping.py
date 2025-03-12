@@ -1100,3 +1100,28 @@ EGOEXO4D_BODYPOSE_KINTREE_PARENTS = [
     13,
     14,
 ]
+
+SMPLH_KINTREE = [
+    -1,
+    0,
+    0,
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    12,
+    12,
+    12,
+    13,
+    14,
+    16,
+    17,
+    18,
+    19,
+]  # Parent indices for each of 22 SMPLH joints

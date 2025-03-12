@@ -6,6 +6,11 @@ import numpy as np
 from egoallo.utils.setup_logger import setup_logger
 from projectaria_tools.core import mps
 from projectaria_tools.core.mps.utils import filter_points_from_confidence
+import tyro
+from third_party.cloudrender.cloudrender.render.pointcloud import Pointcloud
+
+import hashlib
+import tempfile
 
 logger = setup_logger(output=None, name=__name__)
 
@@ -14,7 +19,7 @@ def load_point_cloud_and_find_ground(
     points_path: Path,
     return_points: Literal["all", "filtered", "less_filtered"] = "less_filtered",
     cache_files: bool = True,
-) -> Tuple[np.ndarray, float]:
+) -> Tuple[Pointcloud.PointcloudContainer, np.ndarray, float]:
     """Load an Aria MPS point cloud and find the ground plane.
 
     Args:
@@ -22,9 +27,18 @@ def load_point_cloud_and_find_ground(
         return_points: Which set of points to return ("all", "filtered", or "less_filtered")
         cache_files: Whether to cache filtered points to disk for faster future loading
     """
-    filtered_points_npz_cache_path = points_path.parent / "_cached_filtered_points.npz"
+    # Create hash of points path to use as cache filename
+    points_path_hash = hashlib.md5(str(points_path).encode()).hexdigest()
+
+    # Create persistent temp directory if it doesn't exist
+    temp_cache_dir = Path(tempfile.gettempdir()) / "aria_mps_cache"
+    temp_cache_dir.mkdir(exist_ok=True, parents=True)
+
+    filtered_points_npz_cache_path = (
+        temp_cache_dir / f"{points_path_hash}_filtered_points.npz"
+    )
     less_filtered_points_npz_cache_path = (
-        points_path.parent / "_cached_less_filtered_points.npz"
+        temp_cache_dir / f"{points_path_hash}_less_filtered_points.npz"
     )
 
     # Check if we should use cached files
@@ -58,8 +72,8 @@ def load_point_cloud_and_find_ground(
         assert points_path.exists()
         filtered_points_data = filter_points_from_confidence(
             points_data,
-            threshold_invdep=0.0001,
-            threshold_dep=0.005,
+            threshold_invdep=0.0002,
+            threshold_dep=0.01,
         )
         less_filtered_points_data = filter_points_from_confidence(
             points_data,
@@ -75,7 +89,6 @@ def load_point_cloud_and_find_ground(
 
         # Only save cache files if caching is enabled
         if cache_files:
-            filtered_points_npz_cache_path.parent.mkdir(exist_ok=True, parents=True)
             np.savez_compressed(
                 filtered_points_npz_cache_path,
                 points=filtered_points_data,
@@ -135,10 +148,38 @@ def load_point_cloud_and_find_ground(
 
     # Re-fit plane to inliers.
     floor_z = float(np.median(zs[np.abs(zs - best_z) < 0.01]))
+
+    # Select points based on return_points parameter
     if return_points == "filtered":
-        return filtered_points_data, floor_z
+        vertices = filtered_points_data
     elif return_points == "less_filtered":
-        return less_filtered_points_data, floor_z
+        vertices = less_filtered_points_data
     else:
         assert points_data is not None
-        return np.array([x.position_world for x in points_data]), floor_z
+        vertices = np.array([x.position_world for x in points_data])
+    # Create colors based on z-values using percentiles to be robust to outliers
+    z_values = vertices[:, 2]
+    z_5th = np.percentile(z_values, 5)
+    z_95th = np.percentile(z_values, 95)
+    z_normalized = np.clip((z_values - z_5th) / (z_95th - z_5th), 0, 1)
+
+    # Create a colormap that maps z-values to RGB colors
+    colors = np.zeros((len(vertices), 4), dtype=np.uint8)
+
+    # Red channel - increases with height
+    colors[:, 0] = (255 * z_normalized).astype(np.uint8)
+    # Green channel - inverse of height
+    colors[:, 1] = (255 * (1 - z_normalized)).astype(np.uint8)
+    # Blue channel - varies sinusoidally with height
+    colors[:, 2] = (128 + 127 * np.sin(z_normalized * 4 * np.pi)).astype(np.uint8)
+    # Alpha channel - full opacity
+    colors[:, 3] = 255
+
+    # Create PointcloudContainer
+    pc_container = Pointcloud.PointcloudContainer(vertices=vertices, colors=colors)
+
+    return pc_container, vertices, floor_z
+
+
+if __name__ == "__main__":
+    tyro.cli(load_point_cloud_and_find_ground)

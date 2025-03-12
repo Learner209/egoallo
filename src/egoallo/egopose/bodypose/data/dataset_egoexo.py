@@ -2,13 +2,26 @@ import json
 import os
 import os.path as osp
 import random
-
-import joblib
-import numpy as np
-import torch
-from egoallo.utils.setup_logger import setup_logger
-from torch.utils.data import Dataset
 from tqdm import tqdm
+
+# from egoallo.data.build import EgoTrainingData
+from typing import Dict, Any, Tuple
+from jaxtyping import Float, Bool, jaxtyped
+import typeguard
+from torch import Tensor
+from egoallo.mapping import (
+    EGOEXO4D_BODYPOSE_TO_SMPLH_INDICES,
+    SMPLH_KINTREE,
+    EGOEXO4D_BODYPOSE_KINTREE_PARENTS,
+)
+from egoallo.utils.setup_logger import setup_logger
+from egoallo.utilities import find_numerical_key_in_dict
+from pathlib import Path
+import torch
+import numpy as np
+from scipy.signal import savgol_filter
+
+from torch.utils.data import Dataset
 
 logger = setup_logger(output=None, name=__name__)
 
@@ -17,12 +30,12 @@ random.seed(1)
 
 
 class Dataset_EgoExo(Dataset):
-    def __init__(self, opt):
+    def __init__(self, config: Dict[str, Any]):
         super(Dataset_EgoExo, self).__init__()
 
-        self.root = opt["root"]
+        self.root = config["dataset_path"]
         self.root_takes = os.path.join(self.root, "takes")
-        self.split = opt["split"]
+        self.split = config["split"]
         self.root_poses = os.path.join(
             self.root,
             "annotations",
@@ -30,10 +43,17 @@ class Dataset_EgoExo(Dataset):
             self.split,
             "body",
         )
-        self.use_pseudo = opt["use_pseudo"]
-        self.coord = opt["coord"]
-        self.slice_window = opt["window_size"]
-        # load sequences paths
+        self.use_pseudo = config["use_pseudo"]
+        self.coord = config["coord"]
+        gt_ground_height_anno_dir = config["gt_ground_height_anno_dir"]
+        self.gt_ground_height = json.load(
+            open(
+                Path(gt_ground_height_anno_dir)
+                / f"ego_pose_gt_anno_{self.split}_public_height.json",
+            ),
+        )
+        # self.slice_window =  config["window_size"]
+        self.slice_window = 128
 
         manually_annotated_takes = os.listdir(
             os.path.join(self.root_poses, "annotation"),
@@ -76,12 +96,17 @@ class Dataset_EgoExo(Dataset):
             no_cam = 0
             no_cam_list = []
 
+            cnt = 0
+
             for take_uid in tqdm(
                 self.takes_metadata,
                 total=len(self.takes_metadata),
                 desc="takes_metadata",
                 ascii=" >=",
             ):
+                # if cnt > 50:
+                #     break
+                cnt += 1
                 if take_uid + ".json" in self.cameras:
                     camera_json = json.load(
                         open(
@@ -185,14 +210,18 @@ class Dataset_EgoExo(Dataset):
             "left-ankle",
             "right-ankle",
         ]
-        self.single_joint = opt["single_joint"]
-        print("Dataset lenght: {}".format(len(self.valid_take_uids)))
-        print("Split: {}".format(self.split))
-        # print('No Manually: {}'.format(no_man))
-        # print('No camera: {}'.format(no_cam))
-        # print('No camera list: {}'.format(no_cam_list))
+        # self.single_joint = opt['single_joint']
+        logger.info(f"Dataset lenght: {len(self.valid_take_uids)}")
+        logger.info(f"Split: {self.split}")
+        # logger.info('No Manually: {}'.format(no_man))
+        # logger.info('No camera: {}'.format(no_cam))
+        # logger.info('No camera list: {}'.format(no_cam_list))
 
     def translate_poses(self, anno, cams, coord):
+        """
+        Translate poses from EgoExo4D to global coordinates.
+        NOTE: the raw ['camera_extrinsics'] are in global coordinates, which transforms world coordinates to camera coordinates.
+        """
         trajectory = {}
         to_remove = []
         for key in cams.keys():
@@ -271,8 +300,283 @@ class Dataset_EgoExo(Dataset):
                 )  # visible
             else:
                 flags.append(0)  # not visible
-                poses.append([-1, -1, -1])  # not visible
+                poses.append([float("nan")] * 3)  # not visible
         return poses, flags
+
+    @jaxtyped(typechecker=typeguard.typechecked)
+    def _process_joints(
+        self,
+        data: Float[Tensor, "timesteps 17 3"],
+        vis: Float[Tensor, "timesteps 17"],
+        ground_height: float = 0.0,
+        return_smplh_joints: bool = True,
+        num_joints: int = 22,
+        debug_vis: bool = False,
+    ) -> Tuple[
+        Float[Tensor, "timesteps {num_joints} 3"],
+        Bool[Tensor, "timesteps {num_joints}"],
+    ]:
+        """Process joint data from annotations.
+
+        Args:
+            data: List of frame dictionaries containing body pose data
+            return_smplh_joints: If True, converts joints from EgoExo4D (17 joints) to SMPLH format (22 body joints).
+                Invalid mappings will be filled with zeros.
+            debug_vis: If True, visualize joints using polyscope (for debugging)
+
+        Returns:
+            Tuple of:
+            - joints_world: World coordinate joint positions (timesteps x J x 3) where J is 17 for EgoExo4D or 22 for SMPLH
+            - visible: Joint visibility mask (timesteps x J) where J is 17 for EgoExo4D or 22 for SMPLH
+        """
+        # Initialize SMPLH tensors with NaN for positions and False for visibility
+        if return_smplh_joints:
+            T = data.shape[0]
+            smplh_world = torch.full((T, 22, 3), float("nan"), dtype=torch.float32)
+            smplh_visible = torch.zeros((T, 22), dtype=torch.bool)
+
+            # Map joints using EGOEXO4D_BODYPOSE_TO_SMPLH_INDICES
+            for smplh_idx, ego_idx in enumerate(EGOEXO4D_BODYPOSE_TO_SMPLH_INDICES):
+                if ego_idx != -1:
+                    # Valid mapping - copy data
+                    smplh_world[:, smplh_idx] = data[:, ego_idx]
+                    smplh_visible[:, smplh_idx] = vis[:, ego_idx]
+            return smplh_world, smplh_visible
+        else:
+            return data, vis.bool()
+
+    def apply_kinematic_constraints_v2(
+        self,
+        joints_world: torch.Tensor,
+        joints_world_coco: torch.Tensor,
+        threshold: float = 3.0,
+        window_size: int = 11,  # Odd number for centered window
+        temporal_sigma: float = 2.0,  # For Gaussian weighting
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Enhanced version with temporal awareness and smoothing:
+        1. Uses weighted temporal window for distance statistics
+        2. Applies Savitzky-Golay temporal smoothing
+        3. Fallback to global statistics when local window is insufficient
+        """
+
+        def process_joints(joints: torch.Tensor, kintree: list) -> torch.Tensor:
+            T, J, _ = joints.shape
+            device = joints.device
+
+            # Create Gaussian weights for temporal window
+            half_window = window_size // 2
+            x = np.linspace(-temporal_sigma, temporal_sigma, window_size)
+            weights = torch.tensor(
+                np.exp(-(x**2) / 2),
+                dtype=torch.float32,
+                device=device,
+            )
+            weights /= weights.sum()
+
+            for j in range(J):
+                parent_idx = kintree[j]
+                if parent_idx == -1:
+                    continue
+
+                # Pre-calculate valid frames for efficiency
+                valid_mask = ~torch.isnan(joints[:, j]).any(dim=1) & ~torch.isnan(
+                    joints[:, parent_idx],
+                ).any(dim=1)
+                valid_ts = torch.where(valid_mask)[0].cpu().numpy()
+
+                # Calculate global statistics as fallback
+                if len(valid_ts) > 1:
+                    global_dists = torch.norm(
+                        joints[valid_ts, j] - joints[valid_ts, parent_idx],
+                        dim=1,
+                    )
+                    global_mean = global_dists.mean()
+                    global_std = global_dists.std()
+                else:
+                    continue  # Insufficient data for this joint pair
+
+                for t in range(T):
+                    if not valid_mask[t]:
+                        continue
+
+                    # Get temporal window bounds
+                    start = max(0, t - half_window)
+                    end = min(T, t + half_window + 1)
+                    window_ts = torch.arange(start, end, device=device)
+
+                    # Find valid frames in window
+                    window_valid = valid_mask[window_ts]
+                    if window_valid.sum() < 3:  # Use global stats if insufficient
+                        mean_dist = global_mean
+                        std_dist = global_std
+                    else:
+                        # Calculate weighted statistics in window
+                        window_weights = weights[window_ts - t + half_window][
+                            window_valid
+                        ]
+                        window_dists = torch.norm(
+                            joints[window_ts[window_valid], j]
+                            - joints[window_ts[window_valid], parent_idx],
+                            dim=1,
+                        )
+                        mean_dist = (
+                            window_dists * window_weights
+                        ).sum() / window_weights.sum()
+                        std_dist = torch.sqrt(
+                            (window_weights * (window_dists - mean_dist) ** 2).sum()
+                            / window_weights.sum(),
+                        )
+
+                    # Adjust outliers
+                    current_dist = torch.norm(joints[t, j] - joints[t, parent_idx])
+                    if not (
+                        mean_dist - threshold * std_dist
+                        <= current_dist
+                        <= mean_dist + threshold * std_dist
+                    ):
+                        direction = joints[t, j] - joints[t, parent_idx]
+                        direction_normalized = direction / (current_dist + 1e-7)
+                        adjusted_joint = (
+                            joints[t, parent_idx] + direction_normalized * mean_dist
+                        )
+                        joints[t, j] = adjusted_joint
+
+            # Temporal smoothing after adjustments
+            for j in range(J):
+                valid_ts = torch.where(~torch.isnan(joints[:, j]).any(dim=1))[0]
+                if len(valid_ts) > window_size:
+                    # Savitzky-Golay smoothing for joint trajectories
+                    try:
+                        smoothed = savgol_filter(
+                            joints[valid_ts, j].cpu().numpy(),
+                            window_length=window_size,
+                            polyorder=2,
+                            axis=0,
+                        )
+                        joints[valid_ts, j] = torch.tensor(smoothed, device=device)
+                    except Exception:
+                        logger.warning(
+                            "Applying temporal smoothing using Savitzky-Golay smoothing failed due to insufficient valid ts samples.",
+                        )
+                        pass
+
+            return joints
+
+        # SMPLH kinematic tree (parent indices)
+        smplh_kintree = SMPLH_KINTREE
+
+        # COCO kinematic tree (parent indices)
+        coco_kintree = EGOEXO4D_BODYPOSE_KINTREE_PARENTS
+
+        # Process both joint sets
+        joints_world = process_joints(joints_world, smplh_kintree)
+        joints_world_coco = process_joints(joints_world_coco, coco_kintree)
+
+        return joints_world, joints_world_coco
+
+    @jaxtyped(typechecker=typeguard.typechecked)
+    def apply_kinematic_constraints(
+        self,
+        joints_world: Float[Tensor, "timesteps 22 3"],  # SMPLH joints: (T, 22, 3)
+        joints_world_coco: Float[Tensor, "timesteps 17 3"],  # COCO joints: (T, 17, 3)
+        threshold: float = 3.0,  # Number of standard deviations for outlier detection
+    ) -> Tuple[Float[Tensor, "timesteps 22 3"], Float[Tensor, "timesteps 17 3"]]:
+        """
+        Applies kinematic constraints to joint positions to filter outliers and adjust positions based on expected distances.
+
+        Args:
+            joints_world (torch.Tensor): SMPLH joint positions in world coordinates, shape (T, 22, 3)
+            joints_world_coco (torch.Tensor): COCO joint positions in world coordinates, shape (T, 17, 3)
+            threshold (float): Number of standard deviations for defining outlier thresholds
+
+        Returns:
+            Tuple[torch.Tensor, torch.Tensor]: Adjusted SMPLH and COCO joints
+        """
+        # Define kinematic trees for SMPLH and COCO
+        smplh_kintree = SMPLH_KINTREE
+        coco_kintree = EGOEXO4D_BODYPOSE_KINTREE_PARENTS
+
+        # Process SMPLH joints
+        for joint_idx in range(len(smplh_kintree)):
+            parent_idx = smplh_kintree[joint_idx]
+            if parent_idx == -1:
+                continue  # Skip root node
+
+            valid_frames = []
+            for t in range(joints_world.shape[0]):
+                # Check if parent and child are not NaN
+                parent_valid = not torch.isnan(joints_world[t, parent_idx]).any()
+                child_valid = not torch.isnan(joints_world[t, joint_idx]).any()
+                if parent_valid and child_valid:
+                    valid_frames.append(t)
+
+            if not valid_frames:
+                continue
+
+            # Calculate distances between parent and child in valid frames
+            parent_pos = joints_world[valid_frames, parent_idx]  # [valid_frames, 3]
+            child_pos = joints_world[valid_frames, joint_idx]  # [valid_frames, 3]
+            distances = torch.norm(child_pos - parent_pos, dim=1)  # [valid_frames]
+            mean_dist = torch.mean(distances)
+            std_dist = torch.std(distances)
+
+            upper_bound = mean_dist + threshold * std_dist
+            lower_bound = mean_dist - threshold * std_dist
+
+            # Adjust outliers in each valid frame
+            for t in valid_frames:
+                current_parent = joints_world[t, parent_idx]  # [3]
+                current_child = joints_world[t, joint_idx]  # [3]j
+                dist = torch.norm(current_child - current_parent)  # [1]
+
+                if dist < lower_bound or dist > upper_bound:
+                    direction = current_child - current_parent  # [3]
+                    direction_normalized = direction / (dist + 1e-7)  # [3]
+                    adjusted_child = (
+                        current_parent + direction_normalized * mean_dist
+                    )  # [3]
+                    joints_world[t, joint_idx] = adjusted_child
+
+        # Process COCO joints
+        for joint_idx in range(len(coco_kintree)):
+            parent_idx = coco_kintree[joint_idx]
+            if parent_idx == -1:
+                continue  # Skip root node
+
+            valid_frames = []
+            for t in range(joints_world_coco.shape[0]):
+                parent_valid = not torch.isnan(joints_world_coco[t, parent_idx]).any()
+                child_valid = not torch.isnan(joints_world_coco[t, joint_idx]).any()
+                if parent_valid and child_valid:
+                    valid_frames.append(t)
+
+            if not valid_frames:
+                continue
+
+            # Calculate distances between parent and child in valid frames
+            parent_pos = joints_world_coco[valid_frames, parent_idx]
+            child_pos = joints_world_coco[valid_frames, joint_idx]
+            distances = torch.norm(child_pos - parent_pos, dim=1)
+            mean_dist = torch.mean(distances)
+            std_dist = torch.std(distances)
+
+            upper_bound = mean_dist + threshold * std_dist
+            lower_bound = mean_dist - threshold * std_dist
+
+            # Adjust outliers in each valid frame
+            for t in valid_frames:
+                current_parent = joints_world_coco[t, parent_idx]
+                current_child = joints_world_coco[t, joint_idx]
+                dist = torch.norm(current_child - current_parent)
+
+                if dist < lower_bound or dist > upper_bound:
+                    direction = current_child - current_parent
+                    direction_normalized = direction / (dist + 1e-7)
+                    adjusted_child = current_parent + direction_normalized * mean_dist
+                    joints_world_coco[t, joint_idx] = adjusted_child
+
+        return joints_world, joints_world_coco
 
     def __getitem__(self, index):
         take_uid = self.valid_take_uids[index]
@@ -286,7 +590,11 @@ class Dataset_EgoExo(Dataset):
             ),
         )
         take_name = camera_json["metadata"]["take_name"]
-
+        gt_ground_height = (
+            self.gt_ground_height[take_uid]
+            if take_uid in self.gt_ground_height
+            else 0.0
+        )
         if self.use_pseudo and take_uid in self.pseudo_annotated_takes:
             pose_json = json.load(
                 open(os.path.join(self.root_poses, "automatic", take_uid + ".json")),
@@ -311,58 +619,169 @@ class Dataset_EgoExo(Dataset):
         pose = ann
         aria_trajectory = traj
 
-        capture_frames = list(pose.keys())
+        capture_frames = find_numerical_key_in_dict(pose)
+        # capture_frames =  list(pose.keys())
+        # Create continuous frame sequence from min to max frame keys
+        min_frame = min(capture_frames)
+        max_frame = max(capture_frames)
+        continuous_frames = list(range(min_frame, max_frame + 1))
 
-        if self.split == "train":
-            frames_idx = random.randint(self.slice_window, len(capture_frames) - 1)
-            frames_window = capture_frames[frames_idx - self.slice_window : frames_idx]
-        else:
-            frames_window = capture_frames
+        seq_len = len(continuous_frames)
 
+        # Prepare data for interpolation
+        frame_keys_list = list(capture_frames)
         skeletons_window = []
         flags_window = []
-        t_window = []
         aria_window = []
 
-        for frame in frames_window:
-            t_window.append(int(frame))
-            skeleton = pose[frame][0]["annotation3D"]
+        for frame in frame_keys_list:
+            skeleton = pose[str(frame)][0]["annotation3D"]
             skeleton, flags = self.parse_skeleton(skeleton)
             skeletons_window.append(skeleton)
             flags_window.append(flags)
-            aria_window.append(aria_trajectory[frame])
+            aria_window.append(aria_trajectory[str(frame)])
 
-        skeletons_window = torch.Tensor(np.array(skeletons_window))
-        flags_window = torch.Tensor(np.array(flags_window))
-        aria_window = torch.Tensor(np.array(aria_window))
-        head_offset = aria_window.unsqueeze(1).repeat(1, 17, 1)
-        condition = aria_window
-        task = torch.tensor(self.takes_metadata[take_uid]["task_id"])
-        take_name = self.takes_metadata[take_uid]["root_dir"]
+        skeletons_window = torch.Tensor(np.array(skeletons_window))  # T, 17, 3
+        flags_window = torch.Tensor(np.array(flags_window))  # T, 17
+        aria_window = torch.Tensor(np.array(aria_window))  # T, 3
 
-        return {
-            "cond": condition,
-            "gt": skeletons_window,
-            "visible": flags_window,
-            "t": frames_window,
-            "aria": aria_window,
-            "offset": head_offset,
-            "task": task,
-            "take_name": take_name,
-            "take_uid": take_uid,
-        }
+        # Process original keyframes
+        joints_world_orig, visible_mask_orig = self._process_joints(
+            skeletons_window,
+            flags_window.float(),
+            ground_height=float(gt_ground_height),
+            return_smplh_joints=True,
+            num_joints=22,
+            debug_vis=False,
+        )
+        joints_world_orig_coco, _ = self._process_joints(
+            skeletons_window,
+            flags_window.float(),
+            ground_height=float(gt_ground_height),
+            return_smplh_joints=False,
+            num_joints=17,
+            debug_vis=False,
+        )
+
+        # Import scipy interpolation
+        from scipy.interpolate import make_interp_spline
+
+        # Create interpolation functions for each joint dimension
+        num_joints = joints_world_orig.shape[1]
+
+        # Interpolate world coordinates
+        joints_world = torch.full((seq_len, num_joints, 3), float("nan"))
+        joints_world_coco = torch.full((seq_len, 17, 3), float("nan"))
+
+        for j in range(num_joints):
+            for d in range(3):
+                # Get joint data and corresponding frames
+                joint_data = joints_world_orig[:, j, d].numpy(force=True)
+                valid_mask = ~np.isnan(joint_data)
+                valid_frames = np.array(frame_keys_list)[valid_mask]
+                valid_data = joint_data[valid_mask]
+                if len(valid_frames) == 0:
+                    # If no valid frames, fill with NaN
+                    continue  # do nothing as the initial value is NaN.
+                elif len(valid_frames) >= 4:  # Need at least 4 points for cubic spline
+                    # Create B-spline interpolation
+                    bspl = make_interp_spline(valid_frames, valid_data, k=3)
+                    # Evaluate spline at all frames
+                    interpolated = bspl(continuous_frames)
+                else:
+                    # Fall back to linear interpolation for too few points
+                    interpolated = np.interp(
+                        continuous_frames,
+                        valid_frames,
+                        valid_data,
+                    )
+
+                joints_world[:, j, d] = torch.from_numpy(interpolated)
+
+        for j in range(17):
+            for d in range(3):
+                # Get joint data and corresponding frames
+                joint_data = joints_world_orig_coco[:, j, d].numpy(force=True)
+                valid_mask = ~np.isnan(joint_data)
+                valid_frames = np.array(frame_keys_list)[valid_mask]
+                valid_data = joint_data[valid_mask]
+                if len(valid_frames) == 0:
+                    # If no valid frames, fill with NaN
+                    continue
+                elif len(valid_frames) >= 4:  # Need at least 4 points for cubic spline
+                    # Create B-spline interpolation
+                    bspl = make_interp_spline(valid_frames, valid_data, k=3)
+                    # Evaluate spline at all frames
+                    interpolated = bspl(continuous_frames)
+                else:
+                    # Fall back to linear interpolation for too few points
+                    interpolated = np.interp(
+                        continuous_frames,
+                        valid_frames,
+                        valid_data,
+                    )
+
+                joints_world_coco[:, j, d] = torch.from_numpy(interpolated)
+
+        # joints_world, joints_world_coco = self.apply_kinematic_constraints(
+        joints_world, joints_world_coco = self.apply_kinematic_constraints_v2(
+            joints_world=joints_world,
+            joints_world_coco=joints_world_coco,
+        )
+        # Create visibility mask based on non-nan values in world coordinates
+        visible_mask = ~torch.isnan(joints_world).any(
+            dim=-1,
+        )  # shape: (seq_len, num_joints)
+        visible_mask_orig_coco = ~torch.isnan(joints_world_coco).any(
+            dim=-1,
+        )  # shape: (seq_len, num_joints)
+        take_name = f"name_{take_name}_uid_{take_uid}_t{continuous_frames[0]}_{continuous_frames[-1]}"
+
+        from egoallo.data.dataclass import EgoTrainingData
+
+        ret = EgoTrainingData(
+            joints_wrt_world=joints_world,  # Already computed above
+            joints_wrt_cpf=torch.zeros_like(joints_world),  # Same shape as joints_world
+            T_world_root=torch.zeros(
+                (seq_len, 7),
+            ),  # T x 7 for translation + quaternion
+            T_world_cpf=torch.zeros((seq_len, 7)),  # T x 7 for translation + quaternion
+            visible_joints_mask=visible_mask,  # Already computed above
+            mask=torch.ones(seq_len, dtype=torch.bool),  # T
+            betas=torch.zeros((1, 16)),  # 1 x 16 for SMPL betas
+            body_quats=torch.zeros(
+                (seq_len, 21, 4),
+            ),  # T x 21 x 4 for body joint rotations
+            hand_quats=torch.zeros(
+                (seq_len, 30, 4),
+            ),  # T x 30 x 4 for hand joint rotations
+            contacts=torch.zeros((seq_len, 22)),  # T x 22 for contact states
+            height_from_floor=torch.full((seq_len, 1), gt_ground_height),  # T x 1
+            metadata=EgoTrainingData.MetaData(  # raw data.
+                take_name=(take_name,),
+                frame_keys=tuple(continuous_frames),  # Convert to tuple of ints
+                stage="raw",
+                scope="test",
+                dataset_type="AriaDataset",
+                aux_joints_wrt_world_placeholder=joints_world_coco,  # Placeholder for COCO joints
+                aux_visible_joints_mask_placeholder=visible_mask_orig_coco,  # Placeholder for COCO visibility
+            ),
+        )
+        ret = ret.preprocess()
+
+        return ret
 
     def __len__(self):
         return len(self.valid_take_uids)
 
 
 class Dataset_EgoExo_inference(Dataset):
-    def __init__(self, opt):
+    def __init__(self, config: Dict[str, Any]):
         super(Dataset_EgoExo_inference, self).__init__()
 
-        self.root = opt["root"]
+        self.root = config["dataset_path"]
         self.root_takes = os.path.join(self.root, "takes")
-        self.split = opt["split"]  # val or test
+        self.split = config["split"]  # val or test
         self.camera_poses = os.path.join(
             self.root,
             "annotations",
@@ -370,12 +789,12 @@ class Dataset_EgoExo_inference(Dataset):
             self.split,
             "camera_pose",
         )
-        self.use_pseudo = opt["use_pseudo"]
-        self.coord = opt["coord"]
+        self.use_pseudo = config["use_pseudo"]
+        self.coord = config["coord"]
 
         self.metadata = json.load(open(os.path.join(self.root, "takes.json")))
 
-        self.dummy_json = json.load(open(opt["dummy_json_path"]))
+        self.dummy_json = json.load(open(config["dummy_json_path"]))
         self.takes_uids = [*self.dummy_json]
         self.takes_metadata = {}
 
