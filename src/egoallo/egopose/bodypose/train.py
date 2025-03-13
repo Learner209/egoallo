@@ -151,8 +151,8 @@ def test(
     for task_num in range(0, 10):
         task_ids = [i for i, j in enumerate(tasks) if j == str(task_num)]
         if len(task_ids) > 0:
-            pos_ = torch.stack(pos_error)[task_ids].cpu().numpy()
-            vel_ = torch.stack(vel_error)[task_ids].cpu().numpy()
+            pos_ = torch.stack(pos_error)[task_ids].cpu().numpy(force=True)
+            vel_ = torch.stack(vel_error)[task_ids].cpu().numpy(force=True)
             logger.info(
                 "<epoch:{:3d}, iter:{:8,d}, Task: {}, Samples: {}, MPJPE[cm]: {:<.5f}, MPJVE [m/s]: {:<.5f}\n".format(
                     epoch,

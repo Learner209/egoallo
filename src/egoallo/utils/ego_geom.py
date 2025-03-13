@@ -107,7 +107,7 @@ def get_head_vel(head_pose, dt=1 / 30):
         v = (next_qpos[:3] - curr_qpos[:3]) / dt
         # multiply world-frame diff by current head quat to get the velocity in the head frame.
         #! 'heading' option is applied, so x,y components are erased out, only consider rotation around z-axis.
-        v = transform_vec_t(v.data.cpu().numpy(), curr_qpos[3:7], "heading")
+        v = transform_vec_t(v.data.cpu().numpy(force=True), curr_qpos[3:7], "heading")
 
         qrel = transforms.quaternion_multiply(
             next_qpos[3:7],
@@ -304,7 +304,7 @@ def rotate_at_frame_smplh(root_pose, cano_t_idx=0):
     ------
     >>> root_pose = torch.rand(2, 10, 7)
     >>> new_glob_X, new_glob_Q, yrot = rotate_at_frame_smplh(root_pose, cano_t_idx=0)
-    >>> new_glob_X.cpu().numpy().shape, new_glob_Q.cpu().numpy().shape, yrot.cpu().numpy().shape
+    >>> new_glob_X.cpu().numpy(force=True).shape, new_glob_Q.cpu().numpy(force=True).shape, yrot.cpu().numpy(force=True).shape
     ((2, 10, 3), (2, 10, 4), (2, 4))
 
     """
@@ -406,8 +406,8 @@ def batch_align_to_reference_pose(to_align_pose, reference_pose):
         aligned_seq_rot_mat,
     )  # B x T X 4
 
-    aligned_seq_rot_mat = aligned_seq_rot_mat.data.cpu().numpy()
-    aligned_seq_rot_quat_wxyz = aligned_seq_rot_quat_wxyz.data.cpu().numpy()
+    aligned_seq_rot_mat = aligned_seq_rot_mat.data.cpu().numpy(force=True)
+    aligned_seq_rot_quat_wxyz = aligned_seq_rot_quat_wxyz.data.cpu().numpy(force=True)
 
     seq_to_align_trans = torch.from_numpy(to_align_trans).float()[
         ...,
@@ -417,13 +417,13 @@ def batch_align_to_reference_pose(to_align_pose, reference_pose):
         ...,
         0,
     ]  # B x T X 3
-    aligned_seq_trans = aligned_seq_trans.data.cpu().numpy()
+    aligned_seq_trans = aligned_seq_trans.data.cpu().numpy(force=True)
 
     # Make initial x,y,z aligned
     move_to_ref_trans = ref_trans[0:1, :] - aligned_seq_trans[:, 0:1, :]  # B x 1 x 3
     aligned_seq_trans = aligned_seq_trans + move_to_ref_trans  # B x T x 3
 
-    to_align2ref_rot_seq = to_align2ref_rot_seq.data.cpu().numpy()
+    to_align2ref_rot_seq = to_align2ref_rot_seq.data.cpu().numpy(force=True)
 
     return (
         aligned_seq_trans,
@@ -471,8 +471,8 @@ def align_to_reference_pose(to_align_pose, reference_pose):
     )  # T X 3 X 3
     aligned_seq_rot_quat_wxyz = transforms.matrix_to_quaternion(aligned_seq_rot_mat)
 
-    aligned_seq_rot_mat = aligned_seq_rot_mat.data.cpu().numpy()
-    aligned_seq_rot_quat_wxyz = aligned_seq_rot_quat_wxyz.data.cpu().numpy()
+    aligned_seq_rot_mat = aligned_seq_rot_mat.data.cpu().numpy(force=True)
+    aligned_seq_rot_quat_wxyz = aligned_seq_rot_quat_wxyz.data.cpu().numpy(force=True)
 
     seq_to_align_trans = torch.from_numpy(to_align_trans).float()[
         :,
@@ -484,7 +484,7 @@ def align_to_reference_pose(to_align_pose, reference_pose):
         :,
         0,
     ]  # T X 3
-    aligned_seq_trans = aligned_seq_trans.data.cpu().numpy()
+    aligned_seq_trans = aligned_seq_trans.data.cpu().numpy(force=True)
 
     # Make initial x,y,z aligned
     move_to_gt_trans = ref_trans[0:1, :] - aligned_seq_trans[0:1, :]

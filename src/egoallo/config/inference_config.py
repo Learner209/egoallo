@@ -22,7 +22,7 @@ class InferenceConfig:
     """Output directory for the results. It can be separated from traj_root."""
 
     checkpoint_dir: Path = Path("experiments/nov8_v1/v1/checkpoint-10000")
-    smplh_npz_path: Path = Path("./data/smplh/neutral/model.npz")
+    smplh_model_path: Path = Path("assets/smpl_based_model/smplh/SMPLH_NEUTRAL.pkl")
 
     glasses_x_angle_offset: float = 0.0
     """Rotate the CPF poses by some X angle."""

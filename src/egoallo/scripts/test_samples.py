@@ -6,7 +6,9 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 import train_motion_prior
 import subprocess
-from egoallo.fncsmpl import SmplhModel
+
+# from egoallo.fncsmpl import SmplhModel
+from egoallo.fncsmpl_library import SmplhModel
 import os
 
 
@@ -45,7 +47,7 @@ def temp_dataset(tmp_path: Path = Path("./assets/dummy_test/data/amass_rich_hps"
 @pytest.fixture
 def mock_body_model():
     model_path = Path("./assets/dummy_test/smplh_model/male/model.npz")
-    return SmplhModel.load(model_path)
+    return SmplhModel.load(model_path, use_pca=False)
 
 
 def test_run_training_real_data(tmp_path, mock_accelerator, mock_wandb, temp_dataset):

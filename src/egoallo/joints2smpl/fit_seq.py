@@ -15,7 +15,9 @@ import torch
 import trimesh
 import typeguard
 import tyro
-from egoallo import fncsmpl
+
+# from egoallo import fncsmpl
+from egoallo import fncsmpl_library as fncsmpl
 from egoallo.data.dataclass import EgoTrainingData
 from egoallo.joints2smpl import joints2smpl_config
 from egoallo.joints2smpl import smplify
@@ -152,7 +154,7 @@ def main(opt: Joints2SmplFittingConfig):
             return_verts=True,
         )
         mesh_p = trimesh.Trimesh(
-            vertices=outputp.vertices.detach().cpu().numpy().squeeze(),
+            vertices=outputp.vertices.detach().cpu().numpy(force=True).squeeze(),
             faces=smplmodel.faces,
             process=False,
         )
@@ -160,13 +162,13 @@ def main(opt: Joints2SmplFittingConfig):
 
         # save the pkl
         param = {}
-        param["beta"] = new_opt_betas.detach().cpu().numpy()
-        param["pose"] = new_opt_pose.detach().cpu().numpy()
-        param["cam"] = new_opt_cam_t.detach().cpu().numpy()
+        param["beta"] = new_opt_betas.detach().cpu().numpy(force=True)
+        param["pose"] = new_opt_pose.detach().cpu().numpy(force=True)
+        param["cam"] = new_opt_cam_t.detach().cpu().numpy(force=True)
 
         # save the root position
         # shape of keypoints_3d is torch.Size([1, 22, 3]) and root is the first one
-        root_position = keypoints_3d[0, 0, :].detach().cpu().numpy()
+        root_position = keypoints_3d[0, 0, :].detach().cpu().numpy(force=True)
         print(f"root at {root_position}, shape of keypoints_3d is {keypoints_3d.shape}")
         param["root"] = root_position
 
@@ -269,7 +271,7 @@ def joints2smpl_fit_seq(
             return_verts=True,
         )
         mesh_p = trimesh.Trimesh(
-            vertices=outputp.vertices.detach().cpu().numpy().squeeze(),
+            vertices=outputp.vertices.detach().cpu().numpy(force=True).squeeze(),
             faces=smplmodel.faces,
             process=False,
         )

@@ -878,22 +878,22 @@ class EgoPoseDataPreparation:
             # gen_full_body_vis(opt_pred_smplh_verts[0], opt_pred_smplh_faces, dest_mesh_vis_folder, seq_name, vis_gt=False)
 
             opt_this_take_smplh_anno_3d.append(
-                opt_pred_smplh_jnts[0, 0].detach().cpu().numpy(),
+                opt_pred_smplh_jnts[0, 0].detach().cpu().numpy(force=True),
             )
             opt_this_take_smplh_verts.append(
-                opt_pred_smplh_jnts[0, 0].detach().cpu().numpy(),
+                opt_pred_smplh_jnts[0, 0].detach().cpu().numpy(force=True),
             )
             opt_this_take_smplh_faces.append(
-                opt_pred_smplh_faces.detach().cpu().numpy(),
+                opt_pred_smplh_faces.detach().cpu().numpy(force=True),
             )
             opt_this_take_smplh_local_aa_rep.append(
-                opt_local_aa_rep[0, 0].detach().cpu().numpy(),
+                opt_local_aa_rep[0, 0].detach().cpu().numpy(force=True),
             )
             opt_this_take_smplh_root_trans.append(
-                this_frame_hip_trans[0, 0].detach().cpu().numpy(),
+                this_frame_hip_trans[0, 0].detach().cpu().numpy(force=True),
             )
             opt_this_take_smplh_root_rot.append(
-                this_frame_pelvis_origin.detach().cpu().numpy(),
+                this_frame_pelvis_origin.detach().cpu().numpy(force=True),
             )
 
             if VIS_W_MUJOCO:
@@ -915,7 +915,11 @@ class EgoPoseDataPreparation:
                     axis=1,
                 )  # T x (24*3)
                 smpl_global_trans = (
-                    this_frame_hip_trans[0].reshape(T, -1).detach().cpu().numpy()
+                    this_frame_hip_trans[0]
+                    .reshape(T, -1)
+                    .detach()
+                    .cpu()
+                    .numpy(force=True)
                 )  # T x 3
 
                 smpl_m_viewer.set_smpl_pose(

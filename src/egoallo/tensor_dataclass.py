@@ -2,11 +2,12 @@ import dataclasses
 from typing import Any
 from typing import Callable
 from typing import Self
+from typing import TypeVar
 
 import torch
 
 
-@dataclass()
+@dataclasses.dataclass()
 class TensorDataclass:
     """A lighter version of nerfstudio's TensorDataclass:
     https://github.com/nerfstudio-project/nerfstudio/blob/main/nerfstudio/utils/tensor_dataclass.py

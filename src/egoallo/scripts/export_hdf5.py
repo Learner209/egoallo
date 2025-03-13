@@ -8,7 +8,9 @@ from pathlib import Path
 import h5py
 import torch.cuda
 import tyro
-from egoallo import fncsmpl
+
+# from egoallo import fncsmpl
+from egoallo import fncsmpl_library as fncsmpl
 from egoallo import network
 from egoallo import training_utils
 from egoallo.data.dataclass import EgoTrainingData
@@ -17,13 +19,13 @@ from egoallo.data.dataclass import EgoTrainingData
 
 
 def main(
-    smplh_npz_path: Path = Path("./assets/smpl_based_model/smplh/neutral/model.npz"),
+    smplh_model_path: Path = Path("assets/smpl_based_model/smplh/SMPLH_NEUTRAL.pkl"),
     data_npz_dirs: list[Path] = [Path("")],
     output_file: Path = Path(""),
     output_list_file: Path = Path(""),
     include_hands: bool = True,
 ) -> None:
-    body_model = fncsmpl.SmplhModel.load(smplh_npz_path)
+    body_model = fncsmpl.SmplhModel.load(smplh_model_path, use_pca=False)
 
     # training_utils.ipdb_safety_net()
     assert torch.cuda.is_available()

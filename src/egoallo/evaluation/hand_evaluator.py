@@ -12,7 +12,8 @@ import numpy as np
 import torch
 import typeguard
 import yaml
-from egoallo import fncsmpl
+
+# from egoallo import fncsmpl
 from egoallo.constants import EGOEXO_NAMES_LEFT
 from egoallo.constants import EGOEXO_NAMES_RIGHT
 from egoallo.constants import VERTEX_IDS
@@ -47,10 +48,6 @@ class HandEvaluator(BaseEvaluator):
         super().__init__(body_npz_path, device)
         self.egoexo_dir = Path(egoexo_dir)
         self.egoexo_reorg_dir = Path(egoexo_reorg_dir)
-
-    def _load_body_model(self, model_path: Path) -> torch.nn.Module:
-        """Load the SMPL body model."""
-        return fncsmpl.SmplhModel.load(model_path).to(self.device)
 
     @staticmethod
     def get_mano_from_openpose_indices(include_tips: bool = True) -> FloatArray:

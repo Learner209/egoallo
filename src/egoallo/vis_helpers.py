@@ -15,7 +15,9 @@ from jaxtyping import jaxtyped
 from plyfile import PlyData
 from torch import Tensor
 
-from . import fncsmpl
+from . import fncsmpl_library as fncsmpl
+
+# from . import fncsmpl
 from . import network
 from .hand_detection_structs import CorrespondedAriaHandWristPoseDetections
 from .hand_detection_structs import CorrespondedHamerDetections

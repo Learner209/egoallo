@@ -12,11 +12,13 @@ from tqdm import tqdm
 import multiprocessing
 import subprocess
 import os
+from typing import Union, Dict
 
 if TYPE_CHECKING:
     from egoallo.types import DenoiseTrajType
 
-from egoallo import fncsmpl
+# from egoallo import fncsmpl
+from egoallo import fncsmpl_library as fncsmpl
 from egoallo.config import CONFIG_FILE, make_cfg
 from egoallo.config.inference.inference_defaults import InferenceConfig
 from egoallo.data import make_batch_collator, build_dataset
@@ -169,9 +171,6 @@ class TestRunner:
         )
         self.denoiser = self.denoiser.to(self.device)
 
-        self.body_model = fncsmpl.SmplhModel.load(runtime_config.smplh_npz_path).to(
-            self.device,
-        )
         # ! Override runtime config with inference config values
         for field in dataclasses.fields(type(self.inference_config)):
             if hasattr(runtime_config, field.name):
@@ -196,6 +195,13 @@ class TestRunner:
         runtime_config.fps_aug = False
         # runtime_config.dataset_slice_strategy = "random_uniform_len"
 
+        self.body_model = fncsmpl.SmplhModel.load(
+            runtime_config.smplh_model_path,
+            use_pca=False,
+            batch_size=ds_init_config.batch_size * runtime_config.subseq_len,
+        ).to(
+            self.device,
+        )
         self.dataloader = torch.utils.data.DataLoader(
             dataset=build_dataset(cfg=runtime_config)(config=ds_init_config),
             batch_size=1,
@@ -318,111 +324,6 @@ class TestRunner:
                     if isinstance(value, torch.Tensor)
                     else value,
                 )
-
-            # metrics = denoised_trajs._compute_metrics(
-            #     gt_trajs, body_model=self.body_model, device=self.device)
-            # metrics = EgoAlloEvaluationMetrics(**metrics)
-
-            # TODO: this is previous implementation of visualization routine, which would cause GPU OOM.
-            # if self.runtime_config.denoising.denoising_mode == "joints_only":
-            #     # import ipdb; ipdb.set_trace()
-            #     denoised_traj = denoised_traj[seq_idx]
-            #     # joints2smpl_fit_seq(Joints2SmplFittingConfig(), self.body_model, denoised_traj.joints.shape[0], denoised_traj.joints.cpu(), output_dir)
-            #
-            #     fit_seq_data: "EgoTrainingData" = joints2smpl_fit_seq(
-            #         Joints2SmplFittingConfig(),
-            #         self.body_model,
-            #         gt_traj.joints.shape[0],
-            #         gt_traj.joints.cpu(),
-            #         output_dir,
-            #     )
-            #     # FIXME: this is a temporary fix to visualize the fit_seq_traj, set denoising mode to absolute to use from_ego_data function from `AbsoluteDenoiseTraj`.
-            #     _ = self.runtime_config.denoising.denoising_mode
-            #     self.runtime_config.denoising.denoising_mode = "absolute"
-            #     fit_seq_traj = self.runtime_config.denoising.from_ego_data(
-            #         fit_seq_data, include_hands=True
-            #     )
-            #     self.runtime_config.denoising.denoising_mode = _
-
-            #     fit_seq_traj = fit_seq_traj.map(lambda x: x.to(self.device))
-            #     self.body_model = self.body_model.to(self.device)
-
-            #     output_path = Path("./exp/debug_frame_rate_diff/")
-            #     output_path.mkdir(parents=True, exist_ok=True)
-
-            #     EgoTrainingData.visualize_ego_training_data(
-            #         # fit_seq_traj,
-            #         gt_traj,
-            #         self.body_model,
-            #         output_path=str(output_path / "fit_seq_traj.mp4"),
-            #     )
-
-            # TODO: this is previous implementation of visualization routine, which would cause GPU OOM.
-            # Save visualizations if requested
-            # if (
-            #     self.inference_config.visualize_traj
-            #     and self.runtime_config.denoising.denoising_mode != "joints_only"
-            # ):
-            #     logger.info(f"this take name is: {batch.take_name}")
-            #     timestamp = time.strftime("%Y%m%d-%H%M%S")
-
-            #     # Adaptive sampling if sequence is longer than 1500 frames
-            #     denoised_traj = denoised_traj[seq_idx]
-            #     if len(denoised_traj.t_world_root) > 1500:
-            #         # Calculate stride to get under 1500 frames
-            #         stride = len(denoised_traj.t_world_root) // 1499 + 1
-            #         denoised_traj = denoised_traj[::stride]
-            #     # Run visualization in a separate process
-            #     import multiprocessing
-            #     # TODO: this is a temporary fix to avoid OOM of GPU memory as the OpenGL python bindings context would eat up GPU MeM too fast.
-
-            #     ()
-            #     vis_process = multiprocessing.Process(
-            #         target=visualizer.save_visualization,
-            #         args=(
-            #             gt_traj[seq_idx],
-            #             denoised_traj,
-            #             self.body_model,
-            #             output_dir,
-            #             output_name
-            #             if output_name
-            #             else f"sequence_{batch_idx}_{seq_idx}.mp4",
-            #             save_gt_vis,
-            #         ),
-            #     )
-            #     vis_process.start()
-            #     vis_process.join()  # Wait for visualization to complete
-
-            #     # Construct paths that would have been returned
-            #     gt_path = (
-            #         output_dir
-            #         / f"gt_traj_{output_name if output_name else f'sequence_{batch_idx}_{seq_idx}.mp4'}"
-            #     )
-            #     inferred_path = (
-            #         output_dir
-            #         / f"inferred_traj_{output_name if output_name else f'sequence_{batch_idx}_{seq_idx}.mp4'}"
-            #     )
-
-            #     logger.info(f"pred_path: {inferred_path}")
-            #     if save_gt_vis:
-            #         logger.info(f"gt_path: {gt_path}")
-
-            # Save sequence data
-            # assert (
-            #     output_name is not None
-            #     and output_name.endswith(".pt")
-            #     or output_name is None
-            # )
-            # filename = (
-            #     output_name if output_name else f"sequence_{batch_idx}_{seq_idx}.pt"
-            # )
-            # output_path = output_dir / filename
-            # if self.runtime_config.denoising.denoising_mode != "joints_only":
-            #     self._save_sequence_data(gt_traj, denoised_traj, seq_idx, output_path)
-
-        # processor.save_sequence(gt_trajs, output_dir / f"gt_traj_{output_name}.pt")
-        # processor.save_sequence(denoised_trajs, output_dir / f"denoised_traj_{output_name}.pt")
-
         return gt_trajs, denoised_trajs
 
     def _compute_metrics(
@@ -432,7 +333,7 @@ class TestRunner:
         """Compute evaluation metrics on processed sequences."""
         # try:
         evaluator = BodyEvaluator(
-            body_model_path=self.runtime_config.smplh_npz_path,
+            body_model_path=self.runtime_config.smplh_model_path,
             device=self.device,
         )
 
@@ -475,6 +376,8 @@ class TestRunner:
                 desc="Enumerating test loader",
                 ascii=" >=",
             ):
+                if batch_idx > 2:
+                    break
                 # Add debug iteration limit check
                 if (
                     self.inference_config.debug_max_iters
@@ -505,13 +408,21 @@ class TestRunner:
                 identifiers.append(batch.metadata.take_name[0][0])
 
                 torch.cuda.empty_cache()
+
             # Prepare arguments for parallel metric computation
+            # breakpoint()
             metric_args = [
                 (
                     {
-                        "gt_traj": gt_traj,
-                        "est_traj": est_traj,
-                        "body_model": self.body_model.to(torch.device("cpu")),
+                        "gt_traj": gt_traj.map(lambda x: x.detach().cpu()),
+                        "est_traj": est_traj.map(lambda x: x.detach().cpu()),
+                        "body_model": fncsmpl.SmplhModel.load(
+                            self.runtime_config.smplh_model_path,
+                            use_pca=False,
+                            batch_size=est_traj.betas.shape[0]
+                            * est_traj.betas.shape[1],
+                        ).to(torch.device("cpu")),
+                        # "body_model": self.body_model.to(torch.device("cpu")),
                         "device": torch.device("cpu"),
                     },
                 )
@@ -540,9 +451,8 @@ class TestRunner:
             # Calculate mean and std for each metric
             final_metrics = {}
             for metric_name, values in aggregated_metrics.items():
-                values_tensor = torch.FloatTensor(values)
-                final_metrics[metric_name] = values_tensor.mean()
-                final_metrics[f"{metric_name}_std"] = values_tensor.std()
+                # values_tensor = torch.FloatTensor(values)
+                final_metrics[metric_name] = torch.FloatTensor(values)
 
             # Create evaluation metrics object with aggregated results
             metrics = EgoAlloEvaluationMetrics(**final_metrics)
@@ -609,7 +519,7 @@ class TestRunner:
                         "--trajectory-type",
                         denoise_traj_type,
                         "--smplh-model-path",
-                        str(self.runtime_config.smplh_npz_path),
+                        str(self.runtime_config.smplh_model_path),
                         "--output-dir",
                         str(temp_output_dir / take_name),
                         "--dataset-type",

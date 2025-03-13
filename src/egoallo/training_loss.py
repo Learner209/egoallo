@@ -2,7 +2,9 @@
 
 import dataclasses
 from typing import Literal
+from typing import Union, Tuple
 from typing import TYPE_CHECKING
+from jaxtyping import Float, Bool, Int
 
 import torch.utils.data
 from egoallo.config import CONFIG_FILE
@@ -383,8 +385,7 @@ class TrainingLossComputer:
                         train_batch.mask,
                         weight_t,
                         torch.sum(train_batch.mask),
-                    )
-                    * 2.0,
+                    ),
                     "foot_skating": foot_skating_loss,
                     "velocity": x_0_pred._weight_and_mask_loss(
                         ((joint_velocities - gt_velocities) ** 2).reshape(

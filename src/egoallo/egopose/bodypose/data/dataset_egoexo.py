@@ -383,7 +383,7 @@ class Dataset_EgoExo(Dataset):
                 valid_mask = ~torch.isnan(joints[:, j]).any(dim=1) & ~torch.isnan(
                     joints[:, parent_idx],
                 ).any(dim=1)
-                valid_ts = torch.where(valid_mask)[0].cpu().numpy()
+                valid_ts = torch.where(valid_mask)[0].cpu().numpy(force=True)
 
                 # Calculate global statistics as fallback
                 if len(valid_ts) > 1:
@@ -449,7 +449,7 @@ class Dataset_EgoExo(Dataset):
                     # Savitzky-Golay smoothing for joint trajectories
                     try:
                         smoothed = savgol_filter(
-                            joints[valid_ts, j].cpu().numpy(),
+                            joints[valid_ts, j].cpu().numpy(force=True),
                             window_length=window_size,
                             polyorder=2,
                             axis=0,

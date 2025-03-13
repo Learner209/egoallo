@@ -327,13 +327,13 @@ class EgoExoDataset(torch.utils.data.Dataset[EgoTrainingData]):
             ps.init()
             # Visualize first frame joints in world coordinates
             draw_coco_kinematic_tree(
-                joints_world_tensor[0].detach().cpu().numpy(),
+                joints_world_tensor[0].detach().cpu().numpy(force=True),
                 coco_cfg=CFG.plotly.coco_kinematic_tree,
                 curve_network_id="world_joints",
             )
             # Visualize first frame joints in camera coordinates
             draw_coco_kinematic_tree(
-                joints_cam_tensor[0].detach().cpu().numpy(),
+                joints_cam_tensor[0].detach().cpu().numpy(force=True),
                 coco_cfg=CFG.plotly.coco_kinematic_tree,
                 curve_network_id="camera_joints",
             )

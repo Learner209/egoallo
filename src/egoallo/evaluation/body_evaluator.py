@@ -5,7 +5,8 @@ from typing import Optional
 import numpy as np
 import torch
 import typeguard
-from egoallo import fncsmpl
+
+# from egoallo import fncsmpl
 from egoallo.config.train.train_config import EgoAlloTrainConfig
 from egoallo.constants import FOOT_HEIGHT_THRESHOLDS
 from egoallo.constants import FOOT_INDICES
@@ -30,10 +31,6 @@ logger = setup_logger(output="logs/evaluation", name=__name__, level=logging.INF
 
 class BodyEvaluator(BaseEvaluator):
     """Evaluates body pose metrics between predicted and ground truth data."""
-
-    def _load_body_model(self, model_path: Path) -> fncsmpl.SmplhModel:
-        """Load the SMPL body model."""
-        return fncsmpl.SmplhModel.load(model_path).to(self.device)
 
     @classmethod
     @jaxtyped(typechecker=typeguard.typechecked)
@@ -76,7 +73,7 @@ class BodyEvaluator(BaseEvaluator):
             * 1000.0
         )  # Convert to mm
 
-        return fs_per_sample.cpu().numpy()
+        return fs_per_sample.cpu().numpy(force=True)
 
     @classmethod
     @jaxtyped(typechecker=typeguard.typechecked)
@@ -104,7 +101,7 @@ class BodyEvaluator(BaseEvaluator):
         # Calculate ratio of frames with at least one foot contact
         contact_ratio = torch.mean((num_contacts_per_frame > 0).float(), dim=-1)  # [N]
 
-        return contact_ratio.cpu().numpy()
+        return contact_ratio.cpu().numpy(force=True)
 
     @classmethod
     @jaxtyped(typechecker=typeguard.typechecked)
@@ -132,7 +129,7 @@ class BodyEvaluator(BaseEvaluator):
         )
         mean_errors = torch.mean(errors, dim=-1)
 
-        return mean_errors.cpu().numpy()
+        return mean_errors.cpu().numpy(force=True)
 
     @classmethod
     def compute_head_trans(
@@ -149,7 +146,7 @@ class BodyEvaluator(BaseEvaluator):
         mean_errors = (
             torch.mean(torch.linalg.norm(errors, dim=-1), dim=-1) * 1000.0
         )  # Convert to mm
-        return mean_errors.cpu().numpy()
+        return mean_errors.cpu().numpy(force=True)
 
     @classmethod
     @jaxtyped(typechecker=typeguard.typechecked)
@@ -187,7 +184,7 @@ class BodyEvaluator(BaseEvaluator):
         pjpe = torch.linalg.norm(position_differences, dim=-1) * 1000.0  # [N, T, J+1]
         mpjpe = torch.mean(pjpe.reshape(num_samples, -1), dim=-1)  # [N]
 
-        return mpjpe.cpu().numpy()
+        return mpjpe.cpu().numpy(force=True)
 
     @classmethod
     @jaxtyped(typechecker=typeguard.typechecked)

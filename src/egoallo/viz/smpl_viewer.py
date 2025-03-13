@@ -9,15 +9,18 @@ import sys
 from pathlib import Path
 from typing import Optional
 from typing import TYPE_CHECKING
+from typing import Tuple
+from dataclasses import dataclass
 
 import numpy as np
 import torch
-from egoallo.fncsmpl import SE3
-from egoallo.fncsmpl import SmplhModel
-from egoallo.fncsmpl import SO3
-from egoallo.fncsmpl_extensions import get_T_world_cpf
+from egoallo.fncsmpl_library import SE3
+from egoallo.fncsmpl_library import SmplhModel
+from egoallo.fncsmpl_library import SO3
+from egoallo.fncsmpl_extensions_library import get_T_world_cpf
 from tqdm import tqdm
 from videoio import VideoWriter
+from egoallo.setup_logger import setup_logger
 
 
 from egoallo.fncsmpl import (
@@ -26,7 +29,7 @@ from egoallo.fncsmpl import (
 from egoallo.viz.utils import create_skeleton_point_cloud
 
 if TYPE_CHECKING:
-    from egoallo.fncsmpl import SmplhModel
+    from egoallo.fncsmpl_library import SmplhModel
     from egoallo.types import DenoiseTrajType
 
 
@@ -317,9 +320,9 @@ class SMPLViewer(BaseRenderer):
         for i in range(T_world_root.shape[0]):
             motion_sequence.append(
                 {
-                    "pose": pose[i].cpu().numpy(),
-                    "shape": traj.betas[0, :16].cpu().numpy(),
-                    "translation": T_world_root[i, 4:].cpu().numpy(),
+                    "pose": pose[i].cpu().numpy(force=True),
+                    "shape": traj.betas[0, :16].cpu().numpy(force=True),
+                    "translation": T_world_root[i, 4:].cpu().numpy(force=True),
                 },
             )
 
@@ -328,9 +331,15 @@ class SMPLViewer(BaseRenderer):
 
         if traj.metadata.dataset_type in ("AriaDataset", "EgoExoDataset"):
             seq_len = traj.metadata.aux_joints_wrt_world_placeholder.shape[1]
-            jnts = traj.metadata.aux_joints_wrt_world_placeholder[0, :, :].cpu().numpy()
+            jnts = (
+                traj.metadata.aux_joints_wrt_world_placeholder[0, :, :]
+                .cpu()
+                .numpy(force=True)
+            )
             vis_masks = (
-                traj.metadata.aux_visible_joints_mask_placeholder[0, :].cpu().numpy()
+                traj.metadata.aux_visible_joints_mask_placeholder[0, :]
+                .cpu()
+                .numpy(force=True)
                 if traj.metadata.aux_visible_joints_mask_placeholder is not None
                 else np.ones_like(jnts[..., 0], dtype=bool)
             )
@@ -340,9 +349,9 @@ class SMPLViewer(BaseRenderer):
             "VanillaAmassHdf5Dataset",
         ):
             seq_len = traj.joints_wrt_world.shape[0]
-            jnts = traj.joints_wrt_world.cpu().numpy()
+            jnts = traj.joints_wrt_world.cpu().numpy(force=True)
             vis_masks = (
-                traj.visible_joints_mask.cpu().numpy()
+                traj.visible_joints_mask.cpu().numpy(force=True)
                 if traj.visible_joints_mask is not None
                 else np.ones_like(jnts[..., 0], dtype=bool)
             )
@@ -515,7 +524,7 @@ class SMPLViewer(BaseRenderer):
 
         # Update shadow map position with higher elevation
         assert self.shadow_map is not None
-        smpl_translation = self.smpl_renderer.translation_params.cpu().numpy()
+        smpl_translation = self.smpl_renderer.translation_params.cpu().numpy(force=True)
         shadow_offset = -self.light.direction * 5  # Increased distance
         shadow_height_offset = np.array([0.0, 0.0, 2.0])  # Raise shadow camera
         self.shadow_map.camera.init_extrinsics(

@@ -73,6 +73,7 @@ def ipdb_safety_net():
     or (b) we encounter an uncaught exception. Helpful for bypassing minor errors,
     diagnosing problems, and rescuing unsaved models.
     """
+    ipdb = __import__("ipdb")
 
     # Open PDB on Ctrl+C
     def handler(sig, frame):

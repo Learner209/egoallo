@@ -7,7 +7,8 @@ import torch
 import tyro
 from pathlib import Path
 
-from egoallo import fncsmpl
+# from egoallo import fncsmpl
+from egoallo import fncsmpl_library as fncsmpl
 from egoallo.config.inference.inference_defaults import InferenceConfig
 from egoallo.data.dataclass import EgoTrainingData
 from egoallo.scripts.aria_inference import AriaInference
@@ -21,7 +22,7 @@ def visualize_saved_trajectory(
     trajectory_path: tuple[Path, ...],
     trajectory_type: DenoiseTrajTypeLiteral,
     dataset_type: DatasetType,
-    smplh_model_path: Path = Path("./data/smplh/neutral/model.npz"),
+    smplh_model_path: Path = Path("assets/smpl_based_model/smplh/SMPLH_NEUTRAL.pkl"),
     output_dir: Path = Path("./visualization_output"),
     device: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu"),
 ) -> None:
@@ -40,7 +41,7 @@ def visualize_saved_trajectory(
     traj_root = config.egoexo.traj_root
 
     # Load SMPL-H body model
-    body_model = fncsmpl.SmplhModel.load(smplh_model_path).to(device)
+    body_model = fncsmpl.SmplhModel.load(smplh_model_path, use_pca=False).to(device)
 
     # Generate output paths
     gt_path = output_dir / "gt_trajectory.mp4"
@@ -237,7 +238,7 @@ def main(
     trajectory_path: tuple[Path, ...],
     trajectory_type: DenoiseTrajTypeLiteral,
     dataset_type: DatasetType,
-    smplh_model_path: Path = Path("./data/smplh/neutral/model.npz"),
+    smplh_model_path: Path = Path("assets/smpl_based_model/smplh/SMPLH_NEUTRAL.pkl"),
     output_dir: Path = Path("./visualization_output"),
     device: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu"),
     debug: bool = False,

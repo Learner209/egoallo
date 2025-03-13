@@ -13,7 +13,9 @@ import numpy as np
 import torch
 import typeguard
 from egoallo.data.motion_processing import MotionProcessor
-from egoallo.fncsmpl import SmplhModel
+
+# from egoallo.fncsmpl import SmplhModel
+from egoallo.fncsmpl_library import SmplhModel
 from egoallo.transforms import SE3
 from egoallo.transforms import SO3
 from egoallo.utils.setup_logger import setup_logger
@@ -59,7 +61,7 @@ class RICHDataProcessor:
         for gender in ["male", "female", "neutral"]:
             model_path = self.smplh_model_dir / f"SMPLH_{gender.upper()}.pkl"
             # the rich data left/right hand annotations has 12 components.
-            self.body_models[gender] = SmplhModel.load(model_path, num_pca_comps=12).to(
+            self.body_models[gender] = SmplhModel.load(model_path, use_pca=False).to(
                 self.device,
             )
 
@@ -310,7 +312,7 @@ class RICHDataProcessor:
                 scene_name,
                 seq_name,
             )
-            hsc_params["s2m_dist_id"] = world_displacement.cpu().numpy()
+            hsc_params["s2m_dist_id"] = world_displacement.cpu().numpy(force=True)
 
         contact_data = {
             "vertex_contacts": hsc_params["contact"],
@@ -478,8 +480,8 @@ class RICHDataProcessor:
             all_contacts.append(joint_contacts)
 
         # Stack sequences
-        poses = torch.stack(all_poses).cpu().numpy()  # (N, 156)
-        trans = torch.cat(all_trans, dim=0).cpu().numpy()  # (N, 3)
+        poses = torch.stack(all_poses).cpu().numpy(force=True)  # (N, 156)
+        trans = torch.cat(all_trans, dim=0).cpu().numpy(force=True)  # (N, 3)
         joints = np.concatenate(all_joints, axis=0)  # (N, 22, 3)
         contacts = np.stack(all_contacts)  # (N, num_joints)
 
@@ -523,7 +525,7 @@ class RICHDataProcessor:
         sequence_data = {
             "poses": poses,  # (N, 156)
             "trans": trans,  # (N, 3)
-            "betas": body_params["betas"][0].cpu().numpy(),  # (10,)
+            "betas": body_params["betas"][0].cpu().numpy(force=True),  # (10,)
             "gender": gender,
             "fps": self.fps,
             "joints": joints,  # (N, 22, 3)

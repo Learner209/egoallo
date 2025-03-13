@@ -1,5 +1,6 @@
 """Network definitions."""
 
+from abc import ABC, abstractmethod
 import dataclasses
 from dataclasses import dataclass
 from functools import cache
@@ -34,15 +35,14 @@ from torch import Tensor
 if TYPE_CHECKING:
     from egoallo.types import DenoiseTrajType, JointCondMode
 
-from .fncsmpl import SmplhModel, SmplhShapedAndPosed
+# from .fncsmpl import SmplhModel, SmplhShapedAndPosed
+from .fncsmpl_library import SmplhModel, SmplhShapedAndPosed
 from .tensor_dataclass import TensorDataclass
 from .transforms import SE3, SO3
 from egoallo.utils.setup_logger import setup_logger
 
 local_config_file = CONFIG_FILE
 CFG = make_cfg(config_name="defaults", config_file=local_config_file, cli_args=[])
-
-logger = setup_logger(output=None, name=__name__)
 
 logger = setup_logger(output=None, name=__name__)
 
@@ -933,7 +933,8 @@ class AbsoluteDenoiseTraj(BaseDenoiseTraj):
                 gt=other.t_world_root.reshape(*other.t_world_root.shape[:-1], -1),
                 pred=self.t_world_root.reshape(*self.t_world_root.shape[:-1], -1),
                 device=device,
-            ),
+            )
+            * 1000,
         )
 
         # Foot metrics
@@ -1653,7 +1654,7 @@ class EgoDenoiserConfig:
     joint_emb_dim: int = 8
 
     # Add SMPL-H model path configuration
-    smplh_npz_path: Path = Path("data/smplh/neutral/model.npz")
+    smplh_model_path: Path = Path("assets/smpl_based_model/smplh/SMPLH_NEUTRAL.pkl")
 
     # Add new config parameter
     use_fourier_in_masked_joints: bool = (
@@ -1996,7 +1997,11 @@ class EgoDenoiser(nn.Module):
         super().__init__()
 
         self.config = config
-        self.body_model = SmplhModel.load(config.smplh_npz_path)
+        self.body_model = SmplhModel.load(
+            config.smplh_model_path,
+            use_pca=False,
+            batch_size=64 * 128,
+        )
 
         Activation = {"gelu": nn.GELU, "relu": nn.ReLU}[config.activation]
 

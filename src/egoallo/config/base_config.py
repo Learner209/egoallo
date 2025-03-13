@@ -13,7 +13,7 @@ class EgoAlloBaseConfig:
     # Data paths
     dataset_hdf5_path: Path = Path("./data/egoalgo_no_skating_dataset.hdf5")
     dataset_files_path: Path = Path("./data/egoalgo_no_skating_dataset_files.txt")
-    smplh_npz_path: Path = Path("./data/smplh/neutral/model.npz")
+    smplh_model_path: Path = Path("assets/smpl_based_model/smplh/SMPLH_NEUTRAL.pkl")
 
     # Model settings
     model: network.EgoDenoiserConfig = network.EgoDenoiserConfig()

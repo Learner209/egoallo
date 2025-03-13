@@ -14,7 +14,7 @@ class TestConfig(EgoAlloTrainConfig):
 
     # Model and checkpoint settings
     checkpoint_dir: Path = Path("./egoallo_checkpoint_april13/checkpoints_3000000")
-    smplh_npz_path: Path = Path("./data/smplh/neutral/model.npz")
+    smplh_model_path: Path = Path("assets/smpl_based_model/smplh/SMPLH_NEUTRAL.pkl")
 
     # Test settings
     num_inference_steps: int = 50

@@ -10,9 +10,12 @@ import typeguard
 from jaxtyping import Float
 from jaxtyping import jaxtyped
 from torch import Tensor
+from egoallo.setup_logger import setup_logger
 from tqdm import tqdm
 
-from . import fncsmpl
+from . import fncsmpl_library as fncsmpl
+
+# from . import fncsmpl
 from . import network
 from .guidance_optimizer_jax import do_guidance_optimization
 from .guidance_optimizer_jax import GuidanceMode
@@ -25,6 +28,8 @@ from .transforms import SO3
 if TYPE_CHECKING:
     from .data.dataclass import EgoTrainingData
     from .config.train.train_config import EgoAlloTrainConfig
+
+logger = setup_logger(output=None, name=__name__)
 
 
 def quadratic_ts(timesteps: int) -> np.ndarray:
@@ -331,6 +336,7 @@ def run_sampling_with_masked_data(
         .to(device)
         .to(torch.float32)
     )
+    start_time = time.time()
 
     for i in range(len(ts) - 1):
         t = ts[i]

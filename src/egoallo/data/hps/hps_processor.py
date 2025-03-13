@@ -13,7 +13,9 @@ import numpy as np
 import torch
 import typeguard
 from egoallo.data.motion_processing import MotionProcessor
-from egoallo.fncsmpl import SmplhModel
+
+# from egoallo.fncsmpl import SmplhModel
+from egoallo.fncsmpl_library import SmplhModel
 from egoallo.transforms import SE3
 from egoallo.transforms import SO3
 from egoallo.utils.setup_logger import setup_logger
@@ -51,7 +53,9 @@ class HPSProcessor:
         self.body_models = {}
         for gender in ["male", "female", "neutral"]:
             model_path = self.smplh_dir / f"SMPLH_{gender.upper()}.pkl"
-            self.body_models[gender] = SmplhModel.load(model_path).to(self.device)
+            self.body_models[gender] = SmplhModel.load(model_path, use_pca=False).to(
+                self.device,
+            )
 
         # Joint indices for contact detection
         self.joint_indices = {
@@ -237,9 +241,9 @@ class HPSProcessor:
 
         # Prepare sequence data
         sequence_data = {
-            "poses": poses.cpu().numpy(),
-            "trans": trans.cpu().numpy(),
-            "betas": betas.cpu().numpy(),
+            "poses": poses.cpu().numpy(force=True),
+            "trans": trans.cpu().numpy(force=True),
+            "betas": betas.cpu().numpy(force=True),
             "contacts": contacts.astype(
                 np.float32,
             ),  # contacts server as a boolean label, but for compatiblity with `load_from_npz` function, convert it to flaot32
@@ -248,9 +252,9 @@ class HPSProcessor:
             "joints": joints,
             "camera_trajectory": camera_traj,
             "time_range": (start_time, end_time),
-            "root_orient": root_orient.cpu().numpy(),
-            "pose_body": body_pose.cpu().numpy(),
-            "pose_hand": hand_pose.cpu().numpy(),
+            "root_orient": root_orient.cpu().numpy(force=True),
+            "pose_body": body_pose.cpu().numpy(force=True),
+            "pose_hand": hand_pose.cpu().numpy(force=True),
         }
 
         return sequence_data

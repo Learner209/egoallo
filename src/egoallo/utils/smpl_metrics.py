@@ -412,17 +412,17 @@ def compute_metrics_for_smpl(
 
     # Compute accl and accl err.
     accels_pred = (
-        np.mean(compute_accel(pred_global_jpos.data.cpu().numpy())) * 1000
+        np.mean(compute_accel(pred_global_jpos.data.cpu().numpy(force=True))) * 1000
     )  # scalar
     accels_gt = (
-        np.mean(compute_accel(gt_global_jpos.data.cpu().numpy())) * 1000
+        np.mean(compute_accel(gt_global_jpos.data.cpu().numpy(force=True))) * 1000
     )  # scalar
 
     accel_dist = (
         np.mean(
             compute_error_accel(
-                pred_global_jpos.data.cpu().numpy(),
-                gt_global_jpos.data.cpu().numpy(),
+                pred_global_jpos.data.cpu().numpy(force=True),
+                gt_global_jpos.data.cpu().numpy(force=True),
             ),
         )
         * 1000
@@ -430,18 +430,18 @@ def compute_metrics_for_smpl(
 
     # Compute foot sliding error
     pred_fs_metric = compute_foot_sliding_for_smpl(
-        pred_global_jpos.data.cpu().numpy().copy(),
+        pred_global_jpos.data.cpu().numpy(force=True).copy(),
         pred_floor_height,
     )
     gt_fs_metric = compute_foot_sliding_for_smpl(
-        gt_global_jpos.data.cpu().numpy().copy(),
+        gt_global_jpos.data.cpu().numpy(force=True).copy(),
         gt_floor_height,
     )
 
     jpos_pred = pred_global_jpos - pred_global_jpos[:, 0:1]  # T x J x 3 zero out root
     jpos_gt = gt_global_jpos - gt_global_jpos[:, 0:1]  # T x J x 3
-    jpos_pred = jpos_pred.data.cpu().numpy()
-    jpos_gt = jpos_gt.data.cpu().numpy()
+    jpos_pred = jpos_pred.data.cpu().numpy(force=True)
+    jpos_gt = jpos_gt.data.cpu().numpy(force=True)
     mpjpe = np.linalg.norm(jpos_pred - jpos_gt, axis=2).mean() * 1000
 
     # Add jpe for each joint

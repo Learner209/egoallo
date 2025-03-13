@@ -2,6 +2,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from typing import Self
 import dataclasses
+from dataclasses import dataclass
 import numpy as np
 import torch.utils.data
 import typeguard
@@ -14,7 +15,9 @@ if TYPE_CHECKING:
     from egoallo.types import DenoiseTrajType
     from egoallo.types import DatasetType
 
-from .. import fncsmpl, fncsmpl_extensions
+# from .. import fncsmpl, fncsmpl_extensions
+from .. import fncsmpl_library as fncsmpl
+from .. import fncsmpl_extensions_library as fncsmpl_extensions
 from .. import transforms as tf
 from ..tensor_dataclass import TensorDataclass
 from typing import Optional, TYPE_CHECKING, Literal

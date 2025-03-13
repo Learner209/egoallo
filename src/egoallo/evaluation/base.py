@@ -1,11 +1,12 @@
 from abc import ABC
 from abc import abstractmethod
-from pathlib import Path
 from typing import Optional
 
 import torch
 import typeguard
-from egoallo import fncsmpl
+
+# from egoallo import fncsmpl
+from egoallo import fncsmpl_library as fncsmpl
 from egoallo.types import Device
 from egoallo.types import MetricsDict
 from egoallo.types import PathLike
@@ -32,14 +33,7 @@ class BaseEvaluator(ABC):
         """
         self.device = get_device(device)
         self.body_model_path = ensure_path(body_model_path)
-        self.body_model: fncsmpl.SmplhModel = self._load_body_model(
-            self.body_model_path,
-        )
-
-    @abstractmethod
-    def _load_body_model(self, model_path: Path) -> fncsmpl.SmplhModel:
-        """Load the body model from file."""
-        pass
+        self.body_model: Optional[fncsmpl.SmplhModel] = None
 
     @classmethod
     @abstractmethod

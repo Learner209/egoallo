@@ -10,7 +10,9 @@ import numpy as np
 import torch
 import tyro
 import viser
-from egoallo import fncsmpl
+
+# from egoallo import fncsmpl
+from egoallo import fncsmpl_library as fncsmpl
 from egoallo.data.aria_mps import load_point_cloud_and_find_ground
 from egoallo.hand_detection_structs import CorrespondedAriaHandWristPoseDetections
 from egoallo.hand_detection_structs import CorrespondedHamerDetections
@@ -27,18 +29,18 @@ from tqdm import tqdm
 
 def main(
     search_root_dir: Path,
-    smplh_npz_path: Path = Path("./data/smplh/neutral/model.npz"),
+    smplh_model_path: Path = Path("assets/smpl_based_model/smplh/SMPLH_NEUTRAL.pkl"),
 ) -> None:
     """Visualization script for outputs from EgoAllo.
 
     Arguments:
         search_root_dir: Root directory where inputs/outputs are stored. All
             NPZ files in this directory will be assumed to be outputs from EgoAllo.
-        smplh_npz_path: Path to the SMPLH model NPZ file.
+        smplh_model_path: Path to the SMPLH model NPZ file.
     """
     device = torch.device("cuda")
 
-    body_model = fncsmpl.SmplhModel.load(smplh_npz_path).to(device)
+    body_model = fncsmpl.SmplhModel.load(smplh_model_path, use_pca=False).to(device)
 
     server = viser.ViserServer()
     server.gui.configure_theme(dark_mode=True)

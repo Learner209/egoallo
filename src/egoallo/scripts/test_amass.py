@@ -4,7 +4,9 @@ import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from egoallo import fncsmpl, fncsmpl_extensions
+# from egoallo import fncsmpl, fncsmpl_extensions
+from egoallo import fncsmpl_library as fncsmpl
+from egoallo import fncsmpl_extensions_library as fncsmpl_extensions
 from egoallo.data.amass_dataset import EgoAmassHdf5Dataset
 from egoallo.data.dataclass import collate_dataclass
 from egoallo.training_utils import ipdb_safety_net
@@ -29,7 +31,9 @@ def main(config: TestConfig):
 
     # Initialize model and body model
     denoiser_network = load_denoiser(config.checkpoint_dir).to(device)
-    body_model = fncsmpl.SmplhModel.load(config.smplh_npz_path).to(device)
+    body_model = fncsmpl.SmplhModel.load(config.smplh_model_path, use_pca=False).to(
+        device,
+    )
 
     # Initialize test dataset
     test_dataset = EgoAmassHdf5Dataset(config)
@@ -109,7 +113,10 @@ def main(config: TestConfig):
     # Compute metrics if requested
     if config.compute_metrics:
         logger.info("\nComputing evaluation metrics...")
-        evaluator = BodyEvaluator(body_model_path=config.smplh_npz_path, device=device)
+        evaluator = BodyEvaluator(
+            body_model_path=config.smplh_model_path,
+            device=device,
+        )
 
         evaluator.evaluate_directory(
             dir_with_pt_files=config.output_dir,

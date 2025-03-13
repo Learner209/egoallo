@@ -21,7 +21,7 @@ class EgoAlloTrainConfig:
     experiment_dir: Path = Path("")
     dataset_hdf5_path: Path = Path("data/egoalgo_no_skating_dataset.hdf5")
     dataset_files_path: Path = Path("data/egoalgo_no_skating_dataset_files.txt")
-    smplh_npz_path: Path = Path("./data/smplh/neutral/model.npz")
+    smplh_model_path: Path = Path("assets/smpl_based_model/smplh/SMPLH_NEUTRAL.pkl")
 
     # MAE params.
     spatial_mask_ratio: float = 0.75
@@ -111,7 +111,7 @@ class EgoAlloTrainConfig:
         self.model = network.EgoDenoiserConfig(
             mask_ratio=self.spatial_mask_ratio,
             joint_cond_mode=self.joint_cond_mode,
-            smplh_npz_path=self.smplh_npz_path,
+            smplh_model_path=self.smplh_model_path,
             use_fourier_in_masked_joints=self.use_fourier_in_masked_joints,
             use_joint_embeddings=self.use_joint_embeddings,
         )

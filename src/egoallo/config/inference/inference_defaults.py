@@ -27,7 +27,7 @@ class InferenceConfig:
     batch_size: int = 1
     """Batch size for inference"""
 
-    smplh_npz_path: Path = Path("./data/smplh/neutral/model.npz")
+    smplh_model_path: Path = Path("assets/smpl_based_model/smplh/SMPLH_NEUTRAL.pkl")
     """Path to SMPL+H model file"""
 
     output_dir: Path = Path("./exp/test-amass")

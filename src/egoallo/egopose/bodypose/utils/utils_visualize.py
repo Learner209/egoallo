@@ -160,15 +160,15 @@ class CheckerBoard:
         verts: (1, N, 3)
         """
         if yaxis_up:
-            y_off = torch.min(verts[0], 0)[0].cpu().numpy()
+            y_off = torch.min(verts[0], 0)[0].cpu().numpy(force=True)
         else:
-            y_off = torch.max(verts[0], 0)[0].cpu().numpy()
+            y_off = torch.max(verts[0], 0)[0].cpu().numpy(force=True)
         # print(verts.shape, y_off.shape)
         offset = np.array([-xlength / 2, y_off[1], -ylength / 2])
         print(
             offset,
-            torch.min(verts[0], 0)[0].cpu().numpy(),
-            torch.max(verts[0], 0)[0].cpu().numpy(),
+            torch.min(verts[0], 0)[0].cpu().numpy(force=True),
+            torch.max(verts[0], 0)[0].cpu().numpy(force=True),
         )
         checker = CheckerBoard()
         checker.init_checker(

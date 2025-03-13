@@ -11,9 +11,13 @@ import numpy as np
 import torch
 import typeguard
 from egoallo.data.motion_processing import MotionProcessor
-from egoallo.fncsmpl import SmplhModel
-from egoallo.fncsmpl import SmplhShaped
-from egoallo.fncsmpl import SmplhShapedAndPosed
+
+# from egoallo.fncsmpl import SmplhModel
+# from egoallo.fncsmpl import SmplhShaped
+# from egoallo.fncsmpl import SmplhShapedAndPosed
+from egoallo.fncsmpl_library import SmplhModel
+from egoallo.fncsmpl_library import SmplhShaped
+from egoallo.fncsmpl_library import SmplhShapedAndPosed
 from egoallo.transforms import SE3
 from egoallo.transforms import SO3
 from egoallo.utils.setup_logger import setup_logger
@@ -79,7 +83,7 @@ class AMASSProcessor:
         self.body_models = {}
         for gender in ["male", "female", "neutral"]:
             model_path = self.smplh_dir / f"{gender}/model.npz"
-            self.body_models[gender] = SmplhModel.load(model_path)
+            self.body_models[gender] = SmplhModel.load(model_path, use_pca=False)
 
     @jaxtyped(typechecker=typeguard.typechecked)
     def _convert_rotations(
@@ -252,10 +256,12 @@ class AMASSProcessor:
             )
 
             trans_vel = self.motion_processor.compute_joint_velocity(
-                trans.cpu().numpy(),
+                trans.cpu().numpy(force=True),
             )
 
-            root_orient_mat = SO3.exp(root_orient).as_matrix().detach().cpu().numpy()
+            root_orient_mat = (
+                SO3.exp(root_orient).as_matrix().detach().cpu().numpy(force=True)
+            )
             root_ang_vel = self.motion_processor.compute_angular_velocity(
                 root_orient_mat,
                 dt,
@@ -276,18 +282,18 @@ class AMASSProcessor:
 
         # Prepare output data
         sequence_data = {
-            "poses": poses.cpu().numpy(),
-            "trans": trans.cpu().numpy(),
-            "betas": betas.cpu().numpy(),
+            "poses": poses.cpu().numpy(force=True),
+            "trans": trans.cpu().numpy(force=True),
+            "betas": betas.cpu().numpy(force=True),
             "gender": gender,
             "fps": fps,
             "joints": joints,
             "contacts": contacts.astype(
                 np.float32,
             ),  # contacts server as a boolean label, but for compatiblity with `load_from_npz` function, convert it to flaot32
-            "pose_hand": hand_pose.cpu().numpy(),
-            "root_orient": root_orient.cpu().numpy(),
-            "pose_body": body_pose.cpu().numpy(),
+            "pose_hand": hand_pose.cpu().numpy(force=True),
+            "root_orient": root_orient.cpu().numpy(force=True),
+            "pose_body": body_pose.cpu().numpy(force=True),
         }
 
         if velocities is not None:
