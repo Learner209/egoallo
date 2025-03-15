@@ -1,9 +1,7 @@
 import torch
-import typeguard
 from egoallo.joints2smpl import joints2smpl_config
 from egoallo.joints2smpl.prior import MaxMixturePrior
 from jaxtyping import Float
-from jaxtyping import jaxtyped
 from torch import Tensor
 
 
@@ -18,7 +16,7 @@ def gmof(x, sigma):
 
 
 # angle prior
-@jaxtyped(typechecker=typeguard.typechecked)
+# @jaxtyped(typechecker=typeguard.typechecked)
 def angle_prior(pose: Float[Tensor, "batch_size 69"]) -> Float[Tensor, "batch_size 4"]:
     """
     Angle prior that penalizes unnatural bending of the knees and elbows
@@ -63,7 +61,7 @@ def perspective_projection(points, rotation, translation, focal_length, camera_c
     return projected_points[:, :, :-1]
 
 
-@jaxtyped(typechecker=typeguard.typechecked)
+# @jaxtyped(typechecker=typeguard.typechecked)
 def body_fitting_loss(
     body_pose: Float[Tensor, "batch_size 69"],
     betas: Float[Tensor, "batch_size 10"],
@@ -177,7 +175,7 @@ def camera_fitting_loss(
 
 
 # #####--- body fitiing loss -----
-@jaxtyped(typechecker=typeguard.typechecked)
+# @jaxtyped(typechecker=typeguard.typechecked)
 def body_fitting_loss_3d(
     body_pose: Float[Tensor, "batch_size 69"],
     preserve_pose: Float[Tensor, "batch_size 69"],
@@ -261,7 +259,7 @@ def body_fitting_loss_3d(
 
 
 # #####--- get camera fitting loss -----
-@jaxtyped(typechecker=typeguard.typechecked)
+# @jaxtyped(typechecker=typeguard.typechecked)
 def camera_fitting_loss_3d(
     j3d_est: Float[Tensor, "batch_size 45 3"],
     camera_translation: Float[Tensor, "batch_size 3"],

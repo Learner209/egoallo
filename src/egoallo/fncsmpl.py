@@ -27,11 +27,9 @@ from pathlib import Path
 
 import numpy as np
 import torch
-import typeguard
 from einops import einsum
 from jaxtyping import Float
 from jaxtyping import Int
-from jaxtyping import jaxtyped
 from torch import Tensor
 
 from .tensor_dataclass import TensorDataclass
@@ -39,7 +37,7 @@ from .transforms import SE3
 from .transforms import SO3
 
 
-@jaxtyped(typechecker=typeguard.typechecked)
+# @jaxtyped(typechecker=typeguard.typechecked)
 class SmplhModel(TensorDataclass):
     """A human body model from the SMPL family."""
 
@@ -131,7 +129,7 @@ class SmplhModel(TensorDataclass):
         )
 
     @classmethod
-    @jaxtyped(typechecker=typeguard.typechecked)
+    # @jaxtyped(typechecker=typeguard.typechecked)
     def pca_to_aa(
         cls,
         hand_pose_pca: Float[Tensor, "*batch num_pca"],
@@ -155,7 +153,7 @@ class SmplhModel(TensorDataclass):
         # Reshape to (batch_size, 15, 3) format
         return hand_pose.reshape(*hand_pose.shape[:-1], 15, 3)
 
-    @jaxtyped(typechecker=typeguard.typechecked)
+    # @jaxtyped(typechecker=typeguard.typechecked)
     def convert_hand_poses(
         self,
         left_hand_pca: Float[Tensor, "*batch num_pca"] | None = None,
@@ -188,7 +186,7 @@ class SmplhModel(TensorDataclass):
         """Get the number of joints in this model."""
         return len(self.parent_indices)
 
-    @jaxtyped(typechecker=typeguard.typechecked)
+    # @jaxtyped(typechecker=typeguard.typechecked)
     def with_shape(self, betas: Float[Tensor, "*batch n_betas"]) -> "SmplhShaped":
         """Compute a new body model, with betas applied."""
         num_betas = betas.shape[-1]
@@ -217,7 +215,7 @@ class SmplhModel(TensorDataclass):
         )
 
 
-@jaxtyped(typechecker=typeguard.typechecked)
+# @jaxtyped(typechecker=typeguard.typechecked)
 class SmplhShaped(TensorDataclass):
     """The SMPL-H body model with a body shape applied."""
 
@@ -234,7 +232,7 @@ class SmplhShaped(TensorDataclass):
     """Position of each shaped body joint relative to its parent. Does not
     include root."""
 
-    @jaxtyped(typechecker=typeguard.typechecked)
+    # @jaxtyped(typechecker=typeguard.typechecked)
     def with_pose_decomposed(
         self,
         T_world_root: Float[Tensor, "*batch 7"],
@@ -259,7 +257,7 @@ class SmplhShaped(TensorDataclass):
         assert local_quats.shape[-2:] == (num_joints, 4)
         return self.with_pose(T_world_root, local_quats)
 
-    @jaxtyped(typechecker=typeguard.typechecked)
+    # @jaxtyped(typechecker=typeguard.typechecked)
     def with_pose(
         self,
         T_world_root: Float[Tensor, "*batch 7"],
@@ -286,7 +284,7 @@ class SmplhShaped(TensorDataclass):
         )
 
 
-@jaxtyped(typechecker=typeguard.typechecked)
+# @jaxtyped(typechecker=typeguard.typechecked)
 class SmplhShapedAndPosed(TensorDataclass):
     """Outputs from the SMPL-H model."""
 
@@ -302,7 +300,7 @@ class SmplhShapedAndPosed(TensorDataclass):
     Ts_world_joint: Float[Tensor, "*#batch joints 7"]
     """Absolute transform for each joint. Does not include the root."""
 
-    @jaxtyped(typechecker=typeguard.typechecked)
+    # @jaxtyped(typechecker=typeguard.typechecked)
     def with_new_T_world_root(
         self,
         T_world_root: Float[Tensor, "*batch 7"],
@@ -374,7 +372,7 @@ class SmplhShapedAndPosed(TensorDataclass):
             faces=self.shaped_model.body_model.faces,
         )
 
-    @jaxtyped(typechecker=typeguard.typechecked)
+    # @jaxtyped(typechecker=typeguard.typechecked)
     def compute_joint_contacts(
         self,
         vertex_contacts: Float[Tensor, "*batch verts"],
@@ -410,7 +408,7 @@ class SmplhShapedAndPosed(TensorDataclass):
         return joint_contacts
 
 
-@jaxtyped(typechecker=typeguard.typechecked)
+# @jaxtyped(typechecker=typeguard.typechecked)
 class SmplMesh(TensorDataclass):
     """Outputs from the SMPL-H model."""
 
@@ -424,7 +422,7 @@ class SmplMesh(TensorDataclass):
     """Faces for mesh."""
 
 
-@jaxtyped(typechecker=typeguard.typechecked)
+# @jaxtyped(typechecker=typeguard.typechecked)
 def forward_kinematics(
     T_world_root: Float[Tensor, "*#batch 7"],
     Rs_parent_joint: Float[Tensor, "*#batch joints 4"],

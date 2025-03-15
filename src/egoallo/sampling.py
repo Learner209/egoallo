@@ -6,9 +6,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import torch
-import typeguard
 from jaxtyping import Float
-from jaxtyping import jaxtyped
 from torch import Tensor
 from egoallo.setup_logger import setup_logger
 from tqdm import tqdm
@@ -51,7 +49,7 @@ def linear_ts(timesteps: int) -> np.ndarray:
     return np.arange(start_step, end_step - 1, -1)
 
 
-@jaxtyped(typechecker=typeguard.typechecked)
+# @jaxtyped(typechecker=typeguard.typechecked)
 class CosineNoiseScheduleConstants(TensorDataclass):
     """Constants used for cosine noise scheduling."""
 
@@ -93,7 +91,7 @@ class CosineNoiseScheduleConstants(TensorDataclass):
         )
 
 
-# @jaxtyped(typechecker=typeguard.typechecked)
+# # @jaxtyped(typechecker=typeguard.typechecked)
 # def run_sampling_with_stitching(
 #     denoiser_network: network.EgoDenoiser,
 #     body_model: fncsmpl.SmplhModel,
@@ -266,7 +264,7 @@ class CosineNoiseScheduleConstants(TensorDataclass):
 #         return x_t_list[-1]
 
 
-@jaxtyped(typechecker=typeguard.typechecked)
+# @jaxtyped(typechecker=typeguard.typechecked)
 def run_sampling_with_masked_data(
     denoiser_network: network.EgoDenoiser,
     body_model: fncsmpl.SmplhModel,
@@ -465,7 +463,7 @@ def run_sampling_with_masked_data(
 
 
 # # Implementation of DDPM sampling
-# @jaxtyped(typechecker=typeguard.typechecked)
+# # @jaxtyped(typechecker=typeguard.typechecked)
 # def run_sampling_with_masked_data_ddpm(
 #     denoiser_network: network.EgoDenoiser,
 #     body_model: fncsmpl.SmplhModel,

@@ -10,7 +10,6 @@ from typing import Tuple
 
 import numpy as np
 import torch
-import typeguard
 import yaml
 
 # from egoallo import fncsmpl
@@ -166,7 +165,7 @@ class HandEvaluator(BaseEvaluator):
 
         return a - aligned_b
 
-    @jaxtyped(typechecker=typeguard.typechecked)
+    # @jaxtyped(typechecker=typeguard.typechecked)
     def procrustes_align(
         self,
         points_y: Float[Tensor, "*batch time 3"],

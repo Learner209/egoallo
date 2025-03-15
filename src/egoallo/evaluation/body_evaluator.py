@@ -4,7 +4,6 @@ from typing import Optional
 
 import numpy as np
 import torch
-import typeguard
 
 # from egoallo import fncsmpl
 from egoallo.config.train.train_config import EgoAlloTrainConfig
@@ -21,7 +20,6 @@ from egoallo.types import ProcrustesOutput
 from egoallo.utilities import procrustes_align
 from egoallo.utils.setup_logger import setup_logger
 from jaxtyping import Float
-from jaxtyping import jaxtyped
 from torch import Tensor
 
 from .base import BaseEvaluator
@@ -33,7 +31,7 @@ class BodyEvaluator(BaseEvaluator):
     """Evaluates body pose metrics between predicted and ground truth data."""
 
     @classmethod
-    @jaxtyped(typechecker=typeguard.typechecked)
+    # @jaxtyped(typechecker=typeguard.typechecked)
     def compute_foot_skate(
         cls,
         pred_Ts_world_joint: BatchedJointTransforms,
@@ -76,7 +74,7 @@ class BodyEvaluator(BaseEvaluator):
         return fs_per_sample.cpu().numpy(force=True)
 
     @classmethod
-    @jaxtyped(typechecker=typeguard.typechecked)
+    # @jaxtyped(typechecker=typeguard.typechecked)
     def compute_foot_contact(
         cls,
         pred_Ts_world_joint: BatchedJointTransforms,
@@ -104,7 +102,7 @@ class BodyEvaluator(BaseEvaluator):
         return contact_ratio.cpu().numpy(force=True)
 
     @classmethod
-    @jaxtyped(typechecker=typeguard.typechecked)
+    # @jaxtyped(typechecker=typeguard.typechecked)
     def compute_head_ori(
         cls,
         label_Ts_world_joint: Float[Tensor, "batch time 21 7"],
@@ -149,7 +147,7 @@ class BodyEvaluator(BaseEvaluator):
         return mean_errors.cpu().numpy(force=True)
 
     @classmethod
-    @jaxtyped(typechecker=typeguard.typechecked)
+    # @jaxtyped(typechecker=typeguard.typechecked)
     def compute_mpjpe(
         cls,
         label_root_pos: Float[Tensor, "batch time 3"],
@@ -187,7 +185,7 @@ class BodyEvaluator(BaseEvaluator):
         return mpjpe.cpu().numpy(force=True)
 
     @classmethod
-    @jaxtyped(typechecker=typeguard.typechecked)
+    # @jaxtyped(typechecker=typeguard.typechecked)
     def procrustes_align(
         cls,
         points_y: Float[Tensor, "*batch time 3"],
@@ -268,7 +266,7 @@ class BodyEvaluator(BaseEvaluator):
         return metrics
 
     @classmethod
-    @jaxtyped(typechecker=typeguard.typechecked)
+    # @jaxtyped(typechecker=typeguard.typechecked)
     def compute_masked_error(
         cls,
         gt: Float[Tensor, "*batch time d"],

@@ -6,8 +6,7 @@ from tqdm import tqdm
 
 # from egoallo.data.build import EgoTrainingData
 from typing import Dict, Any, Tuple
-from jaxtyping import Float, Bool, jaxtyped
-import typeguard
+from jaxtyping import Float, Bool
 from torch import Tensor
 from egoallo.mapping import (
     EGOEXO4D_BODYPOSE_TO_SMPLH_INDICES,
@@ -303,7 +302,7 @@ class Dataset_EgoExo(Dataset):
                 poses.append([float("nan")] * 3)  # not visible
         return poses, flags
 
-    @jaxtyped(typechecker=typeguard.typechecked)
+    # @jaxtyped(typechecker=typeguard.typechecked)
     def _process_joints(
         self,
         data: Float[Tensor, "timesteps 17 3"],
@@ -475,7 +474,7 @@ class Dataset_EgoExo(Dataset):
 
         return joints_world, joints_world_coco
 
-    @jaxtyped(typechecker=typeguard.typechecked)
+    # @jaxtyped(typechecker=typeguard.typechecked)
     def apply_kinematic_constraints(
         self,
         joints_world: Float[Tensor, "timesteps 22 3"],  # SMPLH joints: (T, 22, 3)

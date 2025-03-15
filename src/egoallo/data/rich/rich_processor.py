@@ -11,7 +11,6 @@ from typing import Union
 
 import numpy as np
 import torch
-import typeguard
 from egoallo.data.motion_processing import MotionProcessor
 
 # from egoallo.fncsmpl import SmplhModel
@@ -20,7 +19,6 @@ from egoallo.transforms import SE3
 from egoallo.transforms import SO3
 from egoallo.utils.setup_logger import setup_logger
 from jaxtyping import Float
-from jaxtyping import jaxtyped
 from smplx import SMPLX
 from torch import Tensor
 
@@ -322,7 +320,7 @@ class RICHDataProcessor:
 
         return body_params_tensor, None, contact_data
 
-    @jaxtyped(typechecker=typeguard.typechecked)
+    # @jaxtyped(typechecker=typeguard.typechecked)
     def _convert_rotations(
         self,
         global_orient: Float[Tensor, "... 3"],

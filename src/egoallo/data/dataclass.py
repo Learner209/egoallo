@@ -5,8 +5,7 @@ import dataclasses
 from dataclasses import dataclass
 import numpy as np
 import torch.utils.data
-import typeguard
-from jaxtyping import Bool, Float, jaxtyped
+from jaxtyping import Bool, Float
 from egoallo.transforms import SO3, SE3
 from torch import Tensor
 
@@ -31,7 +30,7 @@ from egoallo.setup_logger import setup_logger
 logger = setup_logger(output=None, name=__name__)
 
 
-@jaxtyped(typechecker=typeguard.typechecked)
+# @jaxtyped(typechecker=typeguard.typechecked)
 class EgoTrainingData(TensorDataclass):
     """Dictionary of tensors we use for EgoAllo training."""
 
@@ -233,7 +232,7 @@ class EgoTrainingData(TensorDataclass):
             **kwargs,
         )
 
-    @jaxtyped(typechecker=typeguard.typechecked)
+    # @jaxtyped(typechecker=typeguard.typechecked)
     def preprocess(self, _rotate_radian: None | Tensor = None) -> "EgoTrainingData":
         """
         Modifies the current EgoTrainingData instance by:
@@ -385,7 +384,7 @@ class EgoTrainingData(TensorDataclass):
 
         return self
 
-    @jaxtyped(typechecker=typeguard.typechecked)
+    # @jaxtyped(typechecker=typeguard.typechecked)
     def postprocess(self) -> "EgoTrainingData":
         """
         Modifies the current EgoTrainingData instance by:

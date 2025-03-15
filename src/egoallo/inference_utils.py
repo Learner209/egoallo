@@ -8,14 +8,12 @@ from pathlib import Path
 
 import numpy as np
 import torch
-import typeguard
 import yaml
 from egoallo.config import CONFIG_FILE
 from egoallo.config import make_cfg
 from egoallo.config.train.train_config import EgoAlloTrainConfig
 from egoallo.utils.setup_logger import setup_logger
 from jaxtyping import Float
-from jaxtyping import jaxtyped
 from projectaria_tools.core import mps  # type: ignore
 from projectaria_tools.core.data_provider import create_vrs_data_provider
 from safetensors import safe_open
@@ -155,7 +153,7 @@ class InferenceTrajectoryPaths:
         )
 
 
-@jaxtyped(typechecker=typeguard.typechecked)
+# @jaxtyped(typechecker=typeguard.typechecked)
 class InferenceInputTransforms(TensorDataclass):
     """Some relevant transforms for inference."""
 

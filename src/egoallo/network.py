@@ -19,14 +19,12 @@ from typing import Union
 import numpy as np
 import torch
 import torch.nn.functional as F
-import typeguard
 from egoallo.config import CONFIG_FILE
 from egoallo.config import make_cfg
 from einops import rearrange
 from jaxtyping import Bool
 from jaxtyping import Float
 from jaxtyping import Int
-from jaxtyping import jaxtyped
 from rotary_embedding_torch import RotaryEmbedding
 from torch import nn
 from torch import Tensor
@@ -86,7 +84,7 @@ def get_kinematic_chain(use_smplh: bool = True) -> list[tuple[int, int]]:
         return kinematic_chain[:-2]
 
 
-@jaxtyped(typechecker=typeguard.typechecked)
+# @jaxtyped(typechecker=typeguard.typechecked)
 def project_rotmats_via_svd(
     rotmats: Float[Tensor, "*batch 3 3"],
 ) -> Float[Tensor, "*batch 3 3"]:
@@ -294,7 +292,7 @@ class DenoisingConfig:
 
         return modality_dims
 
-    @jaxtyped(typechecker=typeguard.typechecked)
+    # @jaxtyped(typechecker=typeguard.typechecked)
     def from_ego_data(
         self,
         ego_data: "EgoTrainingData",
@@ -704,7 +702,7 @@ class AbsoluteDenoiseTraj(BaseDenoiseTraj):
         # )
         return posed
 
-    @jaxtyped(typechecker=typeguard.typechecked)
+    # @jaxtyped(typechecker=typeguard.typechecked)
     def pack(self) -> Float[Tensor, "*batch timesteps d_state"]:
         """Pack trajectory into a single flattened vector."""
         (*batch, time, num_joints, _, _) = self.body_rotmats.shape
@@ -725,7 +723,7 @@ class AbsoluteDenoiseTraj(BaseDenoiseTraj):
         return torch.cat(tensors_to_pack, dim=-1)
 
     @classmethod
-    @jaxtyped(typechecker=typeguard.typechecked)
+    # @jaxtyped(typechecker=typeguard.typechecked)
     def unpack(
         cls,
         x: Float[Tensor, "*batch timesteps d_state"],
@@ -1228,7 +1226,7 @@ class VelocityDenoiseTraj(BaseDenoiseTraj):
 
         return posed
 
-    @jaxtyped(typechecker=typeguard.typechecked)
+    # @jaxtyped(typechecker=typeguard.typechecked)
     def pack(self) -> Float[Tensor, "*batch timesteps d_state"]:
         """Pack trajectory into a single flattened vector.
         Only packs the temporal offset attributes and other necessary components."""
@@ -1254,7 +1252,7 @@ class VelocityDenoiseTraj(BaseDenoiseTraj):
         return torch.cat(tensors_to_pack, dim=-1)
 
     @classmethod
-    @jaxtyped(typechecker=typeguard.typechecked)
+    # @jaxtyped(typechecker=typeguard.typechecked)
     def unpack(
         cls,
         x: Float[Tensor, "*batch timesteps d_state"],
@@ -1623,7 +1621,7 @@ class VelocityDenoiseTraj(BaseDenoiseTraj):
         return metrics
 
 
-@jaxtyped(typechecker=typeguard.typechecked)
+# @jaxtyped(typechecker=typeguard.typechecked)
 @dataclass
 class EgoDenoiserConfig:
     # Basic parameters
@@ -1710,7 +1708,7 @@ class EgoDenoiserConfig:
 
         return d_cond
 
-    @jaxtyped(typechecker=typeguard.typechecked)
+    # @jaxtyped(typechecker=typeguard.typechecked)
     def make_cond_with_masked_joints(
         self,
         joints: Float[Tensor, "batch time 22 3"],
@@ -2089,7 +2087,7 @@ class EgoDenoiser(nn.Module):
             ],
         )
 
-    @jaxtyped(typechecker=typeguard.typechecked)
+    # @jaxtyped(typechecker=typeguard.typechecked)
     def forward(
         self,
         x_t_unpacked: Union[VelocityDenoiseTraj, AbsoluteDenoiseTraj, JointsOnlyTraj],
@@ -2215,7 +2213,7 @@ class EgoDenoiser(nn.Module):
         return packed_output
 
 
-@jaxtyped(typechecker=typeguard.typechecked)
+# @jaxtyped(typechecker=typeguard.typechecked)
 @cache
 def make_positional_encoding(
     d_latent: int,
@@ -2234,7 +2232,7 @@ def make_positional_encoding(
     return pe
 
 
-@jaxtyped(typechecker=typeguard.typechecked)
+# @jaxtyped(typechecker=typeguard.typechecked)
 def fourier_encode(
     x: Float[Tensor, "*batch channels"],
     freqs: int,
@@ -2326,7 +2324,7 @@ class TransformerBlock(nn.Module):
         self.mlp1 = nn.Linear(config.d_feedforward, config.d_latent)
         self.config = config
 
-    @jaxtyped(typechecker=typeguard.typechecked)
+    # @jaxtyped(typechecker=typeguard.typechecked)
     def forward(
         self,
         x: Float[Tensor, "batch tokens d_latent"],

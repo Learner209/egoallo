@@ -376,8 +376,6 @@ class TestRunner:
                 desc="Enumerating test loader",
                 ascii=" >=",
             ):
-                if batch_idx > 2:
-                    break
                 # Add debug iteration limit check
                 if (
                     self.inference_config.debug_max_iters

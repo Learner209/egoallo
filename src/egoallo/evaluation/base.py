@@ -3,7 +3,6 @@ from abc import abstractmethod
 from typing import Optional
 
 import torch
-import typeguard
 
 # from egoallo import fncsmpl
 from egoallo import fncsmpl_library as fncsmpl
@@ -13,7 +12,6 @@ from egoallo.types import PathLike
 from egoallo.types import ProcrustesMode
 from egoallo.types import ProcrustesOutput
 from jaxtyping import Float
-from jaxtyping import jaxtyped
 from torch import Tensor
 
 from .utils import ensure_path
@@ -37,7 +35,7 @@ class BaseEvaluator(ABC):
 
     @classmethod
     @abstractmethod
-    @jaxtyped(typechecker=typeguard.typechecked)
+    # @jaxtyped(typechecker=typeguard.typechecked)
     def procrustes_align(
         cls,
         points_y: Float[Tensor, "*batch time 3"],

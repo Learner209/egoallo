@@ -15,10 +15,8 @@ from typing import Tuple
 import imageio
 import numpy as np
 import torch
-import typeguard
 from egoallo.utils.setup_logger import setup_logger
 from jaxtyping import Float
-from jaxtyping import jaxtyped
 from torch import Tensor
 from yacs.config import CfgNode as CN
 # from egoego.config import make_cfg, CONFIG_FILE
@@ -298,7 +296,7 @@ def ensure_path(path: str | Path) -> Path:
     return Path(path) if not isinstance(path, Path) else path
 
 
-@jaxtyped(typechecker=typeguard.typechecked)
+# @jaxtyped(typechecker=typeguard.typechecked)
 def procrustes_align(
     points_y: Float[Tensor, "*batch time 3"],
     points_x: Float[Tensor, "*batch time 3"],

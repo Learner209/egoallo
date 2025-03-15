@@ -3,18 +3,16 @@ import pickle
 
 import smplx
 import torch
-import typeguard
 from egoallo.joints2smpl import joints2smpl_config
 from egoallo.joints2smpl.customloss import body_fitting_loss_3d
 from egoallo.joints2smpl.customloss import camera_fitting_loss_3d
 from egoallo.joints2smpl.prior import MaxMixturePrior
 from jaxtyping import Float
-from jaxtyping import jaxtyped
 from torch import Tensor
 
 
 @torch.no_grad()
-@jaxtyped(typechecker=typeguard.typechecked)
+# @jaxtyped(typechecker=typeguard.typechecked)
 def guess_init_3d(
     j3d_est: Float[Tensor, "batch_size 45 3"],
     j3d_gt: Float[Tensor, "batch_size 22 3"],
@@ -99,7 +97,7 @@ class SMPLify3D:
             print("NO SUCH JOINTS CATEGORY!")
 
     # ---- get the man function here ------
-    @jaxtyped(typechecker=typeguard.typechecked)
+    # @jaxtyped(typechecker=typeguard.typechecked)
     def __call__(
         self,
         init_pose: Float[Tensor, "batch_size 72"],

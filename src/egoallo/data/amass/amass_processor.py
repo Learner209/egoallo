@@ -9,7 +9,6 @@ from typing import Optional
 
 import numpy as np
 import torch
-import typeguard
 from egoallo.data.motion_processing import MotionProcessor
 
 # from egoallo.fncsmpl import SmplhModel
@@ -22,7 +21,6 @@ from egoallo.transforms import SE3
 from egoallo.transforms import SO3
 from egoallo.utils.setup_logger import setup_logger
 from jaxtyping import Float
-from jaxtyping import jaxtyped
 from numpy import ndarray as Array
 from torch import Tensor
 
@@ -85,7 +83,7 @@ class AMASSProcessor:
             model_path = self.smplh_dir / f"{gender}/model.npz"
             self.body_models[gender] = SmplhModel.load(model_path, use_pca=False)
 
-    @jaxtyped(typechecker=typeguard.typechecked)
+    # @jaxtyped(typechecker=typeguard.typechecked)
     def _convert_rotations(
         self,
         root_orient: Float[Tensor, "... 3"],

@@ -1,7 +1,6 @@
 import numpy as np
 
-from jaxtyping import Float, Bool, jaxtyped
-import typeguard
+from jaxtyping import Float, Bool
 from typing import Optional
 from egoallo.mapping import EGOEXO4D_BODYPOSE_KINTREE_PARENTS, SMPLH_KINTREE
 
@@ -17,7 +16,7 @@ def blend_with_background(image: np.ndarray, background_color: tuple) -> np.ndar
     return blended.astype(np.uint8)
 
 
-@jaxtyped(typechecker=typeguard.typechecked)
+# @jaxtyped(typechecker=typeguard.typechecked)
 def create_skeleton_point_cloud(
     joints_wrt_world: Float[np.ndarray, "num_joints 3"],
     visible_joints_mask: Bool[np.ndarray, "num_joints"],

@@ -1,6 +1,5 @@
 from typing import TYPE_CHECKING, Any, Literal, Union, assert_never, cast
-from jaxtyping import jaxtyped, Float, Bool
-import typeguard
+from jaxtyping import Float, Bool
 
 import h5py
 import math
@@ -643,7 +642,7 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
 
         return ret
 
-    @jaxtyped(typechecker=typeguard.typechecked)
+    # @jaxtyped(typechecker=typeguard.typechecked)
     def resample_data(
         self,
         data: Float[np.ndarray, "time *dim"] | Bool[np.ndarray, "time *dim"],

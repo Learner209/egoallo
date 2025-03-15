@@ -19,12 +19,10 @@ import numpy as np
 from pathlib import Path
 from jaxtyping import Float, Int
 from .transforms import SE3, SO3
-from jaxtyping import jaxtyped
 from torch import Tensor
-import typeguard
 
 
-@jaxtyped(typechecker=typeguard.typechecked)
+# @jaxtyped(typechecker=typeguard.typechecked)
 class SmplhModel:
     """SMPL-H Wrapper using smplx.SMPLH with original API structure."""
 
@@ -61,7 +59,7 @@ class SmplhModel:
     def get_num_joints(self) -> int:
         return len(self.parent_indices)
 
-    @jaxtyped(typechecker=typeguard.typechecked)
+    # @jaxtyped(typechecker=typeguard.typechecked)
     def with_shape(self, betas: Float[Tensor, "*batch num_betas"]) -> "SmplhShaped":
         return SmplhShaped(self, betas)
 
@@ -70,7 +68,7 @@ class SmplhModel:
         return self
 
 
-@jaxtyped(typechecker=typeguard.typechecked)
+# @jaxtyped(typechecker=typeguard.typechecked)
 class SmplhShaped:
     body_model: SmplhModel
     """The underlying body model."""
@@ -85,7 +83,7 @@ class SmplhShaped:
     """Position of each shaped body joint relative to its parent. Does not
     include root."""
 
-    @jaxtyped(typechecker=typeguard.typechecked)
+    # @jaxtyped(typechecker=typeguard.typechecked)
     def __init__(
         self,
         model: SmplhModel,
@@ -133,7 +131,7 @@ class SmplhShaped:
             self.batch_axes + self.t_parent_joint.shape[-2:],
         )
 
-    @jaxtyped(typechecker=typeguard.typechecked)
+    # @jaxtyped(typechecker=typeguard.typechecked)
     def with_pose(
         self,
         T_world_root: Float[Tensor, "*batch 7"],
@@ -141,7 +139,7 @@ class SmplhShaped:
     ) -> "SmplhShapedAndPosed":
         return SmplhShapedAndPosed(self, T_world_root, local_quats)
 
-    @jaxtyped(typechecker=typeguard.typechecked)
+    # @jaxtyped(typechecker=typeguard.typechecked)
     def with_pose_decomposed(
         self,
         T_world_root: Float[Tensor, "*batch 7"],
@@ -165,7 +163,7 @@ class SmplhShaped:
         return self.with_pose(T_world_root, local_quats)
 
 
-@jaxtyped(typechecker=typeguard.typechecked)
+# @jaxtyped(typechecker=typeguard.typechecked)
 class SmplhShapedAndPosed:
     """Outputs from the SMPL-H model."""
 
@@ -229,7 +227,7 @@ class SmplhShapedAndPosed:
         return SmplMesh(self, output.vertices, self.shaped_model.body_model.faces)
 
 
-@jaxtyped(typechecker=typeguard.typechecked)
+# @jaxtyped(typechecker=typeguard.typechecked)
 class SmplMesh:
     """Outputs from the SMPL-H model."""
 
@@ -248,7 +246,7 @@ class SmplMesh:
         self.faces = faces
 
 
-@jaxtyped(typechecker=typeguard.typechecked)
+# @jaxtyped(typechecker=typeguard.typechecked)
 def forward_kinematics(
     T_world_root: Float[Tensor, "*#batch 7"],
     Rs_parent_joint: Float[Tensor, "*#batch joints 4"],

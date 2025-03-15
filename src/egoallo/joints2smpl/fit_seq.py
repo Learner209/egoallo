@@ -13,7 +13,6 @@ import numpy as np
 import smplx
 import torch
 import trimesh
-import typeguard
 import tyro
 
 # from egoallo import fncsmpl
@@ -23,7 +22,6 @@ from egoallo.joints2smpl import joints2smpl_config
 from egoallo.joints2smpl import smplify
 from egoallo.utils.setup_logger import setup_logger
 from jaxtyping import Float
-from jaxtyping import jaxtyped
 from torch import Tensor
 from tqdm import tqdm
 
@@ -175,7 +173,7 @@ def main(opt: Joints2SmplFittingConfig):
         joblib.dump(param, dir_save / ("%04d" % idx + ".pkl"), compress=3)
 
 
-@jaxtyped(typechecker=typeguard.typechecked)
+# @jaxtyped(typechecker=typeguard.typechecked)
 def joints2smpl_fit_seq(
     opt: Joints2SmplFittingConfig,
     body_model: fncsmpl.SmplhModel,

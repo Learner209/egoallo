@@ -4,16 +4,14 @@ from __future__ import annotations
 
 import numpy as np
 import torch
-import typeguard
 from jaxtyping import Float
-from jaxtyping import jaxtyped
 from torch import Tensor
 
 from . import fncsmpl_library
 from . import transforms
 
 
-@jaxtyped(typechecker=typeguard.typechecked)
+# @jaxtyped(typechecker=typeguard.typechecked)
 def get_T_world_cpf(mesh: fncsmpl_library.SmplMesh) -> Float[Tensor, "*batch 7"]:
     """Get the central pupil frame from a mesh. This assumes that we're using the SMPL-H model."""
 
@@ -29,7 +27,7 @@ def get_T_world_cpf(mesh: fncsmpl_library.SmplMesh) -> Float[Tensor, "*batch 7"]
     return torch.cat([cpf_orientation, cpf_pos], dim=-1)
 
 
-@jaxtyped(typechecker=typeguard.typechecked)
+# @jaxtyped(typechecker=typeguard.typechecked)
 def get_T_head_cpf(shaped: fncsmpl_library.SmplhShaped) -> Float[Tensor, "*batch 7"]:
     """Get the central pupil frame with respect to the head (joint 14). This
     assumes that we're using the SMPL-H model."""
@@ -55,7 +53,7 @@ def get_T_head_cpf(shaped: fncsmpl_library.SmplhShaped) -> Float[Tensor, "*batch
     )
 
 
-@jaxtyped(typechecker=typeguard.typechecked)
+# @jaxtyped(typechecker=typeguard.typechecked)
 def get_T_world_root_from_cpf_pose(
     posed: fncsmpl_library.SmplhShapedAndPosed,
     Ts_world_cpf: Float[Tensor | np.ndarray, "... 7"],
@@ -83,7 +81,7 @@ def get_T_world_root_from_cpf_pose(
     return T_world_root.wxyz_xyz
 
 
-@jaxtyped(typechecker=typeguard.typechecked)
+# @jaxtyped(typechecker=typeguard.typechecked)
 def get_T_world_cpf_from_root_pose(
     posed: fncsmpl_library.SmplhShapedAndPosed,
     T_world_root: Float[Tensor, "... 7"],
