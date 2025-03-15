@@ -114,6 +114,8 @@ class EgoAlloTrainConfig:
             smplh_model_path=self.smplh_model_path,
             use_fourier_in_masked_joints=self.use_fourier_in_masked_joints,
             use_joint_embeddings=self.use_joint_embeddings,
+            batch_size=self.batch_size,
+            seq_length=self.subseq_len,
         )
         # Create denoising config first since model config depends on it
         self.denoising = network.DenoisingConfig.from_joint_cond_mode(

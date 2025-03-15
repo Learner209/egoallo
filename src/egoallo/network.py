@@ -1648,21 +1648,23 @@ class EgoDenoiserConfig:
     )
 
     # Joint position conditioning settings
-    joint_cond_mode: "JointCondMode" = "vel_acc"
+    joint_cond_mode: "JointCondMode" = "absrel"
     joint_emb_dim: int = 8
 
     # Add SMPL-H model path configuration
     smplh_model_path: Path = Path("assets/smpl_based_model/smplh/SMPLH_NEUTRAL.pkl")
 
-    # Add new config parameter
     use_fourier_in_masked_joints: bool = (
         True  # Whether to apply Fourier encoding in make_cond_with_masked_joints
     )
 
-    # Add new config parameter
     use_joint_embeddings: bool = (
         True  # Whether to use joint index embeddings in conditioning
     )
+
+    # batch size and sequence length, used only for initializing smplhmodel.
+    batch_size: int = 64
+    seq_length: int = 128
 
     @cached_property
     def d_cond(self) -> int:
@@ -1998,7 +2000,7 @@ class EgoDenoiser(nn.Module):
         self.body_model = SmplhModel.load(
             config.smplh_model_path,
             use_pca=False,
-            batch_size=64 * 128,
+            batch_size=config.batch_size * config.seq_length,
         )
 
         Activation = {"gelu": nn.GELU, "relu": nn.ReLU}[config.activation]
