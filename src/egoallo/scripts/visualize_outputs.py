@@ -11,7 +11,6 @@ import torch
 import tyro
 import viser
 
-# from egoallo import fncsmpl
 from egoallo import fncsmpl_library as fncsmpl
 from egoallo.data.aria_mps import load_point_cloud_and_find_ground
 from egoallo.hand_detection_structs import CorrespondedAriaHandWristPoseDetections

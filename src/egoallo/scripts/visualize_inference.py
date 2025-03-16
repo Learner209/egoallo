@@ -7,7 +7,6 @@ import torch
 import tyro
 from pathlib import Path
 
-# from egoallo import fncsmpl
 from egoallo import fncsmpl_library as fncsmpl
 from egoallo.config.inference.inference_defaults import InferenceConfig
 from egoallo.data.dataclass import EgoTrainingData
@@ -41,7 +40,6 @@ def visualize_saved_trajectory(
     traj_root = config.egoexo.traj_root
 
     # Load SMPL-H body model
-    body_model = fncsmpl.SmplhModel.load(smplh_model_path, use_pca=False).to(device)
 
     # Generate output paths
     gt_path = output_dir / "gt_trajectory.mp4"
@@ -55,15 +53,15 @@ def visualize_saved_trajectory(
         gt_traj: DenoiseTrajType = torch.load(trajectory_path[0], map_location=device)
         pred_traj: DenoiseTrajType = torch.load(trajectory_path[1], map_location=device)
 
-        # Visualize ground truth
+        EgoTrainingData.visualize_ego_training_data(
+            gt_traj,
+            smplh_model_path,
+            str(gt_path),
+        )
 
-        EgoTrainingData.visualize_ego_training_data(gt_traj, body_model, str(gt_path))
-
-        # Visualize prediction
         EgoTrainingData.visualize_ego_training_data(
             pred_traj,
-            # gt_traj,
-            body_model,
+            smplh_model_path,
             str(pred_path),
         )
     elif dataset_type in ("AriaDataset", "AriaInferenceDataset", "EgoExoDataset"):
@@ -71,6 +69,11 @@ def visualize_saved_trajectory(
         from egoallo.network import AbsoluteDenoiseTraj
 
         pred_traj: DenoiseTrajType = torch.load(trajectory_path[1], map_location=device)
+        body_model = fncsmpl.SmplhModel.load(
+            smplh_model_path,
+            use_pca=False,
+            batch_size=1,
+        ).to(device)
 
         assert isinstance(pred_traj, AbsoluteDenoiseTraj), (
             "Prediction trajectory should be AbsoluteDenoiseTraj for visualization."

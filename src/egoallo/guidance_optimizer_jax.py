@@ -25,7 +25,8 @@ from jax import numpy as jnp
 from jaxtyping import Float, Int
 from torch import Tensor
 
-from . import fncsmpl, fncsmpl_jax, network
+from . import fncsmpl_library as fncsmpl
+from . import fncsmpl_jax, network
 from .transforms._so3 import SO3
 
 

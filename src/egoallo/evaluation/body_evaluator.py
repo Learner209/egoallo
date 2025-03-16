@@ -5,7 +5,6 @@ from typing import Optional
 import numpy as np
 import torch
 
-# from egoallo import fncsmpl
 from egoallo.config.train.train_config import EgoAlloTrainConfig
 from egoallo.constants import FOOT_HEIGHT_THRESHOLDS
 from egoallo.constants import FOOT_INDICES

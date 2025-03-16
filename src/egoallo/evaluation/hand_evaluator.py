@@ -12,7 +12,6 @@ import numpy as np
 import torch
 import yaml
 
-# from egoallo import fncsmpl
 from egoallo.constants import EGOEXO_NAMES_LEFT
 from egoallo.constants import EGOEXO_NAMES_RIGHT
 from egoallo.constants import VERTEX_IDS

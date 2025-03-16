@@ -6,7 +6,6 @@ from jaxtyping import Float
 
 from .network import EgoDenoiseTraj
 
-# from .fncsmpl import SmplhModel
 from .fncsmpl_library import SmplhModel
 from .hand_detection_structs import (
     CorrespondedAriaHandWristPoseDetections,

@@ -15,7 +15,6 @@ import torch
 import trimesh
 import tyro
 
-# from egoallo import fncsmpl
 from egoallo import fncsmpl_library as fncsmpl
 from egoallo.data.dataclass import EgoTrainingData
 from egoallo.joints2smpl import joints2smpl_config

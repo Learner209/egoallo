@@ -5,8 +5,6 @@ from smplx import SMPLH
 from egoallo.training_utils import ipdb_safety_net
 import pyvista as pv
 
-# from egoallo.fncsmpl import SmplhModel  # Replace with actual import
-# from egoallo.fncsmpl_library_complex import SmplhModel
 from egoallo.fncsmpl_library import SmplhModel as SmplhModel
 
 

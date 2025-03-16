@@ -13,7 +13,6 @@ import numpy as np
 import torch
 from egoallo.data.motion_processing import MotionProcessor
 
-# from egoallo.fncsmpl import SmplhModel
 from egoallo.fncsmpl_library import SmplhModel
 from egoallo.transforms import SE3
 from egoallo.transforms import SO3

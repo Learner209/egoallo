@@ -13,7 +13,6 @@ from tqdm import tqdm
 
 from . import fncsmpl_library as fncsmpl
 
-# from . import fncsmpl
 from . import network
 from .guidance_optimizer_jax import do_guidance_optimization
 from .guidance_optimizer_jax import GuidanceMode

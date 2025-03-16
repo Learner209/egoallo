@@ -9,7 +9,6 @@ import h5py
 import torch.cuda
 import tyro
 
-# from egoallo import fncsmpl
 from egoallo import fncsmpl_library as fncsmpl
 from egoallo import network
 from egoallo import training_utils

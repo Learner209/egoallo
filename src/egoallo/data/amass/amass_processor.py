@@ -11,9 +11,6 @@ import numpy as np
 import torch
 from egoallo.data.motion_processing import MotionProcessor
 
-# from egoallo.fncsmpl import SmplhModel
-# from egoallo.fncsmpl import SmplhShaped
-# from egoallo.fncsmpl import SmplhShapedAndPosed
 from egoallo.fncsmpl_library import SmplhModel
 from egoallo.fncsmpl_library import SmplhShaped
 from egoallo.fncsmpl_library import SmplhShapedAndPosed

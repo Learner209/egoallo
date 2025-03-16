@@ -11,25 +11,23 @@ from typing import Optional
 from typing import TYPE_CHECKING
 from typing import Tuple
 from dataclasses import dataclass
+from functools import reduce
 
 import numpy as np
 import torch
 from egoallo.fncsmpl_library import SE3
-from egoallo.fncsmpl_library import SmplhModel
 from egoallo.fncsmpl_library import SO3
 from egoallo.fncsmpl_extensions_library import get_T_world_cpf
 from tqdm import tqdm
 from videoio import VideoWriter
 from egoallo.setup_logger import setup_logger
+from OpenGL import GL as gl
 
 
-from egoallo.fncsmpl import (
-    SmplhShapedAndPosed,
-)
-from egoallo.viz.utils import create_skeleton_point_cloud
+import egoallo.fncsmpl_library as fncsmpl
+from .utils import create_skeleton_point_cloud, blend_with_background
 
 if TYPE_CHECKING:
-    from egoallo.fncsmpl_library import SmplhModel
     from egoallo.types import DenoiseTrajType
 
 
@@ -269,7 +267,7 @@ class SMPLViewer(BaseRenderer):
     def render_sequence(
         self,
         traj: DenoiseTrajType,
-        body_model: SmplhModel,
+        smplh_model_path: Path,
         output_path: str = "output.mp4",
     ) -> None:
         """Render SMPL sequence to video using denoised trajectory data."""
@@ -283,7 +281,6 @@ class SMPLViewer(BaseRenderer):
         device = torch.device("cpu")
 
         traj = traj.to(device)
-        body_model = body_model.to(device)
 
         # Prepare SMPL sequence
         # denoised_traj = denoised_traj
@@ -296,7 +293,16 @@ class SMPLViewer(BaseRenderer):
         traj = traj.map(
             lambda x: x.unsqueeze(0),
         )  # prepend a new axis to incorporate changes in `apply_to_body` function.
-        posed: SmplhShapedAndPosed = traj.apply_to_body(body_model)
+        batch_size = reduce(lambda x, y: x * y, traj.betas.shape[:-1])
+        posed: fncsmpl.SmplhShapedAndPosed = traj.apply_to_body(
+            fncsmpl.SmplhModel.load(
+                smplh_model_path,
+                use_pca=False,
+                batch_size=batch_size,
+            ).to(
+                device,
+            ),
+        )
         posed = posed.map(
             lambda x: x.squeeze(0),
         )  # remove the first dim as a compensation for the denoised_traj unsqueeze operation.
@@ -451,7 +457,11 @@ class SMPLViewer(BaseRenderer):
                     video_writer=vw,
                     capture=capturing,
                     camera_pose=T_world_cam,
-                    body_model=body_model,
+                    body_model=fncsmpl.SmplhModel.load(
+                        smplh_model_path,
+                        use_pca=False,
+                        batch_size=1,
+                    ).to(device),  # per-frame rendering always uses batch size 1
                 )
 
             self._flush_remaining_frames(video_writer=vw, capture=capturing)
@@ -557,22 +567,3 @@ class SMPLViewer(BaseRenderer):
         while color is not None:
             video_writer.write(color)
             color = capture.get_first_requested_color()
-
-
-def visualize_ego_training_data(
-    denoised_traj: DenoiseTrajType,
-    body_model: SmplhModel,
-    output_path: str = "output.mp4",
-    **kwargs,
-) -> None:
-    """
-    Main visualization function for denoised trajectories.
-
-    Args:
-        denoised_traj: Denoised trajectory containing pose sequences
-        body_model: SMPL body model for mesh generation
-        output_path: Path to save the output video
-    """
-
-    viewer = SMPLViewer(**kwargs)
-    viewer.render_sequence(denoised_traj, body_model, output_path)

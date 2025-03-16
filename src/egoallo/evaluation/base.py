@@ -4,7 +4,6 @@ from typing import Optional
 
 import torch
 
-# from egoallo import fncsmpl
 from egoallo import fncsmpl_library as fncsmpl
 from egoallo.types import Device
 from egoallo.types import MetricsDict

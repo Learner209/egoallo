@@ -14,7 +14,6 @@ if TYPE_CHECKING:
     from egoallo.types import DenoiseTrajType
     from egoallo.types import DatasetType
 
-# from .. import fncsmpl, fncsmpl_extensions
 from .. import fncsmpl_library as fncsmpl
 from .. import fncsmpl_extensions_library as fncsmpl_extensions
 from .. import transforms as tf
@@ -23,7 +22,7 @@ from typing import Optional, TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from egoallo.types import DenoiseTrajType
-from ..viz.smpl_viewer import visualize_ego_training_data as viz_ego_data
+from ..viz.smpl_viewer import SMPLViewer
 
 from egoallo.setup_logger import setup_logger
 
@@ -221,16 +220,14 @@ class EgoTrainingData(TensorDataclass):
     @staticmethod
     def visualize_ego_training_data(
         data: "DenoiseTrajType",
-        body_model: fncsmpl.SmplhModel,
+        smplh_model_path: Path = Path(
+            "assets/smpl_based_model/smplh/SMPLH_NEUTRAL.pkl",
+        ),
         output_path: str = "output.mp4",
         **kwargs,
     ):
-        viz_ego_data(
-            data,
-            body_model=body_model,
-            output_path=output_path,
-            **kwargs,
-        )
+        viewer = SMPLViewer(**kwargs)
+        viewer.render_sequence(data, smplh_model_path, output_path)
 
     # @jaxtyped(typechecker=typeguard.typechecked)
     def preprocess(self, _rotate_radian: None | Tensor = None) -> "EgoTrainingData":

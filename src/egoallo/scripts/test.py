@@ -17,7 +17,6 @@ from typing import Union, Dict
 if TYPE_CHECKING:
     from egoallo.types import DenoiseTrajType
 
-# from egoallo import fncsmpl
 from egoallo import fncsmpl_library as fncsmpl
 from egoallo.config import CONFIG_FILE, make_cfg
 from egoallo.config.inference.inference_defaults import InferenceConfig
@@ -408,7 +407,6 @@ class TestRunner:
                 torch.cuda.empty_cache()
 
             # Prepare arguments for parallel metric computation
-            # breakpoint()
             metric_args = [
                 (
                     {

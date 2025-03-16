@@ -33,7 +33,6 @@ from torch import Tensor
 if TYPE_CHECKING:
     from egoallo.types import DenoiseTrajType, JointCondMode
 
-# from .fncsmpl import SmplhModel, SmplhShapedAndPosed
 from .fncsmpl_library import SmplhModel, SmplhShapedAndPosed
 from .tensor_dataclass import TensorDataclass
 from .transforms import SE3, SO3
