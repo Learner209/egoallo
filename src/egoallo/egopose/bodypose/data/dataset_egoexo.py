@@ -30,6 +30,7 @@ random.seed(1)
 
 class Dataset_EgoExo(Dataset):
     def __init__(self, config: Dict[str, Any]):
+        raise NotImplementedError("Dataset_EgoExo is poorly implemented yet.")
         super(Dataset_EgoExo, self).__init__()
 
         self.root = config["dataset_path"]

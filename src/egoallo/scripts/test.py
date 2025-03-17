@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 
 from egoallo import fncsmpl_library as fncsmpl
 from egoallo.config import CONFIG_FILE, make_cfg
-from egoallo.config.inference.inference_defaults import InferenceConfig
+from egoallo.config.inference.defaults import InferenceConfig
 from egoallo.data import make_batch_collator, build_dataset
 from egoallo.config.train.train_config import EgoAlloTrainConfig
 from egoallo.data.dataclass import EgoTrainingData
@@ -161,11 +161,11 @@ class TestRunner:
     def _initialize_components(self) -> None:
         """Initialize all required components."""
         runtime_config: EgoAlloTrainConfig = load_runtime_config(
-            self.inference_config.checkpoint_dir,
+            Path(self.inference_config.checkpoint_dir),
         )
         self.runtime_config = runtime_config
         self.denoiser, self.model_config = load_denoiser(
-            self.inference_config.checkpoint_dir,
+            Path(self.inference_config.checkpoint_dir),
             runtime_config,
         )
         self.denoiser = self.denoiser.to(self.device)
@@ -363,7 +363,6 @@ class TestRunner:
         # Create temporary directory for intermediate files
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_output_dir = Path(temp_dir)
-            # temp_output_dir = Path("./exp/test-debug-too-many-open-files")
 
             gt_trajs = []
             denoised_trajs = []
@@ -488,6 +487,14 @@ class TestRunner:
                 pool.starmap(save_single_traj_helper, save_args)
 
             # Run visualizations using subprocess for each trajectory
+            extract_path_name_funcs_dict = {
+                "AriaDataset": lambda take_name: Path(
+                    self.inference_config.egoexo.egoexo_dataset_path,
+                )
+                / "takes"
+                / Path(take_name.split("name_")[1].split("_uid_")[0]),
+                "AdaptiveAmassHdf5Dataset": lambda take_name: take_name,
+            }
             if self.inference_config.visualize_traj:
                 denoise_traj_type: str = (
                     self.runtime_config.denoising._repr_denoise_traj_type()
@@ -495,16 +502,10 @@ class TestRunner:
                 for take_name in identifiers:
                     gt_path = temp_output_dir / take_name / f"gt_{take_name}.pt"
                     est_path = temp_output_dir / take_name / f"est_{take_name}.pt"
-                    # egoexo_utils: EgoExoUtils = EGOEXO_UTILS_INST
-                    # Parse out take_uid from take_name
-                    take_name.split("uid_")[1].split("_t")[0]
-                    this_take_name = take_name.split("name_")[1].split("_uid_")[0]
 
-                    this_take_path = (
-                        Path(self.inference_config.egoexo_dataset_path)
-                        / "takes"
-                        / Path(this_take_name)
-                    )
+                    this_take_path = extract_path_name_funcs_dict[
+                        self.inference_config.dataset_type
+                    ](take_name)
 
                     cmd = [
                         "python",
@@ -520,9 +521,9 @@ class TestRunner:
                         str(temp_output_dir / take_name),
                         "--dataset-type",
                         self.inference_config.dataset_type,
-                        "--config.egoexo.traj_root",
-                        str(this_take_path),
                     ]
+                    if self.inference_config.dataset_type == "AriaDataset":
+                        cmd += ["--config.egoexo.traj_root", str(this_take_path)]
 
                     # Remove empty arguments
                     cmd = [arg for arg in cmd if arg]
@@ -550,7 +551,6 @@ class TestRunner:
 
 def main(inference_config: InferenceConfig, debug: bool = False) -> None:
     """Main entry point."""
-    # try:
     if debug:
         import builtins
 
@@ -559,13 +559,18 @@ def main(inference_config: InferenceConfig, debug: bool = False) -> None:
     runner = TestRunner(inference_config)
     eval_metrics = runner.run()
     eval_metrics.print_metrics(logger=logger, level="info")
-    # except Exception as e:
-    #     logger.error(f"Test run failed: {str(e)}")
-    #     raise
 
 
 if __name__ == "__main__":
-    import tyro
+    import hydra
+    from omegaconf import DictConfig
+    from hydra.utils import instantiate
 
     ipdb_safety_net()
-    tyro.cli(main)
+
+    @hydra.main(version_base="1.3", config_path="../../../config")
+    def test(cfg: DictConfig) -> None:
+        inference_config: InferenceConfig = instantiate(cfg.inference)
+        main(inference_config)
+
+    test()

@@ -24,7 +24,7 @@ from jaxtyping import Float
 from torch import Tensor
 
 if TYPE_CHECKING:
-    from egoallo.config.inference.inference_egoexo import EgoExoInferenceConfig
+    from egoallo.config.inference.egoexo import EgoExoInferenceConfig
 
 local_config_file = CONFIG_FILE
 CFG = make_cfg(config_name="defaults", config_file=local_config_file, cli_args=[])

@@ -1,23 +1,17 @@
 from __future__ import annotations
 
 import dataclasses
-from pathlib import Path
-from typing import TYPE_CHECKING
 
 from egoallo.types import DatasetSliceStrategy
 from egoallo.types import DatasetType
+from typing import Any
+from egoallo.config.inference.defaults import InferenceConfig
+from egoallo.config.data.egoexo.defaults import EgoExoConfig
 
 
-if TYPE_CHECKING:
-    from egoallo.config.inference.inference_defaults import InferenceConfig
-
-
+@dataclasses.dataclass
 class EgoExoInferenceConfig(InferenceConfig):
     """Configuration for EgoExo dataset inference."""
-
-    # Dataset-specific configs
-    bodypose_anno_dir: tuple[Path, ...] = dataclasses.field(default=None)  # type: ignore
-    """Paths to body pose annotation directories, only used when dataset_type is EgoExoDataset"""
 
     dataset_slice_strategy: DatasetSliceStrategy = "full_sequence"
     """Strategy for slicing sequences: 'sliding_window' or 'full_sequence'"""
@@ -27,3 +21,11 @@ class EgoExoInferenceConfig(InferenceConfig):
 
     dataset_type: DatasetType = "EgoExoDataset"
     """Dataset type to use"""
+
+    # Add EgoExo config instance
+    egoexo: EgoExoConfig = dataclasses.field(default_factory=EgoExoConfig)
+    """EgoExo dataset specific configurations"""
+
+    def __getitem__(self, key: str) -> Any:
+        """Enable dictionary-style access to attributes."""
+        return getattr(self, key)

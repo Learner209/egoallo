@@ -60,8 +60,8 @@ egoexo -o $egoexo_output_dir --parts annotations metadata ego_pose_pseudo_gt --b
       python inference.py
       ```
 
-  Modify the corresponding training option file at `options/inference_egoexo.json`. The
-  inference will copy the format of the `dummy_test.json` file and will be stored in
+  Modify the corresponding training option file at `options/egoexo.json`. The inference
+  will copy the format of the `dummy_test.json` file and will be stored in
   `results/EgoExo4D/inference/test_pred.json` by default. Download pretrained
   [EvalAI baseline](https://eval.ai/web/challenges/challenge-page/2245/overview) model
   weights of this baseline from

@@ -1,0 +1,35 @@
+_target_: egoallo.network.EgoDenoiserConfig
+
+# Basic parameters
+max_t: 1000
+fourier_enc_freqs: 3
+d_latent: 512
+d_feedforward: 2048
+d_noise_emb: 1024
+num_heads: 4
+encoder_layers: 6
+decoder_layers: 6
+dropout_p: 0.0
+
+# MAE parameters
+include_hands: false
+
+# Model settings
+activation: gelu
+positional_encoding: rope
+noise_conditioning: token
+xattn_mode: kv_from_cond_q_from_x
+
+# Joint position conditioning settings
+joint_cond_mode: absrel
+joint_emb_dim: 8
+
+# SMPL-H model path
+smplh_model_path: assets/smpl_based_model/smplh/SMPLH_NEUTRAL.pkl
+
+use_fourier_in_masked_joints: true
+use_joint_embeddings: true
+
+# Batch settings
+batch_size: 64
+seq_length: 128

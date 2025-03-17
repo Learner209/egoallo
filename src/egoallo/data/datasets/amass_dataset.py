@@ -1,6 +1,7 @@
 from typing import TYPE_CHECKING, Any, Literal, Union, assert_never, cast
 from jaxtyping import Float, Bool
 
+from pathlib import Path
 import h5py
 import math
 import random
@@ -415,7 +416,7 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
             list[str]: List of groups that meet the criteria.
         """
         # Get all paths from the text file
-        all_paths = self.config.dataset_files_path.read_text().splitlines()
+        all_paths = Path(self.config.dataset_files_path).read_text().splitlines()
 
         # Filter paths that start with any of the split names
         split_prefixes = [split + "/" for split in self.config.splits]
@@ -628,7 +629,7 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         metadata = EgoTrainingData.MetaData()
         metadata.stage = "raw"  # Set initial stage
         # uid servers as a null value just for compatibility with EgoExoDataset
-        metadata.take_name = (f"name_{group}_uid_{group}_t{start_t}_{end_t}",)
+        metadata.take_name = (f"{group}_t{start_t}_{end_t}",)
         metadata.scope = "train"
         metadata.dataset_type = self.__class__.__name__
 

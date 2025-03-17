@@ -18,6 +18,7 @@ import smplx
 import numpy as np
 from pathlib import Path
 from jaxtyping import Float, Int
+from typing import Self
 from .transforms import SE3, SO3
 from torch import Tensor
 from .tensor_dataclass import TensorDataclass
@@ -119,6 +120,11 @@ class SmplhModel(TensorDataclass):
             t_parent_joint=t_parent_joint,
             betas=betas,
         )
+
+    def to(self, device: torch.device) -> Self:
+        super(SmplhModel, self).to(device)
+        self.model = self.model.to(device)
+        return self
 
 
 # @jaxtyped(typechecker=typeguard.typechecked)

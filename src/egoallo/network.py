@@ -1635,7 +1635,6 @@ class EgoDenoiserConfig:
     dropout_p: float = 0.0
 
     # MAE parameters
-    mask_ratio: float = 0.75  # Ratio of joints to mask during training
     include_hands: bool = False
 
     # Model settings

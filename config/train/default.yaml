@@ -1,0 +1,28 @@
+_target_: egoallo.config.train.train_config.EgoAlloTrainConfig
+
+experiment_name: Mar_16
+dataset_hdf5_path: ./data/amass_rich_hps/processed_amass_rich_hps_correct.hdf5
+dataset_files_path: ./data/amass_rich_hps/processed_amass_rich_hps_correct.txt
+
+spatial_mask_ratio: 0.75
+temporal_mask_ratio: 0.3
+
+joint_cond_mode: absrel
+
+splits:
+  - train
+
+use_fourier_in_masked_joints: true
+use_joint_embeddings: true
+
+fps_aug: false
+
+traj_aug: false
+
+batch_size: 64
+
+data_collate_fn: TensorOnlyDataclassBatchCollator
+
+model: ${network.ego_denoiser}
+denoising: ${network.denoising}
+loss: ${train.loss}

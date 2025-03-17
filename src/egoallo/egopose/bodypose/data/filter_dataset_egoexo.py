@@ -162,6 +162,9 @@ class Filtered_Dataset_EgoExo(Dataset):
 
 class Filtered_Dataset_EgoExo_inference(Dataset):
     def __init__(self, opt):
+        raise NotImplementedError(
+            "Filtered_Dataset_EgoExo_inference is poorly implemented.",
+        )
         super(Filtered_Dataset_EgoExo_inference, self).__init__()
 
         self.split = opt["split"]

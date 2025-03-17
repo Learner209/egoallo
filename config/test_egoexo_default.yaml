@@ -1,0 +1,11 @@
+defaults:
+  - inference: egoexo
+  - egoexo: default
+  - _self_
+
+hydra:
+  run:
+    dir: outputs/${now:%Y-%m-%d}/${inference.output_dir}
+  sweep:
+    dir: multirun/${now:%Y-%m-%d}/${inference.output_dir}
+    subdir: ${hydra.job.num}

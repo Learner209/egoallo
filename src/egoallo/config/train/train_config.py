@@ -16,6 +16,11 @@ class EgoAlloTrainConfig:
 
     from egoallo.data.dataclass import EgoTrainingData
 
+    # Model and denoising configuration
+    model: network.EgoDenoiserConfig = dataclasses.field(init=True)
+    denoising: network.DenoisingConfig = dataclasses.field(init=True)
+    loss: training_loss.TrainingLossConfig = dataclasses.field(init=True)
+
     # experiment config.
     experiment_name: str = "motion_prior"
     experiment_dir: Path = Path("")
@@ -38,13 +43,6 @@ class EgoAlloTrainConfig:
 
     joint_cond_mode: JointCondMode = "absrel"
 
-    # Model and denoising configuration
-    model: network.EgoDenoiserConfig = dataclasses.field(init=False)
-    denoising: network.DenoisingConfig = dataclasses.field(init=False)
-    loss: training_loss.TrainingLossConfig = dataclasses.field(
-        default_factory=training_loss.TrainingLossConfig,
-    )
-
     # Dataset arguments.
     batch_size: int = 256
     """Effective batch size."""
@@ -59,7 +57,7 @@ class EgoAlloTrainConfig:
         "ExtendedBatchCollator",
         "EgoTrainingDataBatchCollator",
         "TensorOnlyDataclassBatchCollator",
-    ] = "EgoTrainingDataBatchCollator"
+    ] = "TensorOnlyDataclassBatchCollator"
     dataset_type: DatasetType = "AdaptiveAmassHdf5Dataset"
     bodypose_anno_dir: Path | None = None
     """Path to body pose annotation directory, only used when dataset_type is EgoExoDataset"""
@@ -105,20 +103,3 @@ class EgoAlloTrainConfig:
         ],
     )
     """Keys that contain time-series data in the `EgoTrainingData` dataclass."""
-
-    def __post_init__(self):
-        # Create model config with denoising settings
-        self.model = network.EgoDenoiserConfig(
-            mask_ratio=self.spatial_mask_ratio,
-            joint_cond_mode=self.joint_cond_mode,
-            smplh_model_path=self.smplh_model_path,
-            use_fourier_in_masked_joints=self.use_fourier_in_masked_joints,
-            use_joint_embeddings=self.use_joint_embeddings,
-            batch_size=self.batch_size,
-            seq_length=self.subseq_len,
-        )
-        # Create denoising config first since model config depends on it
-        self.denoising = network.DenoisingConfig.from_joint_cond_mode(
-            joint_cond_mode=self.joint_cond_mode,
-            include_hands=self.model.include_hands,
-        )

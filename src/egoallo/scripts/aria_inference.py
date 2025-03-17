@@ -22,7 +22,7 @@ from egoallo.inference_utils import (
 )
 from egoallo.transforms import SE3, SO3
 from egoallo.training_utils import ipdb_safety_net
-from egoallo.config.inference.inference_defaults import InferenceConfig
+from egoallo.config.inference.defaults import InferenceConfig
 from egoallo.utils.setup_logger import setup_logger
 
 if TYPE_CHECKING:

@@ -12,7 +12,7 @@ from utils import utils_option as option
 from data.select_dataset import define_Dataset
 
 
-def main(json_path="options/inference_egoexo.json"):
+def main(json_path="options/egoexo.json"):
     """
     # ----------------------------------------
     # Step--1 (prepare opt)

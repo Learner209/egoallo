@@ -8,7 +8,7 @@ import tyro
 from pathlib import Path
 
 from egoallo import fncsmpl_library as fncsmpl
-from egoallo.config.inference.inference_defaults import InferenceConfig
+from egoallo.config.inference.defaults import InferenceConfig
 from egoallo.data.dataclass import EgoTrainingData
 from egoallo.scripts.aria_inference import AriaInference
 from egoallo.types import DenoiseTrajType, DenoiseTrajTypeLiteral, DatasetType
@@ -37,7 +37,6 @@ def visualize_saved_trajectory(
     """
     # Create output directory
     output_dir.mkdir(exist_ok=True, parents=True)
-    traj_root = config.egoexo.traj_root
 
     # Load SMPL-H body model
 
@@ -65,6 +64,7 @@ def visualize_saved_trajectory(
             str(pred_path),
         )
     elif dataset_type in ("AriaDataset", "AriaInferenceDataset", "EgoExoDataset"):
+        traj_root = config.egoexo.traj_root
         # Just load and visualize prediction
         from egoallo.network import AbsoluteDenoiseTraj
 

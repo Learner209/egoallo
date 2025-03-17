@@ -1,0 +1,4 @@
+_target_: egoallo.config.inference.egoexo.EgoExoInferenceConfig
+
+egoexo: ${egoexo}
+output_dir: ./exp/test-egoexo-${now:%Y-%m-%d}

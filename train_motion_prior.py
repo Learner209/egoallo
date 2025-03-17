@@ -19,12 +19,12 @@ import time
 
 import torch.optim.lr_scheduler
 import torch.utils.data
-import tyro
 import yaml
 from accelerate import Accelerator, DataLoaderConfiguration
 from accelerate.utils import ProjectConfiguration
 from loguru import logger
 
+from hydra.utils import instantiate
 
 # Install hook before importing any modules you want to typecheck
 # with install_import_hook("egoallo", "typeguard.typechecked"):
@@ -36,7 +36,7 @@ import wandb
 from torch.amp import autocast
 import datetime
 import tempfile
-from egoallo.config.inference.inference_defaults import InferenceConfig
+from egoallo.config.inference.defaults import InferenceConfig
 from egoallo.scripts.test import TestRunner
 import numpy as np
 
@@ -401,4 +401,12 @@ def run_training(
 
 
 if __name__ == "__main__":
-    tyro.cli(run_training)
+    import hydra
+    from omegaconf import DictConfig
+
+    @hydra.main(version_base="1.3", config_path="config")
+    def main(cfg: DictConfig) -> None:
+        train_config: EgoAlloTrainConfig = instantiate(cfg.train)
+        run_training(train_config)
+
+    main()
