@@ -77,7 +77,7 @@ def main(
                             2
                         ]  # get original path name
                         group_name = (
-                            Path(group_name).stem
+                            str(Path(group_name).with_suffix(""))
                             + f"_{start_idx}_{end_idx}"
                             + Path(group_name).suffix
                         )
