@@ -8,6 +8,7 @@ import torch.utils.data
 from jaxtyping import Bool, Float
 from egoallo.transforms import SO3, SE3
 from torch import Tensor
+from typing import Generator
 
 
 if TYPE_CHECKING:
@@ -112,25 +113,21 @@ class EgoTrainingData(TensorDataclass):
 
     @staticmethod
     def load_from_npz(
-        body_model: fncsmpl.SmplhModel,
-        path: Path,
+        smplh_model_path: Path,
+        data_path: Path,
         include_hands: bool,
-    ) -> "EgoTrainingData":
+        device: torch.device,
+    ) -> Generator[tuple["EgoTrainingData", tuple[int, int]], None, None]:
         """Load a single trajectory from a (processed_30fps) npz file."""
         raw_fields = {
             k: torch.from_numpy(v.astype(np.float32) if v.dtype == np.float64 else v)
-            for k, v in np.load(path, allow_pickle=True).items()
+            for k, v in np.load(data_path, allow_pickle=True).items()
             if v.dtype in (np.float32, np.float64)
         }
 
-        # import ipdb; ipdb.set_trace()
         timesteps = raw_fields["root_orient"].shape[0]
+
         # preprocessing
-        # 1. remove the first joint (root) from contacts.
-        if raw_fields["contacts"].shape == (timesteps, 52) or raw_fields[
-            "contacts"
-        ].shape == (timesteps, 22):
-            raw_fields["contacts"] = raw_fields["contacts"][:, 1:]
 
         betas = (
             raw_fields["betas"]
@@ -156,8 +153,6 @@ class EgoTrainingData(TensorDataclass):
             raw_fields["betas"] = torch.cat([raw_fields["betas"], torch.zeros(6)])
         assert raw_fields["betas"].shape[0] == 16
 
-        device = body_model.weights.device
-
         T_world_root = torch.cat(
             [
                 tf.SO3.exp(raw_fields["root_orient"]).wxyz,
@@ -173,49 +168,86 @@ class EgoTrainingData(TensorDataclass):
             raw_fields["pose_hand"].reshape(timesteps, 30, 3),
         ).wxyz.to(device)
 
-        shaped = body_model.with_shape(raw_fields["betas"].unsqueeze(0).to(device))
+        window_size = 30000
+        for i in range(0, timesteps, window_size):
+            end_idx = min(i + window_size, timesteps)
+            batch_size = end_idx - i
+            body_model = fncsmpl.SmplhModel.load(
+                smplh_model_path,
+                use_pca=False,
+                batch_size=batch_size,
+            ).to(device)
 
-        # Batch the SMPL body model operations, this can be pretty memory-intensive...
-        posed = shaped.with_pose_decomposed(
-            T_world_root=T_world_root.to(device),
-            body_quats=body_quats.to(device),
-        )
+            shaped_batch = body_model.with_shape(
+                raw_fields["betas"].unsqueeze(0).repeat(batch_size, 1).to(device),
+            )
 
-        joints_wrt_world = raw_fields["joints"]
+            T_world_root_batch = T_world_root[i:end_idx].to(device)
+            body_quats_batch = body_quats[i:end_idx].to(device)
 
-        # Align T_world_cpf (only x,y translation component)
-        T_world_cpf = (
-            tf.SE3(posed.Ts_world_joint[:, 14, :])  # T_world_head
-            @ tf.SE3(fncsmpl_extensions.get_T_head_cpf(shaped))
-        ).parameters()
+            posed_batch = shaped_batch.with_pose_decomposed(
+                T_world_root=T_world_root_batch,
+                body_quats=body_quats_batch,
+            )
 
-        # METADATA can be omittted and set as default param.
-        return EgoTrainingData(
-            T_world_root=T_world_root.cpu(),
-            contacts=raw_fields["contacts"][:, :22].cpu(),  # root is included.
-            betas=raw_fields["betas"].unsqueeze(0).cpu(),
-            joints_wrt_world=joints_wrt_world.cpu(),  # root is included.
-            body_quats=body_quats.cpu(),
-            # CPF frame stuff.
-            T_world_cpf=T_world_cpf.cpu(),
-            height_from_floor=T_world_cpf[:, 6:7].cpu(),
-            joints_wrt_cpf=(
-                # unsqueeze so both shapes are (timesteps, joints, dim)
-                tf.SE3(T_world_cpf[:, None, :]).inverse()
-                @ joints_wrt_world.to(T_world_cpf.device)
-            ).cpu(),
-            mask=torch.ones((timesteps,), dtype=torch.bool),
-            hand_quats=hand_quats.cpu() if include_hands else None,
-            visible_joints_mask=None,
-            metadata=EgoTrainingData.MetaData(  # default metadata.
-                take_name=(path.name,),
-                frame_keys=tuple(),  # Convert to tuple of ints
-                stage="raw",
-                scope="test",
-            ),
-        )
+            # Align T_world_cpf (only x,y translation component)
+            T_world_cpf = (
+                tf.SE3(posed_batch.Ts_world_joint[:, 14, :])  # T_world_head
+                @ tf.SE3(fncsmpl_extensions.get_T_head_cpf(shaped_batch))
+            ).parameters()
 
-        return ego_data
+            joints_wrt_world = raw_fields["joints"]
+
+            # let take_name be the stem of data_path suffixed with window start and end like: "_window_{start}_{end}" using pathlib functionliaty.
+            take_name = (
+                Path(data_path).stem + "_window_{start}_{end}" + Path(data_path).suffix
+            )
+
+            # METADATA can be omittted and set as default param.
+            yield (
+                EgoTrainingData(
+                    T_world_root=T_world_root[i:end_idx],
+                    contacts=raw_fields["contacts"][
+                        i:end_idx,
+                        :22,
+                    ],  # root is included.
+                    betas=raw_fields["betas"].unsqueeze(0),
+                    joints_wrt_world=joints_wrt_world[
+                        i:end_idx,
+                        :,
+                    ],  # root is included.
+                    body_quats=body_quats[i:end_idx],
+                    # CPF frame stuff.
+                    T_world_cpf=T_world_cpf,
+                    height_from_floor=T_world_cpf[:, 6:7],
+                    joints_wrt_cpf=(
+                        # unsqueeze so both shapes are (timesteps, joints, dim)
+                        tf.SE3(T_world_cpf[:, None, :]).inverse()
+                        @ joints_wrt_world[i:end_idx].to(T_world_cpf.device)
+                    ),
+                    mask=torch.ones((end_idx - i,), dtype=torch.bool),
+                    hand_quats=hand_quats[i:end_idx] if include_hands else None,
+                    visible_joints_mask=None,
+                    metadata=EgoTrainingData.MetaData(  # default metadata.
+                        take_name=(take_name,),
+                        frame_keys=tuple(),  # Convert to tuple of ints
+                        stage="raw",
+                        scope="test",
+                    ),
+                ),
+                (i, end_idx),
+            )
+
+            del shaped_batch
+            del posed_batch
+            del body_model
+            del T_world_root_batch
+            del body_quats_batch
+            del T_world_cpf
+
+            import gc
+
+            gc.collect()
 
     @staticmethod
     def visualize_ego_training_data(
