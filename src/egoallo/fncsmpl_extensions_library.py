@@ -15,9 +15,9 @@ from . import transforms
 def get_T_world_cpf(mesh: fncsmpl_library.SmplMesh) -> Float[Tensor, "*batch 7"]:
     """Get the central pupil frame from a mesh. This assumes that we're using the SMPL-H model."""
 
-    assert mesh.verts.shape[-2:] == (6890, 3), "Not using SMPL-H model!"
-    right_eye = (mesh.verts[..., 6260, :] + mesh.verts[..., 6262, :]) / 2.0
-    left_eye = (mesh.verts[..., 2800, :] + mesh.verts[..., 2802, :]) / 2.0
+    assert mesh.vertices.shape[-2:] == (6890, 3), "Not using SMPL-H model!"
+    right_eye = (mesh.vertices[..., 6260, :] + mesh.vertices[..., 6262, :]) / 2.0
+    left_eye = (mesh.vertices[..., 2800, :] + mesh.vertices[..., 2802, :]) / 2.0
 
     # CPF is between the two eyes.
     cpf_pos = (right_eye + left_eye) / 2.0
