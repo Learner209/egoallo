@@ -23,7 +23,8 @@ from typing import Optional, TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from egoallo.types import DenoiseTrajType
-from ..viz.smpl_viewer import SMPLViewer
+# from ..viz.smpl_viewer import SMPLViewer
+from ..viz.smpl_pyrender_viewer import SMPLViewer
 
 from egoallo.setup_logger import setup_logger
 
@@ -259,7 +260,7 @@ class EgoTrainingData(TensorDataclass):
         **kwargs,
     ):
         viewer = SMPLViewer(**kwargs)
-        viewer.render_sequence(data, smplh_model_path, output_path)
+        viewer.render_sequence(data, smplh_model_path, output_path, online_render=False)
 
     # @jaxtyped(typechecker=typeguard.typechecked)
     def preprocess(self, _rotate_radian: None | Tensor = None) -> "EgoTrainingData":
@@ -515,6 +516,12 @@ class EgoTrainingData(TensorDataclass):
         return self
 
     def _post_process(self, traj: "DenoiseTrajType") -> "DenoiseTrajType":
+        """
+        Postprocess the DenoiseTrajType.
+        1. If the traj has been already rotated, rotate back.
+        2. Add initial x,y position offset.
+        3. Add initial height offset.
+        """
         from egoallo.network import AbsoluteDenoiseTraj
 
         assert self.metadata.stage == "postprocessed"
@@ -556,7 +563,11 @@ class EgoTrainingData(TensorDataclass):
         return traj
 
     def _set_traj(self, traj: "DenoiseTrajType") -> "DenoiseTrajType":
-        # 2. assign joints_wrt_world and visible_joints_mask
+        """
+        Set the trajectory for postprocessing.
+        Set the joints_wrt_world and visible_joints_mask.
+        Set the metadata.
+        """
         assert traj.joints_wrt_world is None and traj.visible_joints_mask is None, (
             "joints_wrt_world and visible_joints_mask should be None for postprocessing."
         )

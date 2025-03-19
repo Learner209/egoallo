@@ -10,6 +10,8 @@ import tyro
 
 from egoallo import training_utils
 from egoallo.data.dataclass import EgoTrainingData
+from egoallo import network
+import dataclasses
 
 # faulthandler.enable()
 import os
@@ -60,16 +62,13 @@ def main(
                     "The data should be test data."
                 )
 
-                # output_name = npz_path.stem + ".mp4"
-                # output_path = Path("./exp/debug_frame_rate_diff/")
-                # output_path.mkdir(parents=True, exist_ok=True)
-
-                # if not (output_path / output_name).exists():
-                #     EgoTrainingData.visualize_ego_training_data(
-                #         train_traj,
-                #         body_model,
-                #         output_path=str(output_path / output_name),
-                #     )
+                denoising: network.DenoisingConfig = dataclasses.field(init=True)
+                traj = denoising.from_ego_data(test_data, include_hands=include_hands)
+                EgoTrainingData.visualize_ego_training_data(
+                    traj,
+                    smplh_model_path,
+                    output_path="./test.mp4",
+                )
 
                 for data_npz_dir in data_npz_dirs:
                     if str(data_npz_dir) in str(npz_path):

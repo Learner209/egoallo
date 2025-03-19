@@ -1045,7 +1045,7 @@ class AbsoluteDenoiseTraj(BaseDenoiseTraj):
         # if coco_regressor is not None:
         #     gt_mesh = gt_posed.lbs()
         #     gt_coco_joints = torch.einsum(
-        #         "ij,...jk->...ik", coco_regressor, gt_mesh.verts
+        #         "ij,...jk->...ik", coco_regressor, gt_mesh.vertices
         #     )
 
         #     num_samples = sampled_T_world_root.shape[0]
@@ -1056,7 +1056,7 @@ class AbsoluteDenoiseTraj(BaseDenoiseTraj):
         #         )
         #         sample_mesh = sample_posed.lbs()
         #         sample_coco_joints = torch.einsum(
-        #             "ij,...jk->...ik", coco_regressor, sample_mesh.verts
+        #             "ij,...jk->...ik", coco_regressor, sample_mesh.vertices
         #         )
         #         sampled_coco_joints.append(sample_coco_joints)
 

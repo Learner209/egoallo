@@ -262,7 +262,7 @@ class SmplMesh(TensorDataclass):
     posed_model: SmplhShapedAndPosed
     """Posed model that this mesh was computed for."""
 
-    verts: Float[Tensor, "*batch verts 3"]
+    vertices: Float[Tensor, "*batch verts 3"]
     """Vertices for mesh."""
 
     faces: Int[Tensor, "faces 3"]

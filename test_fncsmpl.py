@@ -96,7 +96,7 @@ def test_smplh_vs_smplx():
         right_hand_quats=right_quats,
     )
     custom_mesh = posed.lbs()
-    custom_verts = custom_mesh.verts
+    custom_verts = custom_mesh.vertices
 
     custom_verts_np = custom_verts.squeeze().cpu().numpy(force=True)
     smplx_verts_np = smplx_verts.squeeze().cpu().numpy(force=True)

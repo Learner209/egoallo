@@ -3,12 +3,16 @@ from typing import Dict
 from typing import Literal
 from typing import Tuple
 from typing import Union
+from typing import TYPE_CHECKING
 
 import numpy as np
 import torch
-from egoallo.network import AbsoluteDenoiseTraj
-from egoallo.network import JointsOnlyTraj
-from egoallo.network import VelocityDenoiseTraj
+
+if TYPE_CHECKING:
+    from egoallo.network import AbsoluteDenoiseTraj
+    from egoallo.network import JointsOnlyTraj
+    from egoallo.network import VelocityDenoiseTraj
+
 from jaxtyping import Float
 from numpy.typing import NDArray
 from torch import Tensor

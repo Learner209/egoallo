@@ -438,6 +438,11 @@ class SMPLViewer(BaseRenderer):
         )
 
         # Render frames
+        body_model = fncsmpl.SmplhModel.load(
+            smplh_model_path,
+            use_pca=False,
+            batch_size=1,
+        ).to(device)
         with (
             VideoWriter(
                 output_path,
@@ -457,16 +462,271 @@ class SMPLViewer(BaseRenderer):
                     video_writer=vw,
                     capture=capturing,
                     camera_pose=T_world_cam,
-                    body_model=fncsmpl.SmplhModel.load(
-                        smplh_model_path,
-                        use_pca=False,
-                        batch_size=1,
-                    ).to(device),  # per-frame rendering always uses batch size 1
+                    body_model=body_model,
                 )
 
             self._flush_remaining_frames(video_writer=vw, capture=capturing)
 
         del motion_sequence
+
+    def render_sequence_pyrender(
+        self,
+        traj: DenoiseTrajType,
+        smplh_model_path: Path,
+        output_path: str = "output.mp4",
+    ) -> None:
+        """Render SMPL sequence to video using pyrender (lightweight alternative to OpenGL).
+
+        Args:
+            traj: Denoised trajectory data
+            smplh_model_path: Path to SMPL-H model
+            output_path: Path to save the output video
+        """
+        import os
+        import cv2
+        import pyrender
+        import trimesh
+        import numpy as np
+        import torch
+        from egoallo.fncsmpl_library import SE3, SO3
+
+        # Disable pyrender logging spam
+        os.environ["PYOPENGL_PLATFORM"] = "egl"
+
+        # Check that the trajectory is in the right format
+        assert traj.R_world_root.dim() == 3, (
+            "The batch size should be zero when visualizing."
+        )
+        assert traj.metadata.stage == "postprocessed", (
+            "The trajectory should be postprocessed before visualization."
+        )
+
+        # Move trajectory to CPU
+        device = torch.device("cpu")
+        traj = traj.to(device)
+
+        # Get transformation matrices
+        T_world_root = SE3.from_rotation_and_translation(
+            SO3.from_matrix(traj.R_world_root),
+            traj.t_world_root,
+        ).parameters()
+
+        # Process SMPL trajectory data
+        traj = traj.map(
+            lambda x: x.unsqueeze(0),
+        )  # prepend a new axis for apply_to_body
+        batch_size = reduce(lambda x, y: x * y, traj.betas.shape[:-1])
+
+        # Apply trajectory to body model
+        posed = traj.apply_to_body(
+            fncsmpl.SmplhModel.load(
+                smplh_model_path,
+                use_pca=False,
+                batch_size=batch_size,
+            ).to(device),
+        )
+
+        # Cleanup dimensions
+        posed = posed.map(lambda x: x.squeeze(0))
+        traj = traj.map(lambda x: x.squeeze(0))
+
+        # Extract pose parameters
+        global_root_orient_aa = SO3(posed.T_world_root[..., :4]).log()
+        _pose = torch.cat(
+            [
+                global_root_orient_aa,
+                SO3(posed.local_quats[..., :23, :])
+                .log()
+                .reshape(*posed.local_quats.shape[:-2], -1),
+            ],
+            dim=-1,
+        )
+
+        # Get mesh data
+        mesh = posed.lbs()
+        vertices_seq = mesh.vertices.cpu().numpy(force=True)
+        faces = mesh.faces.cpu().numpy(force=True)
+
+        # Get keypoints data
+        if traj.metadata.dataset_type in ("AriaDataset", "EgoExoDataset"):
+            seq_len = traj.metadata.aux_joints_wrt_world_placeholder.shape[1]
+            jnts = (
+                traj.metadata.aux_joints_wrt_world_placeholder[0, :, :]
+                .cpu()
+                .numpy(force=True)
+            )
+            vis_masks = (
+                traj.metadata.aux_visible_joints_mask_placeholder[0, :]
+                .cpu()
+                .numpy(force=True)
+                if traj.metadata.aux_visible_joints_mask_placeholder is not None
+                else np.ones_like(jnts[..., 0], dtype=bool)
+            )
+            in_smplh_flag = False
+        elif traj.metadata.dataset_type in (
+            "AdaptiveAmassHdf5Dataset",
+            "VanillaAmassHdf5Dataset",
+        ):
+            seq_len = traj.joints_wrt_world.shape[0]
+            jnts = traj.joints_wrt_world.cpu().numpy(force=True)
+            vis_masks = (
+                traj.visible_joints_mask.cpu().numpy(force=True)
+                if traj.visible_joints_mask is not None
+                else np.ones_like(jnts[..., 0], dtype=bool)
+            )
+            in_smplh_flag = True
+        else:
+            raise ValueError(f"Unknown dataset type: {traj.metadata.dataset_type}")
+
+        # Create keypoint visualization data
+        vis_kpts_seq = []
+        invis_kpts_seq = []
+        for i in range(seq_len):
+            # Get joints and visibility mask for this frame
+            _jnt = jnts[i]  # [J, 3]
+            _vis_m = vis_masks[i]  # [J]
+
+            # Create skeleton point cloud
+            (
+                (visible_skeleton_points, visible_skeleton_colors),
+                (invisible_skeleton_points, invisible_skeleton_colors),
+            ) = create_skeleton_point_cloud(
+                joints_wrt_world=_jnt,
+                visible_joints_mask=_vis_m,
+                input_smplh=in_smplh_flag,
+                num_samples_per_bone=100,
+                return_colors=True,
+            )
+
+            vis_kpts_seq.append(
+                {
+                    "vertices": visible_skeleton_points,
+                    "colors": visible_skeleton_colors,
+                },
+            )
+            invis_kpts_seq.append(
+                {
+                    "vertices": invisible_skeleton_points,
+                    "colors": invisible_skeleton_colors,
+                },
+            )
+
+        # Setup video writer
+        resolution = self.config.resolution
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        fps = self.config.fps
+        video_writer = cv2.VideoWriter(output_path, fourcc, fps, resolution)
+
+        # Setup renderer
+        renderer = pyrender.OffscreenRenderer(
+            viewport_width=resolution[0],
+            viewport_height=resolution[1],
+        )
+
+        # Create default scene
+        scene = pyrender.Scene(ambient_light=np.array([0.3, 0.3, 0.3, 1.0]))
+
+        # Add light
+        light = pyrender.DirectionalLight(color=np.ones(3), intensity=2.0)
+        scene.add(light)
+
+        camera = pyrender.PerspectiveCamera(
+            yfov=np.radians(self.config.fov),
+            aspectRatio=resolution[0] / resolution[1],
+        )
+        camera_node = scene.add(camera)
+
+        num_frames = min(T_world_root.shape[0], vertices_seq.shape[0])
+
+        material = pyrender.MetallicRoughnessMaterial(
+            metallicFactor=0.0,
+            roughnessFactor=0.8,
+            alphaMode="BLEND",
+            baseColorFactor=(0.7, 0.7, 0.9, 1.0),
+        )
+
+        # Main rendering loop
+        for i in tqdm(range(num_frames), desc="Rendering frames"):
+            # Clear scene for new frame (keeping camera and light)
+            for node in list(scene.mesh_nodes):
+                scene.remove_node(node)
+
+            # Add SMPL mesh for this frame
+            mesh_trimesh = trimesh.Trimesh(
+                vertices=vertices_seq[i],
+                faces=faces,
+                process=False,
+            )
+            mesh_pyrender = pyrender.Mesh.from_trimesh(mesh_trimesh, material=material)
+            scene.add(mesh_pyrender)
+
+            # Add keypoints for this frame if available
+            if i < len(vis_kpts_seq):
+                if len(vis_kpts_seq[i]["vertices"]) > 0:
+                    # Create spheres at keypoints
+                    for point in vis_kpts_seq[i]["vertices"]:
+                        sm = trimesh.creation.uv_sphere(radius=0.01)
+                        sm.visual.vertex_colors = [
+                            0,
+                            255,
+                            0,
+                        ]  # Green for visible keypoints
+                        tfs = np.eye(4)
+                        tfs[:3, 3] = point
+                        scene.add(pyrender.Mesh.from_trimesh(sm, poses=tfs))
+
+            # Position camera
+            # Use a circular camera path around the subject
+            angle = i * 0.05  # Rotate around model over time
+            distance = 2.0
+            height = 0.8
+
+            # Get subject position from current pose
+            subject_pos = T_world_root[i, 4:7].cpu().numpy(force=True)
+
+            # Calculate camera position
+            cam_pos = subject_pos + np.array(
+                [distance * np.cos(angle), distance * np.sin(angle), height],
+            )
+
+            # Calculate camera orientation - look at subject
+            z = subject_pos - cam_pos
+            z = z / np.linalg.norm(z)
+
+            # Up vector (z-axis in world space)
+            up = np.array([0.0, 0.0, 1.0])
+
+            # Camera x axis (right)
+            x = np.cross(up, z)
+            x = x / np.linalg.norm(x)
+
+            # Recompute up
+            y = np.cross(z, x)
+
+            # Camera pose matrix
+            cam_pose = np.eye(4)
+            cam_pose[:3, 0] = x
+            cam_pose[:3, 1] = y
+            cam_pose[:3, 2] = z
+            cam_pose[:3, 3] = cam_pos
+
+            # Update camera
+            scene.set_pose(camera_node, cam_pose)
+
+            # Render the scene
+            color, depth = renderer.render(scene)
+
+            # Convert to BGR for OpenCV
+            color_bgr = cv2.cvtColor(color, cv2.COLOR_RGBA2BGR)
+
+            # Write to video
+            video_writer.write(color_bgr)
+
+        # Clean up
+        video_writer.release()
+        renderer.delete()
+
+        print(f"Video saved to {output_path}")
 
     def _render_frame(
         self,
