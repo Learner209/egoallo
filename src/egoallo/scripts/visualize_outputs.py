@@ -28,7 +28,7 @@ from tqdm import tqdm
 
 def main(
     search_root_dir: Path,
-    smplh_model_path: Path = Path("assets/smpl_based_model/smplh/SMPLH_NEUTRAL.pkl"),
+    smplh_model_path: Path = Path("assets/smpl_based_model/smplh/SMPLH_MALE.pkl"),
 ) -> None:
     """Visualization script for outputs from EgoAllo.
 

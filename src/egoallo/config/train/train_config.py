@@ -26,7 +26,7 @@ class EgoAlloTrainConfig:
     experiment_dir: Path = Path("")
     dataset_hdf5_path: Path = Path("data/egoalgo_no_skating_dataset.hdf5")
     dataset_files_path: Path = Path("data/egoalgo_no_skating_dataset_files.txt")
-    smplh_model_path: Path = Path("assets/smpl_based_model/smplh/SMPLH_NEUTRAL.pkl")
+    smplh_model_path: Path = Path("assets/smpl_based_model/smplh/SMPLH_MALE.pkl")
 
     # MAE params.
     spatial_mask_ratio: float = 0.75

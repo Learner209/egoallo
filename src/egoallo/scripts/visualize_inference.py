@@ -21,7 +21,7 @@ def visualize_saved_trajectory(
     trajectory_path: tuple[Path, ...],
     trajectory_type: DenoiseTrajTypeLiteral,
     dataset_type: DatasetType,
-    smplh_model_path: Path = Path("assets/smpl_based_model/smplh/SMPLH_NEUTRAL.pkl"),
+    smplh_model_path: Path = Path("assets/smpl_based_model/smplh/SMPLH_MALE.pkl"),
     output_dir: Path = Path("./visualization_output"),
     device: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu"),
 ) -> None:
@@ -241,7 +241,7 @@ def main(
     trajectory_path: tuple[Path, ...],
     trajectory_type: DenoiseTrajTypeLiteral,
     dataset_type: DatasetType,
-    smplh_model_path: Path = Path("assets/smpl_based_model/smplh/SMPLH_NEUTRAL.pkl"),
+    smplh_model_path: Path = Path("assets/smpl_based_model/smplh/SMPLH_MALE.pkl"),
     output_dir: Path = Path("./visualization_output"),
     device: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu"),
     debug: bool = False,

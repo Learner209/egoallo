@@ -148,7 +148,7 @@ def simplified_render_sequence(
 
 def main():
     # Path to SMPL-H model - replace with actual path
-    smplh_model_path = Path("assets/smpl_based_model/smplh/SMPLH_NEUTRAL.pkl")
+    smplh_model_path = Path("assets/smpl_based_model/smplh/SMPLH_MALE.pkl")
 
     # Check if the model path exists
     if not smplh_model_path.exists():

@@ -254,13 +254,13 @@ class EgoTrainingData(TensorDataclass):
     def visualize_ego_training_data(
         data: "DenoiseTrajType",
         smplh_model_path: Path = Path(
-            "assets/smpl_based_model/smplh/SMPLH_NEUTRAL.pkl",
+            "assets/smpl_based_model/smplh/SMPLH_MALE.pkl",
         ),
         output_path: str = "output.mp4",
         **kwargs,
     ):
         viewer = SMPLViewer(**kwargs)
-        viewer.render_sequence(data, smplh_model_path, output_path, online_render=False)
+        viewer.render_sequence(data, smplh_model_path, output_path, online_render=True)
 
     # @jaxtyped(typechecker=typeguard.typechecked)
     def preprocess(self, _rotate_radian: None | Tensor = None) -> "EgoTrainingData":

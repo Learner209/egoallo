@@ -1650,7 +1650,7 @@ class EgoDenoiserConfig:
     joint_emb_dim: int = 8
 
     # Add SMPL-H model path configuration
-    smplh_model_path: Path = Path("assets/smpl_based_model/smplh/SMPLH_NEUTRAL.pkl")
+    smplh_model_path: Path = Path("assets/smpl_based_model/smplh/SMPLH_MALE.pkl")
 
     use_fourier_in_masked_joints: bool = (
         True  # Whether to apply Fourier encoding in make_cond_with_masked_joints

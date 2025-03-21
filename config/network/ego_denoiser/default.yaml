@@ -25,7 +25,7 @@ joint_cond_mode: absrel
 joint_emb_dim: 8
 
 # SMPL-H model path
-smplh_model_path: assets/smpl_based_model/smplh/SMPLH_NEUTRAL.pkl
+smplh_model_path: assets/smpl_based_model/smplh/SMPLH_MALE.pkl
 
 use_fourier_in_masked_joints: true
 use_joint_embeddings: true

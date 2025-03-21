@@ -23,7 +23,7 @@ def test_smplh_vs_smplx():
     dtype = torch.float32
 
     # Path to SMPL-H model file (adjust as needed)
-    model_path = Path("assets/smpl_based_model/smplh/SMPLH_NEUTRAL.pkl")
+    model_path = Path("assets/smpl_based_model/smplh/SMPLH_MALE.pkl")
     num_betas = 16  # Number of shape coefficients to test
 
     # Load custom model

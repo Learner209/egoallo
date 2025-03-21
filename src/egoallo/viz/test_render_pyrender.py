@@ -17,7 +17,7 @@ def main():
 
     # Path to SMPL model
     smplh_model_path = (
-        project_root / "assets" / "smpl_based_model" / "smplh" / "SMPLH_NEUTRAL.pkl"
+        project_root / "assets" / "smpl_based_model" / "smplh" / "SMPLH_MALE.pkl"
     )
     if not os.path.exists(smplh_model_path):
         print(f"SMPL model file not found at {smplh_model_path}")
