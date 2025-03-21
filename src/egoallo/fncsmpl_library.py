@@ -55,7 +55,7 @@ class SmplhModel(TensorDataclass):
     @classmethod
     def load(cls, model_path: Path, **kwargs) -> "SmplhModel":
         model = smplx.SMPLH(model_path, **kwargs)
-        parent_indices = tuple(model.parents[1:].tolist())  # Exclude root
+        parent_indices = tuple((model.parents[1:] - 1).tolist())  # Exclude root
         faces = torch.from_numpy(model.faces.astype(np.int32))
         return cls(
             faces=faces,
@@ -88,12 +88,14 @@ class SmplhModel(TensorDataclass):
             1 : self.get_num_joints() + 1,
             :,
         ] - root_offset.unsqueeze(1)
+        root_and_joints_zero = output.joints - root_offset.unsqueeze(1)
+
         t_parent_joint = (
             joints_zero
-            - joints_zero[
+            - root_and_joints_zero[
                 ...,
-                torch.tensor(self.parent_indices).to(
-                    joints_zero.device,
+                torch.tensor(np.array(self.parent_indices) + 1).to(
+                    root_and_joints_zero.device,
                 ),
                 :,
             ]
@@ -150,18 +152,6 @@ class SmplhShaped(TensorDataclass):
         T_world_root: Float[Tensor, "*batch 7"],
         local_quats: Float[Tensor, "*batch joints 4"],
     ) -> "SmplhShapedAndPosed":
-        batch_dim = local_quats.shape[:-2]
-
-        root_se3 = SE3(T_world_root)
-        translation = root_se3.translation()
-        global_orient = root_se3.rotation().log().view(*batch_dim, -1)
-
-        body_pose = SO3(local_quats[..., :21, :]).log().view(*batch_dim, -1)
-        left_hand_pose = (
-            SO3(local_quats[..., 21 : 21 + 15, :]).log().view(*batch_dim, -1)
-        )
-        right_hand_pose = SO3(local_quats[..., 21 + 15 :, :]).log().view(*batch_dim, -1)
-
         Ts_world_joint = forward_kinematics(
             T_world_root=T_world_root,
             Rs_parent_joint=local_quats,
@@ -173,11 +163,6 @@ class SmplhShaped(TensorDataclass):
             T_world_root=T_world_root,
             local_quats=local_quats,
             Ts_world_joint=Ts_world_joint,
-            global_orient=global_orient,
-            body_pose=body_pose,
-            left_hand_pose=left_hand_pose,
-            right_hand_pose=right_hand_pose,
-            translation=translation,
         )
 
     # @jaxtyped(typechecker=typeguard.typechecked)
@@ -220,21 +205,6 @@ class SmplhShapedAndPosed(TensorDataclass):
     Ts_world_joint: Float[Tensor, "*#batch joints 7"]
     """Absolute transform for each joint. Does not include the root."""
 
-    global_orient: Float[Tensor, "*#batch 3"]
-    """Global orientation of the body."""
-
-    body_pose: Float[Tensor, "*#batch (joints - 1) 3"]
-    """Local body pose."""
-
-    left_hand_pose: Float[Tensor, "*#batch 15 3"]
-    """Local left hand pose."""
-
-    right_hand_pose: Float[Tensor, "*#batch 15 3"]
-    """Local right hand pose."""
-
-    translation: Float[Tensor, "*#batch 3"]
-    """Translation of the body."""
-
     def with_new_T_world_root(
         self,
         T_world_root: Float[Tensor, "*batch 7"],
@@ -243,15 +213,29 @@ class SmplhShapedAndPosed(TensorDataclass):
         # return SmplhShapedAndPosed(self.shaped, T_world_root, self.local_quats)
 
     def lbs(self) -> "SmplMesh":
+        batch_dim = self.local_quats.shape[:-2]
+        # NOTE: intentionally left transl to be zeros to deal with root offset afterwards. since the root joint still has offset in the current coordinate.
         output = self.shaped_model.body_model.model(
             betas=self.shaped_model.betas,
-            global_orient=self.global_orient,
-            body_pose=self.body_pose,
-            left_hand_pose=self.left_hand_pose,
-            right_hand_pose=self.right_hand_pose,
-            transl=self.translation,
+            global_orient=SE3(self.T_world_root).rotation().log().view(*batch_dim, -1),
+            body_pose=SO3(self.local_quats[..., :21, :]).log().view(*batch_dim, -1),
+            left_hand_pose=SO3(self.local_quats[..., 21 : 21 + 15, :])
+            .log()
+            .view(*batch_dim, -1),
+            right_hand_pose=SO3(self.local_quats[..., 21 + 15 :, :])
+            .log()
+            .view(*batch_dim, -1),
+            transl=torch.zeros_like(self.T_world_root[..., 4:7]),
             return_verts=True,
         )
+        root_offset = output.joints[..., 0:1, :]
+        output.vertices -= root_offset
+        output.joints -= root_offset
+
+        # apply transl
+        output.vertices += SE3(self.T_world_root).translation().unsqueeze(-2)
+        output.joints += SE3(self.T_world_root).translation().unsqueeze(-2)
+
         return SmplMesh(self, output.vertices, self.shaped_model.body_model.faces)
 
 
@@ -293,7 +277,6 @@ def forward_kinematics(
         Transformations to world frame from each joint frame.
     """
 
-    # Check shapes.
     num_joints = len(parent_indices)
     assert Rs_parent_joint.shape[-2:] == (num_joints, 4)
     assert t_parent_joint.shape[-2:] == (num_joints, 3)
@@ -305,10 +288,10 @@ def forward_kinematics(
     # Compute one joint at a time.
     list_Ts_world_joint: list[Tensor] = []
     for i in range(num_joints):
-        if parent_indices[i] == 0:
+        if parent_indices[i] == -1:
             T_world_parent = T_world_root
         else:
-            T_world_parent = list_Ts_world_joint[parent_indices[i] - 1]
+            T_world_parent = list_Ts_world_joint[parent_indices[i]]
         list_Ts_world_joint.append(
             (SE3(T_world_parent) @ SE3(Ts_parent_child[..., i, :])).wxyz_xyz,
         )
