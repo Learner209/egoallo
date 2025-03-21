@@ -157,7 +157,7 @@ class EgoTrainingData(TensorDataclass):
         T_world_root = torch.cat(
             [
                 tf.SO3.exp(raw_fields["root_orient"]).wxyz,
-                raw_fields["joints"][:, 0, :],
+                raw_fields["trans"],
             ],
             dim=-1,
         ).to(device)
@@ -580,7 +580,7 @@ class EgoTrainingData(TensorDataclass):
                 "visible_joints_mask shouldn't be set for test data."
             )
             traj.visible_joints_mask = torch.ones_like(
-                traj.joints_wrt_world,
+                traj.joints_wrt_world[..., 0],
                 dtype=torch.float,
             )
 

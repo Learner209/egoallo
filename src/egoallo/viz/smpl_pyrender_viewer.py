@@ -14,7 +14,6 @@ import numpy as np
 import torch
 from egoallo.fncsmpl_library import SE3
 from egoallo.fncsmpl_library import SO3
-from egoallo.fncsmpl_extensions_library import get_T_world_cpf
 from egoallo.setup_logger import setup_logger
 
 import os
@@ -110,44 +109,7 @@ class SMPLViewer:
             traj.t_world_root,
         ).parameters()
 
-        # Process SMPL trajectory data
-        traj = traj.map(
-            lambda x: x.unsqueeze(0),
-        )  # prepend a new axis for apply_to_body
         batch_size = reduce(lambda x, y: x * y, traj.betas.shape[:-1])
-
-        # Apply trajectory to body model
-        posed = traj.apply_to_body(
-            fncsmpl.SmplhModel.load(
-                smplh_model_path,
-                use_pca=False,
-                batch_size=batch_size,
-            ).to(device),
-        )
-
-        # Cleanup dimensions
-        posed = posed.map(lambda x: x.squeeze(0))
-        traj = traj.map(lambda x: x.squeeze(0))
-
-        # Extract pose parameters
-        global_root_orient_aa = SO3(posed.T_world_root[..., :4]).log()
-        pose = torch.cat(
-            [
-                global_root_orient_aa,
-                SO3(posed.local_quats[..., :23, :])
-                .log()
-                .reshape(*posed.local_quats.shape[:-2], -1),
-            ],
-            dim=-1,
-        )
-
-        # Get mesh data
-        mesh = posed.lbs()
-        vertices_seq = mesh.vertices.cpu().numpy(force=True)
-        faces = mesh.faces.cpu().numpy(force=True)
-
-        # Get camera transform
-        T_world_cpf = SE3(get_T_world_cpf(mesh))
 
         # Get keypoints data
         if traj.metadata.dataset_type in ("AriaDataset", "EgoExoDataset"):
@@ -213,7 +175,26 @@ class SMPLViewer:
                 },
             )
 
-        # Setup video writer (only if saving to disk)
+        traj = traj.map(
+            lambda x: x.unsqueeze(0),
+        )
+
+        posed = traj.apply_to_body(
+            fncsmpl.SmplhModel.load(
+                smplh_model_path,
+                use_pca=False,
+                batch_size=batch_size,
+            ).to(device),
+        )
+
+        posed = posed.map(lambda x: x.squeeze(0))
+        traj = traj.map(lambda x: x.squeeze(0))
+
+        mesh = posed.lbs()
+
+        vertices_seq = mesh.vertices.cpu().numpy(force=True)
+        faces = mesh.faces.cpu().numpy(force=True)
+
         video_writer = None
         if output_path:
             # Handle different OpenCV versions
@@ -233,19 +214,16 @@ class SMPLViewer:
                 (self.config.resolution[0], self.config.resolution[1]),
             )
 
-        # Material for SMPL mesh
         material = pyrender.MetallicRoughnessMaterial(
             metallicFactor=0.0,
             roughnessFactor=0.8,
             alphaMode="BLEND",
             baseColorFactor=(0.7, 0.7, 0.9, 0.5),
         )
-        # First create the scene for both rendering methods
         scene = pyrender.Scene(
             bg_color=[0.0, 0.0, 0.0, 1.0],
             ambient_light=[0.3, 0.3, 0.3],
         )
-        # Create camera
         camera = pyrender.PerspectiveCamera(
             yfov=np.radians(self.config.fov),
             aspectRatio=self.config.resolution[0] / self.config.resolution[1],
@@ -292,7 +270,6 @@ class SMPLViewer:
 
         try:
             for i in range(len(T_world_root)):
-                # Create mesh for this frame
                 mesh_trimesh = trimesh.Trimesh(
                     vertices=vertices_seq[i],
                     faces=faces,
@@ -347,7 +324,7 @@ class SMPLViewer:
                         mesh_node = scene.add(mesh_pyrender)
 
                     # Update or add keypoints
-                    if keypoints_ready:
+                    if True:
                         points = np.array(vis_kpts_seq[i]["vertices"])
                         colors = np.ones((len(points), 3)) * np.array(
                             [0, 1.0, 0],
@@ -363,7 +340,7 @@ class SMPLViewer:
                         points = np.array(invis_kpts_seq[i]["vertices"])
                         colors = np.ones((len(points), 3)) * np.array(
                             [1.0, 0, 0],
-                        )  # Green points
+                        )  # Red points
 
                         pc = pyrender.Mesh.from_points(points, colors)
                         if occ_pc_node is None:

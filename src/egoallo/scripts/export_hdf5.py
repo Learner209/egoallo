@@ -11,7 +11,6 @@ import tyro
 from egoallo import training_utils
 from egoallo.data.dataclass import EgoTrainingData
 from egoallo import network
-import dataclasses
 
 # faulthandler.enable()
 import os
@@ -62,8 +61,18 @@ def main(
                     "The data should be test data."
                 )
 
-                denoising: network.DenoisingConfig = dataclasses.field(init=True)
+                # test_data = test_data.preprocess()
+                test_data.metadata.stage = "preprocessed"
+
+                denoising = network.DenoisingConfig()
+
                 traj = denoising.from_ego_data(test_data, include_hands=include_hands)
+                # test_data = test_data.postprocess()
+                # traj = test_data._post_process(traj)
+                traj = test_data._set_traj(traj)
+                traj.metadata.stage = "postprocessed"
+
+                # breakpoint()
                 EgoTrainingData.visualize_ego_training_data(
                     traj,
                     smplh_model_path,
