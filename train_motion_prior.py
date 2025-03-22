@@ -62,12 +62,14 @@ def get_experiment_dir(experiment_name: str, version: int = 0) -> Path:
 
 def run_training(
     config: EgoAlloTrainConfig,
-    restore_checkpoint_dir: Path | None = None,
     debug_mode: bool = False,
 ) -> None:
     # Set up experiment directory + HF accelerate.
     # We're getting to manage logging, checkpoint directories, etc manually,
     # and just use `accelerate` for distibuted training.
+    restore_checkpoint_dir = (
+        Path(config.restore_checkpoint_dir) if config.restore_checkpoint_dir else None
+    )
 
     if debug_mode:
         import builtins

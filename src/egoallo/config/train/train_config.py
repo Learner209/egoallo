@@ -78,6 +78,9 @@ class EgoAlloTrainConfig:
         1000000000  # never reached , since max_steps is a debug-only handle.
     )
 
+    # restore checkpoint dir
+    restore_checkpoint_dir: Path | None = None
+
     # Data aug.
     fps_aug: bool = False
     """Whether to augment data with different FPS. Implmented with upsamping with five-order spline interpolation or downsampling at different rates."""
