@@ -10,9 +10,7 @@ from typing import TYPE_CHECKING
 import torch.utils.data
 from tqdm import tqdm
 import multiprocessing
-import subprocess
 import random
-import os
 from typing import Union, Dict
 
 if TYPE_CHECKING:
@@ -42,6 +40,7 @@ from egoallo.sampling import (
 from egoallo.transforms import SE3, SO3
 from egoallo.utils.setup_logger import setup_logger
 from egoallo.training_utils import ipdb_safety_net
+from egoallo.scripts.visualize_inference import main as visualize_inference_cli
 # from egoallo.egoexo import EGOEXO_UTILS_INST
 
 torch.multiprocessing.set_sharing_strategy("file_system")
@@ -519,31 +518,40 @@ class TestRunner:
                     this_take_path = extract_path_name_funcs_dict[
                         self.inference_config.dataset_type
                     ](id)
-
-                    cmd = [
-                        "python",
-                        "src/egoallo/scripts/visualize_inference.py",
-                        "--trajectory-path",
-                        str(gt_path),
-                        str(est_path),
-                        "--trajectory-type",
-                        denoise_traj_type,
-                        "--smplh-model-path",
-                        str(self.runtime_config.smplh_model_path),
-                        "--output-dir",
-                        str(temp_output_dir / id),
-                        "--dataset-type",
-                        self.inference_config.dataset_type,
-                    ]
                     if self.inference_config.dataset_type == "AriaDataset":
-                        cmd += ["--config.egoexo.traj_root", str(this_take_path)]
+                        self.inference_config.egoexo.traj_root = str(this_take_path)
 
-                    # Remove empty arguments
-                    cmd = [arg for arg in cmd if arg]
-                    logger.info(f"Running command: {' '.join(cmd)}")
+                    visualize_inference_cli(
+                        config=self.inference_config,
+                        trajectory_path=(gt_path, est_path),
+                        trajectory_type=denoise_traj_type,
+                        dataset_type=self.inference_config.dataset_type,
+                        smplh_model_path=self.runtime_config.smplh_model_path,
+                        output_dir=temp_output_dir / id,
+                    )
 
-                    # Call visualization process
-                    subprocess.call(cmd, env=os.environ.copy())
+                    # cmd = [
+                    #     "python",
+                    #     "src/egoallo/scripts/visualize_inference.py",
+                    #     "--trajectory-path",
+                    #     str(gt_path),
+                    #     str(est_path),
+                    #     "--trajectory-type",
+                    #     denoise_traj_type,
+                    #     "--smplh-model-path",
+                    #     str(self.runtime_config.smplh_model_path),
+                    #     "--output-dir",
+                    #     str(temp_output_dir / id),
+                    #     "--dataset-type",
+                    #     self.inference_config.dataset_type,
+                    # ]
+
+                    # # Remove empty arguments
+                    # cmd = [arg for arg in cmd if arg]
+                    # logger.info(f"Running command: {' '.join(cmd)}")
+
+                    # # Call visualization process
+                    # subprocess.call(cmd, env=os.environ.copy())
 
             # After all operations complete successfully, copy temp dir contents to persistent location
             persistent_output_dir = Path(self.inference_config.output_dir)

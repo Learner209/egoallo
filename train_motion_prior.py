@@ -200,12 +200,6 @@ def run_training(
         step = int(scheduler.state_dict()["last_epoch"])
         assert step == 0 or restore_checkpoint_dir is not None, step
 
-    # Save an initial checkpoint. Not a big deal but currently this has an
-    # off-by-one error, in that `step` means something different in this
-    # checkpoint vs the others.
-    accelerator.save_state(str(experiment_dir / f"checkpoints_{step}"))
-
-    # Run training loop!
     loss_helper = training_loss.TrainingLossComputer(train_cfg.loss, device=device)
     loop_metrics_gen = training_utils.loop_metric_generator(counter_init=step)
     # prev_checkpoint_path: Path | None = None
