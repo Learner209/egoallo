@@ -2006,31 +2006,52 @@ class EgoDenoiser(nn.Module):
         self.encoders = nn.ModuleDict(
             {
                 k: nn.Sequential(
-                    nn.Linear(modality_dim, config.d_latent),
+                    nn.Linear(modality_dim, config.d_latent // 2),
+                    nn.LayerNorm(config.d_latent // 2),
                     Activation(),
-                    nn.Linear(config.d_latent, config.d_latent),
+                    nn.Dropout(p=config.dropout_p),
+                    nn.Linear(config.d_latent // 2, config.d_latent),
+                    nn.LayerNorm(config.d_latent),
                     Activation(),
+                    nn.Dropout(p=config.dropout_p),
                     nn.Linear(config.d_latent, config.d_latent),
                 )
                 for k, modality_dim in modality_dims.items()
             },
         )
+
         self.decoders = nn.ModuleDict(
             {
                 k: nn.Sequential(
                     nn.Linear(config.d_latent, config.d_latent),
-                    nn.LayerNorm(normalized_shape=config.d_latent),
+                    nn.LayerNorm(config.d_latent),
                     Activation(),
-                    nn.Linear(config.d_latent, config.d_latent),
+                    nn.Dropout(p=config.dropout_p),
+                    nn.Linear(config.d_latent, config.d_latent // 2),
+                    nn.LayerNorm(config.d_latent // 2),
                     Activation(),
-                    nn.Linear(config.d_latent, modality_dim),
+                    nn.Dropout(p=config.dropout_p),
+                    nn.Linear(config.d_latent // 2, modality_dim),
                 )
                 for k, modality_dim in modality_dims.items()
             },
         )
 
         # Helpers for converting between input dimensionality and latent dimensionality.
-        self.latent_from_cond = nn.Linear(config.d_cond, config.d_latent)
+        self.latent_from_cond = nn.Sequential(
+            nn.Linear(config.d_cond, config.d_latent),
+            nn.LayerNorm(config.d_latent),
+            nn.ReLU(),
+            nn.TransformerEncoder(
+                nn.TransformerEncoderLayer(
+                    d_model=config.d_latent,
+                    nhead=8,
+                    dim_feedforward=config.d_latent * 4,
+                    dropout=0.1,
+                ),
+                num_layers=2,
+            ),
+        )
 
         # Noise embedder.
         self.noise_emb = nn.Embedding(
