@@ -1,0 +1,24 @@
+_target_: egoallo.config.inference.defaults.InferenceConfig
+
+start_index: 0
+traj_length: 128
+num_samples: 1
+batch_size: 1
+smplh_model_path: assets/smpl_based_model/smplh/SMPLH_MALE.pkl
+output_dir: ./exp/test-amass-Mar17
+device: cuda
+annotation_path: ./data/egoexo-default-gt-output
+checkpoint_dir: experiments/robot-01-Mar-15-spatial-0.75-temporal-0.3/v4/checkpoints_10000
+
+visualize_traj: true
+
+guidance_post: false
+guidance_inner: false
+guidance_mode: aria_hamer
+
+dataset_type: AdaptiveAmassHdf5Dataset
+dataset_slice_strategy: random_uniform_len
+splits:
+  - train
+
+debug_max_iters: 20
