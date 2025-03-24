@@ -57,6 +57,12 @@ class InferenceConfig:
     visualize_traj: bool = False
     """Whether to visualize trajectories"""
 
+    random_visualize: bool = True
+    """Whether to randomly visualize trajectories, Default is to visualize all trajectories."""
+
+    online_render: bool = False
+    """Whether to online render trajectories in real-time. This would pop-out a pyrender interactive window"""
+
     guidance_post: bool = False
     """Post guidance weight"""
 

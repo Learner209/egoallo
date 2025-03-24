@@ -11,6 +11,7 @@ import torch.utils.data
 from tqdm import tqdm
 import multiprocessing
 import subprocess
+import random
 import os
 from typing import Union, Dict
 
@@ -366,7 +367,7 @@ class TestRunner:
 
             gt_trajs = []
             denoised_trajs = []
-            identifiers = []
+            ids = []
 
             for batch_idx, batch in tqdm(
                 enumerate(self.dataloader),
@@ -401,7 +402,7 @@ class TestRunner:
                 # TODO: the current implementation assumes that the leading `TensorDataClass` batch size dim() returns `1`.
                 gt_trajs.append(gt_traj)
                 denoised_trajs.append(denoised_traj)
-                identifiers.append(batch.metadata.take_name[0][0])
+                ids.append(batch.metadata.take_name[0][0])
 
                 torch.cuda.empty_cache()
 
@@ -454,19 +455,19 @@ class TestRunner:
             # Prepare arguments for parallel saving
             save_args = []
 
-            for gt_traj, est_traj, take_name in zip(
+            for gt_traj, est_traj, id in zip(
                 gt_trajs,
                 denoised_trajs,
-                identifiers,
+                ids,
             ):
                 save_args.append(
                     (
                         {
                             "traj": gt_traj[0],
-                            "take_name": take_name,
+                            "take_name": id,
                             "is_gt": True,
                             "processor": processor,
-                            "output_dir": temp_output_dir / take_name,
+                            "output_dir": temp_output_dir / id,
                         },
                     ),
                 )
@@ -474,10 +475,10 @@ class TestRunner:
                     (
                         {
                             "traj": est_traj[0],
-                            "take_name": take_name,
+                            "take_name": id,
                             "is_gt": False,
                             "processor": processor,
-                            "output_dir": temp_output_dir / take_name,
+                            "output_dir": temp_output_dir / id,
                         },
                     ),
                 )
@@ -496,16 +497,28 @@ class TestRunner:
                 "AdaptiveAmassHdf5Dataset": lambda take_name: take_name,
             }
             if self.inference_config.visualize_traj:
+                if not self.inference_config.random_visualize:
+                    logger.warning(
+                        f"Visualizing all {len(ids)} trajectories: {ids}. Resource constraints may prevent successful visualization.",
+                    )
+
                 denoise_traj_type: str = (
                     self.runtime_config.denoising._repr_denoise_traj_type()
                 )
-                for take_name in identifiers:
-                    gt_path = temp_output_dir / take_name / f"gt_{take_name}.pt"
-                    est_path = temp_output_dir / take_name / f"est_{take_name}.pt"
+
+                vis_ids = (
+                    random.sample(ids, min(len(ids), 5))
+                    if self.inference_config.random_visualize
+                    else ids
+                )
+
+                for id in vis_ids:
+                    gt_path = temp_output_dir / id / f"gt_{id}.pt"
+                    est_path = temp_output_dir / id / f"est_{id}.pt"
 
                     this_take_path = extract_path_name_funcs_dict[
                         self.inference_config.dataset_type
-                    ](take_name)
+                    ](id)
 
                     cmd = [
                         "python",
@@ -518,7 +531,7 @@ class TestRunner:
                         "--smplh-model-path",
                         str(self.runtime_config.smplh_model_path),
                         "--output-dir",
-                        str(temp_output_dir / take_name),
+                        str(temp_output_dir / id),
                         "--dataset-type",
                         self.inference_config.dataset_type,
                     ]

@@ -1,5 +1,6 @@
 defaults:
   - train: default
+  - inference: amass
   - network/ego_denoiser: default
   - network/denoising: default
   - train/loss: default

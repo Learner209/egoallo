@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import time
+from tqdm import tqdm
 from functools import reduce
 from pathlib import Path
 from typing import Optional, Tuple
@@ -205,7 +205,7 @@ class SMPLViewer:
         vis.add_geometry(coordinate_frame)
 
         try:
-            for i in range(len(T_world_root)):
+            for i in tqdm(range(len(T_world_root))):
                 # Update mesh
                 mesh_geo.vertices = o3d.utility.Vector3dVector(vertices_seq[i])
                 mesh_geo.triangles = o3d.utility.Vector3iVector(faces)
@@ -261,21 +261,11 @@ class SMPLViewer:
                 vis.poll_events()
                 vis.update_renderer()
 
-                if online_render:
-                    # For interactive viewing, control framerate
-                    if i % 10 == 0:
-                        print(f"Rendering frame {i + 1}/{len(T_world_root)}")
-                    time.sleep(0.1)
-                    continue
-
                 # Capture frame for video
                 if video_writer is not None:
                     img = np.asarray(vis.capture_screen_float_buffer()) * 255
                     img = cv2.cvtColor(img.astype(np.uint8), cv2.COLOR_RGB2BGR)
                     video_writer.write(img)
-
-                if i % 10 == 0:
-                    print(f"Rendering frame {i + 1}/{len(T_world_root)}")
 
         finally:
             if video_writer is not None:

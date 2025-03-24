@@ -257,10 +257,16 @@ class EgoTrainingData(TensorDataclass):
             "assets/smpl_based_model/smplh/SMPLH_MALE.pkl",
         ),
         output_path: str = "output.mp4",
+        online_render: bool = False,
         **kwargs,
     ):
         viewer = SMPLViewer(**kwargs)
-        viewer.render_sequence(data, smplh_model_path, output_path, online_render=True)
+        viewer.render_sequence(
+            data,
+            smplh_model_path,
+            output_path,
+            online_render=online_render,
+        )
 
     # @jaxtyped(typechecker=typeguard.typechecked)
     def preprocess(self, _rotate_radian: None | Tensor = None) -> "EgoTrainingData":

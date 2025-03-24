@@ -7,7 +7,6 @@ import torch
 import tyro
 from pathlib import Path
 
-from egoallo import fncsmpl_library as fncsmpl
 from egoallo.config.inference.defaults import InferenceConfig
 from egoallo.data.dataclass import EgoTrainingData
 from egoallo.scripts.aria_inference import AriaInference
@@ -56,24 +55,20 @@ def visualize_saved_trajectory(
             gt_traj,
             smplh_model_path,
             str(gt_path),
+            online_render=config.online_render,
         )
 
         EgoTrainingData.visualize_ego_training_data(
             pred_traj,
             smplh_model_path,
             str(pred_path),
+            online_render=config.online_render,
         )
     elif dataset_type in ("AriaDataset", "AriaInferenceDataset", "EgoExoDataset"):
         traj_root = config.egoexo.traj_root
-        # Just load and visualize prediction
         from egoallo.network import AbsoluteDenoiseTraj
 
         pred_traj: DenoiseTrajType = torch.load(trajectory_path[1], map_location=device)
-        body_model = fncsmpl.SmplhModel.load(
-            smplh_model_path,
-            use_pca=False,
-            batch_size=1,
-        ).to(device)
 
         assert isinstance(pred_traj, AbsoluteDenoiseTraj), (
             "Prediction trajectory should be AbsoluteDenoiseTraj for visualization."
@@ -103,10 +98,10 @@ def visualize_saved_trajectory(
 
         EgoTrainingData.visualize_ego_training_data(
             pred_traj,
-            body_model,
+            smplh_model_path,
             str(pred_path),
             scene_obj=pc_container,
-            # scene_obj=""
+            online_render=config.online_render,
         )
         # Save frames as video
         if len(rgb_frames) > 0:

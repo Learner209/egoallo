@@ -11,7 +11,7 @@ annotation_path: ./data/egoexo-default-gt-output
 checkpoint_dir: experiments/robot-01-Mar-15-spatial-0.75-temporal-0.3/v4/checkpoints_10000
 
 visualize_traj: true
-random_visualize: false
+random_visualize: true
 
 guidance_post: false
 guidance_inner: false
@@ -22,4 +22,4 @@ dataset_slice_strategy: full_sequence
 splits:
   - test
 
-debug_max_iters: null
+debug_max_iters: 10

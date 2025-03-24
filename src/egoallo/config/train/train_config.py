@@ -78,6 +78,14 @@ class EgoAlloTrainConfig:
         1000000000  # never reached , since max_steps is a debug-only handle.
     )
 
+    # detect loss spikes after this step.
+    detect_loss_spike_start_step: int = 2000
+    # discard loss spikes backward after this step.
+    discard_loss_spike_start_step: int = 8000
+
+    # restore training from previous ckpt.
+    restore_checkpoint_dir: Path | None = None
+
     # Data aug.
     fps_aug: bool = False
     """Whether to augment data with different FPS. Implmented with upsamping with five-order spline interpolation or downsampling at different rates."""

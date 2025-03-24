@@ -12,6 +12,7 @@ from contextlib import nullcontext
 
 import numpy as np
 import torch
+from tqdm import tqdm
 from egoallo.fncsmpl_library import SE3
 from egoallo.fncsmpl_library import SO3
 from egoallo.setup_logger import setup_logger
@@ -269,7 +270,7 @@ class SMPLViewer:
         viewport_size = (self.config.resolution[0], self.config.resolution[1])
 
         try:
-            for i in range(len(T_world_root)):
+            for i in tqdm(range(len(T_world_root))):
                 mesh_trimesh = trimesh.Trimesh(
                     vertices=vertices_seq[i],
                     faces=faces,
@@ -370,10 +371,6 @@ class SMPLViewer:
                     color_bgr = cv2.cvtColor(color, cv2.COLOR_RGBA2BGR)
                     if video_writer is not None:
                         video_writer.write(color_bgr)
-
-                # Print progress
-                if i % 10 == 0:
-                    print(f"Rendering frame {i + 1}/{len(T_world_root)}")
 
             # If using online viewer, wait for user to close the window
             if online_render and viewer.is_active:
