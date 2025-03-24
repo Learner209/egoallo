@@ -237,9 +237,11 @@ def run_training(
 
             # Check for loss spike
             current_loss = loss.item()
+
+            # Define what constitutes a "significant" spike (e.g., 2x increase)
+            spike_threshold = 8.0
+
             if previous_loss is not None:
-                # Define what constitutes a "significant" spike (e.g., 2x increase)
-                spike_threshold = 3.0
                 if (
                     step > train_cfg.detect_loss_spike_start_step
                     and current_loss > previous_loss * spike_threshold
@@ -269,10 +271,18 @@ def run_training(
                         logger.info(f"Saved loss spike data to {spike_checkpoint_path}")
 
                         if step > train_cfg.discard_loss_spike_start_step:
+                            # Clear gradients before skipping
+                            optim.zero_grad(set_to_none=True)
+                            # Detach loss and other tensors
+                            loss = loss.detach()
+                            # Clear computation graph references
+                            del train_batch, loss, log_outputs
+                            # Now try to free memory
+                            torch.cuda.empty_cache()
                             continue
 
-            # Update previous loss
-            previous_loss = current_loss
+            if previous_loss is None or current_loss <= previous_loss * spike_threshold:
+                previous_loss = current_loss
 
             # Wrap optimization steps in debug_mode check
             if not debug_mode:
@@ -392,8 +402,8 @@ def run_training(
 
             # Evaluation
             steps_to_eval = 1e4
-            if step % steps_to_eval == 0:
-                # if step % steps_to_eval == 0 and step != 0:
+            # if step % steps_to_eval == 0:
+            if step % steps_to_eval == 0 and step != 0:
                 # Create temporary directory for evaluation outputs
                 with tempfile.TemporaryDirectory() as temp_dir:
                     # Create inference config for evaluation
