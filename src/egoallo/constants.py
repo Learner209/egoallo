@@ -1,4 +1,14 @@
-from typing import Dict
+from typing import Dict, TYPE_CHECKING
+from egoallo.type_stubs import SmplFamilyModelType
+from egoallo.type_stubs import SmplFamilyModelTypeLiteral
+from egoallo.type_stubs import SmplxModelAADecomp, SmplhModel
+from egoallo.type_stubs import SmplhModelAADecomp
+from egoallo.type_stubs import SmplModelAADecomp
+from egoallo.type_stubs import EgoTrainingDataTypeLiteral
+
+# Import these only for type checking to avoid circular imports
+if TYPE_CHECKING:
+    pass
 
 # Hand evaluation constants
 EGOEXO_NAMES_LEFT = [
@@ -61,3 +71,18 @@ BODY_METRICS = [
 # Default file names
 DEFAULT_METRICS_FILENAME = "_eval_cached_disaggregated_metrics{}.npz"
 DEFAULT_SUMMARY_FILENAME = "_eval_cached_summary{}.yaml"
+
+
+SmplFamilyMetaModelZoo: Dict[SmplFamilyModelTypeLiteral, SmplFamilyModelType] = {
+    "SmplhModel": SmplhModel,
+    "SmplxModelAADecomp": SmplxModelAADecomp,
+    "SmplhModelAADecomp": SmplhModelAADecomp,
+    "SmplModelAADecomp": SmplModelAADecomp,
+}
+SmplFamilyMetaModelName: SmplFamilyModelTypeLiteral = "SmplModelAADecomp"
+
+EgoTrainingDataZoo: Dict[EgoTrainingDataTypeLiteral, str] = {
+    "EgoTrainingData": "egoallo.data.dataclass.EgoTrainingData",
+    "EgoTrainingDataAADecomp": "egoallo.data.dataclass_aadecomp.EgoTrainingDataAADecomp",
+}
+EgoTrainingDataName: EgoTrainingDataTypeLiteral = "EgoTrainingDataAADecomp"
