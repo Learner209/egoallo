@@ -26,6 +26,8 @@ from pytorch3d.transforms.rotation_conversions import (
     axis_angle_to_matrix,
     matrix_to_axis_angle,
 )
+from jaxtyping import Float, Int, jaxtyped
+import typeguard
 
 from .utils import Tensor, rot_mat_to_euler
 
@@ -533,9 +535,11 @@ def batch_inverse_kinematics_transform_naive(
                 rel_rest_pose[:, i],
             )
             if i == 22 and not naive:
+                #  Special case for jaw joint handling mouth positions.
                 assert children[i] == 57
                 # child == 57, mouth bottom
 
+                # Intricate handling for mouth movement with top and bottom constraints
                 child_final_loc_bottom = torch.matmul(
                     rot_mat_chain[parents[i]].transpose(1, 2),
                     rel_pose_skeleton[:, children[i]],
@@ -1012,16 +1016,17 @@ def vectors2aa(vec_rest, vec_final):
     return axis, sin, cos
 
 
+@jaxtyped(typechecker=typeguard.typechecked)
 def lbs_get_twist(
-    betas: Tensor,
-    pose: Tensor,
-    v_template: Tensor,
-    shapedirs: Tensor,
-    posedirs: Tensor,
-    J_regressor: Tensor,
-    parents: Tensor,
-    lbs_weights: Tensor,
-    leaf_indices: Tensor,
+    betas: Float[torch.Tensor, "*batch num_betas"],
+    pose: Float[torch.Tensor, "*batch num_poses 3 3"],
+    v_template: Float[torch.Tensor, "num_verts 3"],
+    shapedirs: Float[torch.Tensor, "num_verts 3 num_betas"],
+    posedirs: Float[torch.Tensor, "(num_poses-1)*9 num_verts*3"],
+    J_regressor: Float[torch.Tensor, "num_poses num_verts"],
+    parents: Int[torch.Tensor, "num_parents"],
+    lbs_weights: Float[torch.Tensor, "num_verts num_poses"],
+    leaf_indices: list,
     pose2rot: bool = True,
 ):
 
@@ -1037,6 +1042,7 @@ def lbs_get_twist(
 
     # 3. Add pose blend shapes
     # N x J x 3 x 3
+    assert not pose2rot
     if pose2rot:
         rot_mats = batch_rodrigues(pose.view(-1, 3)).view(
             [batch_size, -1, 3, 3],
@@ -1115,18 +1121,21 @@ def get_twist(rot_mats, joints, parents):
         pos = torch.norm(spin_axis - axis, dim=1)
         neg = torch.norm(spin_axis + axis, dim=1)
 
-        if float(neg) < float(pos):
-            if float(pos) > 1.8:
+        _neg = neg.norm()
+        _pos = pos.norm()
+
+        if float(_neg) < float(_pos):
+            if float(_pos) > 1.8:
                 angle_twist.append(-1 * angle)
             else:
                 angle_twist.append(torch.ones_like(angle) * -999)
-                print('error', float(pos), i)
+                print('error', float(_pos), i)
         else:
-            if float(neg) > 1.8:
+            if float(_neg) > 1.8:
                 angle_twist.append(angle)
             else:
                 angle_twist.append(torch.ones_like(angle) * -999)
-                print('error', float(neg), i)
+                print('error', float(_neg), i)
 
     angle_twist = torch.stack(angle_twist, dim=1)
 

@@ -14,7 +14,6 @@
 #
 # Contact: ps-license@tuebingen.mpg.de
 
-from typing import Optional, Dict, Union
 import os
 import os.path as osp
 
@@ -24,6 +23,9 @@ import numpy as np
 
 import torch
 import torch.nn as nn
+from jaxtyping import Float, jaxtyped
+import typeguard
+from typing import Optional, Dict, Union
 from easydict import EasyDict as edict
 
 from .lbs import (
@@ -1502,14 +1504,15 @@ class SMPLXLayer(SMPLX):
         )
         return output
 
+    @jaxtyped(typechecker=typeguard.typechecked)
     def hybrik(
         self,
-        betas: Optional[Tensor] = None,
-        expression: Optional[Tensor] = None,
-        pose_skeleton: Optional[Tensor] = None,
-        phis: Optional[Tensor] = None,
-        leaf_thetas: Optional[Tensor] = None,
-        transl: Optional[Tensor] = None,
+        betas: Optional[Float[torch.Tensor, "batch 11"]] = None,
+        expression: Optional[Float[torch.Tensor, "batch 10"]] = None,
+        pose_skeleton: Optional[Float[torch.Tensor, "batch 71 3"]] = None,
+        phis: Optional[Float[torch.Tensor, "batch 54 2"]] = None,
+        leaf_thetas: Optional[torch.Tensor] = None,
+        transl: Optional[Float[torch.Tensor, "batch 3"]] = None,
         return_verts: bool = True,
         root_align: bool = True,
         use_hand_pca: bool = False,
@@ -1588,6 +1591,8 @@ class SMPLXLayer(SMPLX):
             joints = self.joint_mapper(joints=joints, vertices=vertices)
 
         if transl is not None:
+            root_offset = joints[..., 0, :]
+            transl = transl - root_offset
             joints += transl.unsqueeze(dim=1)
             joints_55 += transl.unsqueeze(dim=1)
             vertices += transl.unsqueeze(dim=1)
@@ -1658,19 +1663,20 @@ class SMPLXLayer(SMPLX):
 
         return parents, children
 
+    @jaxtyped(typechecker=typeguard.typechecked)
     def forward_get_twist(
         self,
-        betas: Optional[Tensor] = None,
-        global_orient: Optional[Tensor] = None,
-        body_pose: Optional[Tensor] = None,
-        left_hand_pose: Optional[Tensor] = None,
-        right_hand_pose: Optional[Tensor] = None,
-        transl: Optional[Tensor] = None,
-        expression: Optional[Tensor] = None,
-        jaw_pose: Optional[Tensor] = None,
-        leye_pose: Optional[Tensor] = None,
-        reye_pose: Optional[Tensor] = None,
-        full_pose: Optional[Tensor] = None,
+        betas: Optional[Float[torch.Tensor, f"*batch num_betas"]] = None,
+        global_orient: Optional[Float[torch.Tensor, f"*batch 1 3 3"]] = None,
+        body_pose: Optional[Float[torch.Tensor, f"*batch 21 3 3"]] = None,
+        left_hand_pose: Optional[Float[torch.Tensor, f"*batch 15 3 3"]] = None,
+        right_hand_pose: Optional[Float[torch.Tensor, f"*batch 15 3 3"]] = None,
+        transl: Optional[Float[torch.Tensor, f"*batch 3"]] = None,
+        expression: Optional[Float[torch.Tensor, f"*batch 10"]] = None,
+        jaw_pose: Optional[Float[torch.Tensor, f"*batch 1 3 3"]] = None,
+        leye_pose: Optional[Float[torch.Tensor, f"*batch 1 3 3"]] = None,
+        reye_pose: Optional[Float[torch.Tensor, f"*batch 1 3 3"]] = None,
+        full_pose: Optional[Float[torch.Tensor, f"*batch dim"]] = None,
     ):
 
         device, dtype = self.shapedirs.device, self.shapedirs.dtype
@@ -1760,29 +1766,38 @@ class SMPLXLayer(SMPLX):
         leaf_joints = vertices[:, self.LEAF_INDICES]
         return torch.cat([joints, leaf_joints], dim=1)
 
+    @jaxtyped(typechecker=typeguard.typechecked)
     def forward_simple(
         self,
-        betas: Optional[Tensor] = None,
-        expression: Optional[Tensor] = None,
-        full_pose: Optional[Tensor] = None,
-        transl: Optional[Tensor] = None,
+        betas: Optional[Float[torch.Tensor, f"*batch num_betas"]] = None,
+        expression: Optional[Float[torch.Tensor, f"*batch num_expression_coeffs"]] = None,
+        full_pose: Optional[Float[torch.Tensor, f"*batch dim 3 3"]] = None,
+        transl: Optional[Float[torch.Tensor, f"*batch 3"]] = None,
         return_verts: bool = True,
         use_pose_mean: bool = False,
         root_align: bool = True,
         **kwargs,
-    ) -> SMPLXOutput:
+    ) -> edict:
 
-        # device, dtype = self.shapedirs.device, self.shapedirs.dtype
+        device, dtype = self.shapedirs.device, self.shapedirs.dtype
 
         if use_pose_mean:
             full_pose += self.pose_mean
 
-        model_vars = [betas, expression, full_pose, transl]
         batch_size = 1
+
+
+        model_vars = [betas, expression, full_pose, transl]
         for var in model_vars:
             if var is None:
                 continue
             batch_size = max(batch_size, len(var))
+
+        if expression is None:
+            expression = torch.zeros(
+                [batch_size, self.num_expression_coeffs],
+                dtype=dtype, device=device,
+            )
 
         shape_components = torch.cat([betas, expression], dim=-1)
 
@@ -1837,6 +1852,8 @@ class SMPLXLayer(SMPLX):
             joints = self.joint_mapper(joints=joints, vertices=vertices)
 
         if transl is not None:
+            root_offset = joints[..., 0, :]
+            transl = transl - root_offset
             joints += transl.unsqueeze(dim=1)
             vertices += transl.unsqueeze(dim=1)
             joints_55 += transl.unsqueeze(dim=1)
@@ -1856,6 +1873,105 @@ class SMPLXLayer(SMPLX):
             transl=transl,
         )
         return output
+
+    @jaxtyped(typechecker=typeguard.typechecked)
+    def forward_simple_with_pose_decomposed(
+        self,
+        betas: Optional[Float[torch.Tensor, "*batch num_betas"]] = None,
+        global_orient: Optional[Float[torch.Tensor, "*batch 1 3 3"]] = None,
+        body_pose: Optional[Float[torch.Tensor, "*batch 21 3 3"]] = None,
+        left_hand_pose: Optional[Float[torch.Tensor, "*batch 15 3 3"]] = None,
+        right_hand_pose: Optional[Float[torch.Tensor, "*batch 15 3 3"]] = None,
+        transl: Optional[Float[torch.Tensor, "*batch 3"]] = None,
+        expression: Optional[Float[torch.Tensor, "*batch 10"]] = None,
+        jaw_pose: Optional[Float[torch.Tensor, "*batch 1 3 3"]] = None,
+        leye_pose: Optional[Float[torch.Tensor, "*batch 1 3 3"]] = None,
+        reye_pose: Optional[Float[torch.Tensor, "*batch 1 3 3"]] = None,
+        return_verts: bool = True,
+        use_pose_mean: bool = False,
+        root_align: bool = True,
+        **kwargs,
+    ) -> edict:
+        device, dtype = self.shapedirs.device, self.shapedirs.dtype
+
+        model_vars = [
+            betas, global_orient, body_pose, transl,
+            expression, left_hand_pose, right_hand_pose, jaw_pose, leye_pose, reye_pose,
+        ]
+        batch_size = 1
+        for var in model_vars:
+            if var is None:
+                continue
+            batch_size = max(batch_size, len(var))
+
+        if global_orient is None:
+            global_orient = torch.eye(3, device=device, dtype=dtype).view(
+                1, 1, 3, 3,
+            ).expand(batch_size, -1, -1, -1).contiguous()
+        if body_pose is None:
+            body_pose = torch.eye(3, device=device, dtype=dtype).view(
+                1, 1, 3, 3,
+            ).expand(
+                    batch_size, self.NUM_BODY_JOINTS, -1, -1,
+            ).contiguous()
+        if left_hand_pose is None:
+            left_hand_pose = torch.eye(3, device=device, dtype=dtype).view(
+                1, 1, 3, 3,
+            ).expand(batch_size, 15, -1, -1).contiguous()
+        if right_hand_pose is None:
+            right_hand_pose = torch.eye(3, device=device, dtype=dtype).view(
+                1, 1, 3, 3,
+            ).expand(batch_size, 15, -1, -1).contiguous()
+        if jaw_pose is None:
+            jaw_pose = torch.eye(3, device=device, dtype=dtype).view(
+                1, 1, 3, 3,
+            ).expand(batch_size, -1, -1, -1).contiguous()
+        if leye_pose is None:
+            leye_pose = torch.eye(3, device=device, dtype=dtype).view(
+                1, 1, 3, 3,
+            ).expand(batch_size, -1, -1, -1).contiguous()
+        if reye_pose is None:
+            reye_pose = torch.eye(3, device=device, dtype=dtype).view(
+                1, 1, 3, 3,
+            ).expand(batch_size, -1, -1, -1).contiguous()
+        if expression is None:
+            expression = torch.zeros(
+                [batch_size, self.num_expression_coeffs],
+                dtype=dtype, device=device,
+            )
+        if betas is None:
+            betas = torch.zeros(
+                [batch_size, self.num_betas],
+                dtype=dtype, device=device,
+            )
+        if transl is None:
+            transl = torch.zeros([batch_size, 3], dtype=dtype, device=device)
+
+        # Concatenate all pose vectors
+        full_pose = torch.cat(
+            [
+                global_orient.reshape(-1, 1, 3, 3),
+                body_pose.reshape(-1, self.NUM_BODY_JOINTS, 3, 3),
+                jaw_pose.reshape(-1, 1, 3, 3),
+                leye_pose.reshape(-1, 1, 3, 3),
+                reye_pose.reshape(-1, 1, 3, 3),
+                left_hand_pose.reshape(-1, self.NUM_HAND_JOINTS, 3, 3),
+                right_hand_pose.reshape(-1, self.NUM_HAND_JOINTS, 3, 3),
+            ], dim=1,
+        )
+
+        res = self.forward_simple(
+            betas=betas,
+            expression=expression,
+            transl=transl,
+            full_pose=full_pose,
+            return_verts=return_verts,
+            use_pose_mean=use_pose_mean,
+            root_align=root_align,
+            **kwargs,
+        )
+
+        return res
 
 
 def build_layer(
