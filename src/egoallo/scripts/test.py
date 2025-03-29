@@ -443,8 +443,10 @@ class TestRunner:
                 )
 
             # parallel compute metrics for debugging.
+            # trajectory_metrics = []
             # for gt_traj, est_traj in zip(gt_trajs, denoised_trajs):
             #     metrics = gt_traj._compute_metrics(est_traj, body_model=self.body_model, device=torch.device("cpu"))
+            #     trajectory_metrics.append(metrics)
 
             # Aggregate metrics across all trajectories
             aggregated_metrics = {}

@@ -429,7 +429,7 @@ def run_sampling_with_masked_data(
             + (
                 torch.sqrt(1 - alpha_bar_t[t_next] - sigma_t[t] ** 2)
                 * (x_t_packed - torch.sqrt(alpha_bar_t[t]) * x_0_packed_pred)
-                / torch.sqrt(1 - alpha_bar_t[t] + 1e-1)
+                / torch.sqrt(1 - alpha_bar_t[t] + 1e-8)
             )
             + sigma_t[t] * torch.randn_like(x_0_packed_pred)
         )
@@ -437,7 +437,7 @@ def run_sampling_with_masked_data(
             runtime_config.denoising.unpack_traj(
                 x_t_packed,
                 include_hands=runtime_config.model.include_hands,
-                project_rotmats=False,
+                project_rotmats=True,
             ),
         )
     duration = time.time() - start_time
