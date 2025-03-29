@@ -3,8 +3,14 @@ from collections import namedtuple
 import numpy as np
 import torch
 import torch.nn as nn
+from jaxtyping import Float, Int
+from jaxtyping import Array, jaxtyped
+import typeguard
+from typing import Optional
 
 from .lbs import lbs, hybrik, rotmat_to_quat, quat_to_rotmat
+from ..smplx.lbs import lbs_get_twist
+from ..smplx.vertex_ids import vertex_ids as VERTEX_IDS
 
 try:
     import cPickle as pk
@@ -60,6 +66,13 @@ class SMPL_layer(nn.Module):
     LEAF_NAMES = [
         'head', 'left_middle', 'right_middle', 'left_bigtoe', 'right_bigtoe',
     ]
+    LEAF_INDICES = [
+        VERTEX_IDS['smplh']['nose'],
+        VERTEX_IDS['smplh']['lmiddle'],
+        VERTEX_IDS['smplh']['rmiddle'],
+        VERTEX_IDS['smplh']['LBigToe'],
+        VERTEX_IDS['smplh']['RBigToe'],
+    ]
     root_idx_17 = 0
     root_idx_smpl = 0
 
@@ -69,7 +82,7 @@ class SMPL_layer(nn.Module):
         h36m_jregressor,
         gender='neutral',
         dtype=torch.float32,
-        num_joints=29,
+        num_joints=24,
     ):
         ''' SMPL model layers
 
@@ -137,6 +150,7 @@ class SMPL_layer(nn.Module):
         )
 
         self.num_joints = num_joints
+        assert self.num_joints >= 24 and self.num_joints <= 29
 
         # indices of parents for each joints
         parents = torch.zeros(len(self.JOINT_NAMES), dtype=torch.long)
@@ -149,7 +163,7 @@ class SMPL_layer(nn.Module):
         parents[27] = 10
         parents[28] = 11
         if parents.shape[0] > self.num_joints:
-            parents = parents[:24]
+            parents = parents[:self.num_joints]
 
         self.register_buffer(
             'children_map',
@@ -179,13 +193,14 @@ class SMPL_layer(nn.Module):
 
         return children
 
+    @jaxtyped(typechecker=typeguard.typechecked)
     def forward(
         self,
-        pose_axis_angle,
-        betas,
-        global_orient,
-        transl=None,
-        return_verts=True,
+        pose_axis_angle: Float[torch.Tensor, "batch 23 3"],
+        betas: Optional[Float[torch.Tensor, "batch 10"]] = None,
+        global_orient: Optional[Float[torch.Tensor, "batch 3"]] = None,
+        transl: Optional[Float[torch.Tensor, "batch 3"]] = None,
+        return_verts: bool = True,
     ):
         ''' Forward pass for the SMPL model
 
@@ -227,6 +242,8 @@ class SMPL_layer(nn.Module):
         )
 
         if transl is not None:
+            root_offset = joints[..., self.root_idx_smpl, :]
+            transl = transl - root_offset
             # apply translations
             joints += transl.unsqueeze(dim=1)
             vertices += transl.unsqueeze(dim=1)
@@ -241,15 +258,16 @@ class SMPL_layer(nn.Module):
         )
         return output
 
+    @jaxtyped(typechecker=typeguard.typechecked)
     def hybrik(
             self,
-            pose_skeleton,
-            betas,
-            phis,
-            global_orient,
-            transl=None,
-            return_verts=True,
-            leaf_thetas=None,
+            pose_skeleton: Float[torch.Tensor, "batch 29 3"] | Float[torch.Tensor, "batch 24 3"],
+            betas: Float[torch.Tensor, "batch 10"],
+            phis: Float[torch.Tensor, "batch 23 2"],
+            global_orient: Optional[Float[torch.Tensor, "batch 3 3"]] = None,
+            transl: Optional[Float[torch.Tensor, "batch 3"]] = None,
+            return_verts: bool = True,
+            leaf_thetas: Optional[Float[torch.Tensor, "batch 5 4"]] = None,
             naive=False,
     ):
         ''' Inverse pass for the SMPL model
@@ -263,7 +281,7 @@ class SMPL_layer(nn.Module):
                 It can used if shape parameters
                 `betas` are predicted from some external model.
                 (default=None)
-            global_orient: torch.tensor, optional, shape Bx3
+            global_orient: torch.tensor, optional, shape Bx3x3
                 Global Orientations.
             transl: torch.tensor, optional, shape Bx3
                 Global Translations.
@@ -288,13 +306,15 @@ class SMPL_layer(nn.Module):
             self.J_regressor, self.J_regressor_h36m, self.parents, self.children_map,
             self.lbs_weights, dtype=self.dtype, train=self.training,
             leaf_thetas=leaf_thetas,
-            naive=naive,
+            naive=naive, num_joints=self.num_joints,
         )
 
-        rot_mats = rot_mats.reshape(batch_size * 24, 3, 3)
+        rot_mats = rot_mats.reshape(batch_size, self.num_joints, 3, 3)
         # rot_mats = rotmat_to_quat(rot_mats).reshape(batch_size, 24 * 4)
 
         if transl is not None:
+            root_offset = new_joints[..., self.root_idx_smpl, :]
+            transl = transl - root_offset
             new_joints += transl.unsqueeze(dim=1)
             vertices += transl.unsqueeze(dim=1)
             joints_from_verts += transl.unsqueeze(dim=1)
@@ -307,3 +327,69 @@ class SMPL_layer(nn.Module):
             vertices=vertices, joints=new_joints, rot_mats=rot_mats, joints_from_verts=joints_from_verts,
         )
         return output
+
+    @jaxtyped(typechecker=typeguard.typechecked)
+    def forward_get_twist(
+        self,
+        betas: Optional[Float[torch.Tensor, f"*batch 10"]] = None,
+        global_orient: Optional[Float[torch.Tensor, f"*batch 1 3 3"]] = None,
+        body_pose: Optional[Float[torch.Tensor, f"*batch 23 3 3"]] = None,
+        transl: Optional[Float[torch.Tensor, f"*batch 3"]] = None,
+        full_pose: Optional[Float[torch.Tensor, f"*batch dim"]] = None,
+    ):
+
+        device, dtype = self.shapedirs.device, self.shapedirs.dtype
+
+        model_vars = [
+            betas, global_orient, body_pose, transl,
+            full_pose,
+        ]
+        batch_size = 1
+        for var in model_vars:
+            if var is None:
+                continue
+            batch_size = max(batch_size, len(var))
+
+        if full_pose is None:
+            if global_orient is None:
+                global_orient = torch.eye(3, device=device, dtype=dtype).view(
+                    1, 1, 3, 3,
+                ).expand(batch_size, -1, -1, -1).contiguous()
+            if body_pose is None:
+                body_pose = torch.eye(3, device=device, dtype=dtype).view(
+                    1, 1, 3, 3,
+                ).expand(
+                        batch_size, self.NUM_BODY_JOINTS, -1, -1,
+                ).contiguous()
+            if betas is None:
+                betas = torch.zeros(
+                    [batch_size, self.NUM_BETAS],
+                    dtype=dtype, device=device,
+                )
+            if transl is None:
+                transl = torch.zeros([batch_size, 3], dtype=dtype, device=device)
+
+            # Concatenate all pose vectors
+            full_pose = torch.cat(
+                [
+                    global_orient.reshape(-1, 1, 3, 3),
+                    body_pose.reshape(-1, self.NUM_BODY_JOINTS, 3, 3),
+                ], dim=1,
+            )
+
+        if self.num_joints == self.NUM_JOINTS + 1:
+            # No leaf jnts
+            twist = lbs_get_twist(
+                betas, full_pose, self.v_template, self.shapedirs, self.posedirs, self.J_regressor, self.parents, self.lbs_weights, leaf_indices=[], pose2rot=False,
+            )
+        else:
+            # has 5 additional leaf jnts
+            twist = lbs_get_twist(
+                betas, full_pose, self.v_template,
+                self.shapedirs, self.posedirs,
+                self.J_regressor, self.parents,
+                self.lbs_weights,
+                leaf_indices=self.LEAF_INDICES, pose2rot=False,
+            )
+
+        return twist

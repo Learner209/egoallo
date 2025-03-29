@@ -16,29 +16,22 @@
 
 """
 Mathematical Core common to `batch_inverse_kinematics_transform` and `batch_inverse_kinematics_transform_naive`)
-
-The mathematical core of the twist-swing decomposition is the same in both implementations:
-
-Finding the Swing Component:
-Calculate axis of rotation via cross product of rest and target bone vectors
-Compute the angle between vectors using dot product (cosine) and cross product (sine)
-Convert axis-angle to rotation matrix using Rodrigues formula
-
-Applying the Twist Component:
-Use the provided phis parameters (cos, sin of twist angle)
-Apply twist rotation around the bone axis
-Combine with swing rotation to get the final rotation matrix
 """
 
 from __future__ import absolute_import
 from __future__ import print_function
 from __future__ import division
+from typing import Optional
 
+from loguru import logger
 import numpy as np
 
 import torch
 import torch.nn.functional as F
+from jaxtyping import jaxtyped, Float, Int
+import typeguard
 
+from ..smplx.vertex_ids import vertex_ids as VERTEX_IDS
 
 def rot_mat_to_euler(rot_mats):
     # Calculates rotation matrix to euler angles
@@ -274,6 +267,7 @@ def lbs(
     '''
     batch_size = max(betas.shape[0], pose.shape[0])
     device = betas.device
+    num_joints = parents.shape[0]
 
     # Add shape contribution
     v_shaped = v_template + blend_shapes(betas, shapedirs)
@@ -308,7 +302,7 @@ def lbs(
 
     v_posed = pose_offsets + v_shaped
     # 4. Get the global joint location
-    J_transformed, A = batch_rigid_transform(rot_mats, J, parents[:24], dtype=dtype)
+    J_transformed, A = batch_rigid_transform(rot_mats, J, parents[:num_joints], dtype=dtype)
 
     # 5. Do skinning:
     # W is N x V x (J + 1)
@@ -335,7 +329,7 @@ def lbs(
 def hybrik(
     betas, global_orient, pose_skeleton, phis,
     v_template, shapedirs, posedirs, J_regressor, J_regressor_h36m, parents, children,
-    lbs_weights, dtype=torch.float32, train=False, leaf_thetas=None, naive=False,
+    lbs_weights, dtype=torch.float32, train=False, leaf_thetas=None, naive=False, num_joints=29,
 ):
     ''' Performs Linear Blend Skinning with the given shape and skeleton joints
 
@@ -343,7 +337,7 @@ def hybrik(
         ----------
         betas : torch.tensor BxNB
             The tensor of shape parameters
-        global_orient : torch.tensor Bx3
+        global_orient : torch.tensor Bx3x3
             The tensor of global orientation
         pose_skeleton : torch.tensor BxJ*3
             The pose skeleton in (X, Y, Z) format
@@ -388,18 +382,20 @@ def hybrik(
 
     # 2. Get the rest joints
     # NxJx3 array
-    if leaf_thetas is not None:
+    if leaf_thetas is None:
         rest_J = vertices2joints(J_regressor, v_shaped)
     else:
-        rest_J = torch.zeros((v_shaped.shape[0], 29, 3), dtype=dtype, device=device)
+        assert num_joints == 29
+        rest_J = torch.zeros((v_shaped.shape[0], num_joints, 3), dtype=dtype, device=device)
         rest_J[:, :24] = vertices2joints(J_regressor, v_shaped)
 
-        leaf_number = [411, 2445, 5905, 3216, 6617]
-        leaf_vertices = v_shaped[:, leaf_number].clone()
-        rest_J[:, 24:] = leaf_vertices
+        if num_joints == 29:
+            leaf_number = [VERTEX_IDS['smplh']['nose'], VERTEX_IDS['smplh']['lmiddle'], VERTEX_IDS['smplh']['rmiddle'], VERTEX_IDS['smplh']['LBigToe'], VERTEX_IDS['smplh']['RBigToe']]
+            leaf_vertices = v_shaped[:, leaf_number].clone()
+            rest_J[:, 24:] = leaf_vertices
 
     # 3. Get the rotation matrics
-    if train or naive:
+    if (train or naive) and False:
         rot_mats, rotate_rest_pose = batch_inverse_kinematics_transform_naive(
             pose_skeleton, global_orient, phis,
             rest_J.clone(), children, parents, dtype=dtype, train=train,
@@ -414,15 +410,15 @@ def hybrik(
 
     test_joints = True
     if test_joints:
-        J_transformed, A = batch_rigid_transform(rot_mats, rest_J[:, :24].clone(), parents[:24], dtype=dtype)
+        J_transformed, A = batch_rigid_transform(rot_mats, rest_J[:, :num_joints].clone(), parents[:num_joints], dtype=dtype)
     else:
         J_transformed = None
 
-    # assert torch.mean(torch.abs(rotate_rest_pose - J_transformed)) < 1e-5
+    assert torch.mean(torch.abs(rotate_rest_pose - J_transformed)) < 1e-5
     # 4. Add pose blend shapes
-    # rot_mats: N x (J + 1) x 3 x 3
+    # rot_mats: N x num_joints x 3 x 3
     ident = torch.eye(3, dtype=dtype, device=device)
-    pose_feature = (rot_mats[:, 1:] - ident).view([batch_size, -1])
+    pose_feature = (rot_mats[:, 1:24] - ident).view([batch_size, -1])
     pose_offsets = torch.matmul(pose_feature, posedirs) \
         .view(batch_size, -1, 3)
 
@@ -433,6 +429,7 @@ def hybrik(
     W = lbs_weights.unsqueeze(dim=0).expand([batch_size, -1, -1])
     # (N x V x (J + 1)) x (N x (J + 1) x 16)
     num_joints = J_regressor.shape[0]
+    A = A[..., :24, :, :]
     T = torch.matmul(W, A.view(batch_size, num_joints, 16)) \
         .view(batch_size, -1, 4, 4)
 
@@ -453,7 +450,7 @@ def vertices2joints(J_regressor, vertices):
     ''' Calculates the 3D joint locations from the vertices
 
     Parameters
-    ----------I have a questions regarding the
+    ---------
     J_regressor : torch.tensor JxV
         The regressor array that is used to calculate the joints from the
         position of the vertices
@@ -594,11 +591,10 @@ def batch_rigid_transform(rot_mats, joints, parents, dtype=torch.float32):
     # The last column of the transformations contains the posed joints
     posed_joints = transforms[:, :, :3, 3]
 
-    # The last column of the transformations contains the posed joints
-    posed_joints = transforms[:, :, :3, 3]
-
     joints_homogen = F.pad(joints, [0, 0, 0, 1])
 
+    # torch.matmul(transforms, joints_homogen): Multiplies each BxNx4x4 transformation by the BxNx4x1 homogeneous joint positions, resulting in BxNx4x1. For joint i, this computes T_i * joints_homogen[:, i], the world position of the rest pose joint under the posed transformation.
+    # F.pad(..., [3, 0, 0, 0, 0, 0, 0, 0]): Pads this BxNx4x1 tensor along the last dimension. With (3, 0), it adds 3 columns of zeros before the existing column, making it BxNx4x4. So, each matrix has columns [0, 0, 0, T_i * joints_homogen[:, i]].
     rel_transforms = transforms - F.pad(
         torch.matmul(transforms, joints_homogen), [3, 0, 0, 0, 0, 0, 0, 0],
     )
@@ -606,10 +602,12 @@ def batch_rigid_transform(rot_mats, joints, parents, dtype=torch.float32):
     return posed_joints, rel_transforms
 
 
+@jaxtyped(typechecker=typeguard.typechecked)
 def batch_inverse_kinematics_transform(
-        pose_skeleton, global_orient,
-        phis,
-        rest_pose,
+        pose_skeleton: Float[torch.Tensor, "*batch 24 3"] | Float[torch.Tensor, "*batch 29 3"],
+        global_orient: Optional[Float[torch.Tensor, "*batch 3 3"]],
+        phis: Float[torch.Tensor, "*batch 23 2"],
+        rest_pose: Float[torch.Tensor, "*batch 24 3"] | Float[torch.Tensor, "*batch 29 3"],
         children, parents, dtype=torch.float32, train=False,
         leaf_thetas=None,
 ):
@@ -641,38 +639,26 @@ def batch_inverse_kinematics_transform(
         The relative (with respect to the root joint) rigid transformations
         for all the joints
     """
-    """
-    This is the standard implementation that processes joints sequentially through the kinematic chain. Key characteristics:
-
-    Processes each joint individually in a for-loop that iterates through joints based on their index
-    Handles three special cases:
-    Leaf nodes (children[i] == -1)
-    Joints with three children (children[i] == -3)
-    Regular joints with one child
-    Uses list append operations to build rotation chains
-    Computes rotations on-the-fly for each joint
-    The core twist-swing calculation occurs in lines 711-746, where:
-
-    The swing is computed by finding the rotation that aligns the rest pose bone with the target bone
-    The twist is applied along the bone axis using the provided phis parameters
-    """
     batch_size = pose_skeleton.shape[0]
     device = pose_skeleton.device
+    num_joints = parents.shape[0]
 
     rel_rest_pose = rest_pose.clone()
     rel_rest_pose[:, 1:] -= rest_pose[:, parents[1:]].clone()
     rel_rest_pose = torch.unsqueeze(rel_rest_pose, dim=-1)
 
     # rotate the T pose
+    # Prepare a tensor to store transformed rest pose joint locations.
     rotate_rest_pose = torch.zeros_like(rel_rest_pose)
-    # set up the root
     rotate_rest_pose[:, 0] = rel_rest_pose[:, 0]
 
+    # Calculate vectors from each joint to its parent in the target pose.
     rel_pose_skeleton = torch.unsqueeze(pose_skeleton.clone(), dim=-1).detach()
     rel_pose_skeleton[:, 1:] = rel_pose_skeleton[:, 1:] - rel_pose_skeleton[:, parents[1:]].clone()
     rel_pose_skeleton[:, 0] = rel_rest_pose[:, 0]
 
     # the predicted final pose
+    # Adjust Final Pose Skeleton (final_pose_skeleton), ranslate the pose skeleton so its root matches the rest pose root.
     final_pose_skeleton = torch.unsqueeze(pose_skeleton.clone(), dim=-1)
     final_pose_skeleton = final_pose_skeleton - final_pose_skeleton[:, 0:1] + rel_rest_pose[:, 0:1]
 
@@ -684,18 +670,19 @@ def batch_inverse_kinematics_transform(
     assert phis.dim() == 3
     phis = phis / (torch.norm(phis, dim=2, keepdim=True) + 1e-8)
 
-    # TODO
-    if train:
+    if global_orient is None:
         global_orient_mat = batch_get_pelvis_orient(
             rel_pose_skeleton.clone(), rel_rest_pose.clone(), parents, children, dtype,
         )
     else:
-        global_orient_mat = batch_get_pelvis_orient_svd(
-            rel_pose_skeleton.clone(), rel_rest_pose.clone(), parents, children, dtype,
-        )
+        global_orient_mat = global_orient
 
-    rot_mat_chain = [global_orient_mat]
-    rot_mat_local = [global_orient_mat]
+    # Preallocate tensors for cumulative (rot_mat_chain) and local (rot_mat_local) rotations.
+    rot_mat_chain = torch.zeros((batch_size, num_joints, 3, 3), dtype=torch.float32, device=pose_skeleton.device)
+    rot_mat_local = torch.zeros_like(rot_mat_chain)
+    rot_mat_chain[:, 0] = global_orient_mat
+    rot_mat_local[:, 0] = global_orient_mat
+
     # leaf nodes rot_mats
     if leaf_thetas is not None:
         leaf_cnt = 0
@@ -703,36 +690,31 @@ def batch_inverse_kinematics_transform(
 
     for i in range(1, parents.shape[0]):
         if children[i] == -1:
-            # leaf nodes
-            if leaf_thetas is not None:
-                rot_mat = leaf_rot_mats[:, leaf_cnt, :, :]
-                leaf_cnt += 1
-
-                rotate_rest_pose[:, i] = rotate_rest_pose[:, parents[i]] + torch.matmul(
-                    rot_mat_chain[parents[i]],
-                    rel_rest_pose[:, i],
-                )
-
-                rot_mat_chain.append(
-                    torch.matmul(
-                    rot_mat_chain[parents[i]],
-                    rot_mat,
-                    ),
-                )
-                rot_mat_local.append(rot_mat)
-        elif children[i] == -3:
-            # three children
             rotate_rest_pose[:, i] = rotate_rest_pose[:, parents[i]] + torch.matmul(
-                rot_mat_chain[parents[i]],
+                rot_mat_chain[:, parents[i]],
                 rel_rest_pose[:, i],
             )
 
-            spine_child = []
-            for c in range(1, parents.shape[0]):
-                if parents[c] == i and c not in spine_child:
-                    spine_child.append(c)
+            # leaf nodes, only increment rot_mat leaf_cnt when there are defined leaf nodes. Nodes are called leaf nodes iff. leaf_thetas is not None
+            if leaf_thetas is not None:
+                rot_mat = leaf_rot_mats[:, leaf_cnt, :, :]
+                leaf_cnt += 1
+            else:
+                rot_mat = torch.eye(3, dtype=dtype, device=device)
 
-            # original
+            rot_mat_chain[:, i] = torch.matmul(
+                rot_mat_chain[:, parents[i]],
+                rot_mat,
+            )
+            rot_mat_local[:, i] = rot_mat
+
+        elif children[i] == -3:
+            # three children
+            rotate_rest_pose[:, i] = rotate_rest_pose[:, parents[i]] + torch.matmul(
+                rot_mat_chain[:, parents[i]],
+                rel_rest_pose[:, i],
+            )
+
             spine_child = []
             for c in range(1, parents.shape[0]):
                 if parents[c] == i and c not in spine_child:
@@ -743,25 +725,22 @@ def batch_inverse_kinematics_transform(
             for c in spine_child:
                 temp = final_pose_skeleton[:, c] - rotate_rest_pose[:, i]
                 children_final_loc.append(temp)
-
                 children_rest_loc.append(rel_rest_pose[:, c].clone())
 
             rot_mat = batch_get_3children_orient_svd(
                 children_final_loc, children_rest_loc,
-                rot_mat_chain[parents[i]], spine_child, dtype,
+                rot_mat_chain[:, parents[i]], spine_child, dtype,
             )
 
-            rot_mat_chain.append(
-                torch.matmul(
-                    rot_mat_chain[parents[i]],
-                    rot_mat,
-                ),
+            rot_mat_chain[:, i] = torch.matmul(
+                rot_mat_chain[:, parents[i]],
+                rot_mat,
             )
-            rot_mat_local.append(rot_mat)
+            rot_mat_local[:, i] = rot_mat
         else:
             # (B, 3, 1)
             rotate_rest_pose[:, i] = rotate_rest_pose[:, parents[i]] + torch.matmul(
-                rot_mat_chain[parents[i]],
+                rot_mat_chain[:, parents[i]],
                 rel_rest_pose[:, i],
             )
             # (B, 3, 1)
@@ -779,7 +758,7 @@ def batch_inverse_kinematics_transform(
                 child_final_loc[big_diff_idx] = orig_vec[big_diff_idx]
 
             child_final_loc = torch.matmul(
-                rot_mat_chain[parents[i]].transpose(1, 2),
+                rot_mat_chain[:, parents[i]].transpose(1, 2),
                 child_final_loc,
             )
 
@@ -827,16 +806,14 @@ def batch_inverse_kinematics_transform(
             rot_mat_spin = ident + sin * K + (1 - cos) * torch.bmm(K, K)
             rot_mat = torch.matmul(rot_mat_loc, rot_mat_spin)
 
-            rot_mat_chain.append(
-                torch.matmul(
-                rot_mat_chain[parents[i]],
+            rot_mat_chain[:, i] = torch.matmul(
+                rot_mat_chain[:, parents[i]],
                 rot_mat,
-                ),
             )
-            rot_mat_local.append(rot_mat)
+            rot_mat_local[:, i] = rot_mat
 
     # (B, K + 1, 3, 3)
-    rot_mats = torch.stack(rot_mat_local, dim=1)
+    rot_mats = rot_mat_local
 
     return rot_mats, rotate_rest_pose.squeeze(-1)
 
@@ -876,17 +853,10 @@ def batch_inverse_kinematics_transform_naive(
         The relative (with respect to the root joint) rigid transformations
         for all the joints
     """
-    """
-    This is an optimized version that uses a level-based approach to process joints in batches. Key differences:
 
-    Preallocates tensors for rotations instead of building lists
-    Uses a level-wise traversal approach via idx_levs which groups joints by their depth in the kinematic tree
-    Processes joints at the same level in the hierarchy simultaneously (batched operations)
-    Has a more vectorized implementation for computing rotations
-    Has the option to retain gradients with need_detach parameter
-    """
     batch_size = pose_skeleton.shape[0]
     device = pose_skeleton.device
+    num_joints = parents.shape[0]
 
     rel_rest_pose = rest_pose.clone()
     rel_rest_pose[:, 1:] -= rest_pose[:, parents[1:]].clone()
@@ -919,11 +889,7 @@ def batch_inverse_kinematics_transform_naive(
     else:
         global_orient_mat = global_orient
 
-    # rot_mat_chain = [global_orient_mat]
-    # rot_mat_local = [global_orient_mat]
-    # print(global_orient_mat)
-
-    rot_mat_chain = torch.zeros((batch_size, 24, 3, 3), dtype=torch.float32, device=pose_skeleton.device)
+    rot_mat_chain = torch.zeros((batch_size, num_joints, 3, 3), dtype=torch.float32, device=pose_skeleton.device)
     rot_mat_local = torch.zeros_like(rot_mat_chain)
     rot_mat_chain[:, 0] = global_orient_mat
     rot_mat_local[:, 0] = global_orient_mat
@@ -945,41 +911,54 @@ def batch_inverse_kinematics_transform_naive(
         [22, 23],
         [24, 25, 26, 27, 28],
     ]
-    if leaf_thetas is not None:
+    if leaf_thetas is None:
         idx_levs = idx_levs[:-1]
 
     for idx_lev in range(1, len(idx_levs)):
+
         indices = idx_levs[idx_lev]
+
         if idx_lev == len(idx_levs)-1:
-            # leaf nodes
+
             if leaf_thetas is not None:
+                # leaf nodes
                 rot_mat = leaf_rot_mats[:, :, :, :]
+                leaf_cnt += 1
+            else:
+                rot_mat = torch.eye(3, device=pose_skeleton.device).unsqueeze(0).unsqueeze(0).expand(batch_size, len(indices), 3, 3)
 
-                rotate_rest_pose[:, indices] = rotate_rest_pose[:, parents[indices]] + torch.matmul(
-                    rot_mat_chain[:, parents[indices]],
-                    rel_rest_pose[:, indices],
-                )
+            # Update rotate_rest_pose: Parent position + rotated bone vector.
+            rotate_rest_pose[:, indices] = rotate_rest_pose[:, parents[indices]] + torch.matmul(
+                rot_mat_chain[:, parents[indices]],
+                rel_rest_pose[:, indices],
+            )
 
-                rot_mat_chain[:, indices] = torch.matmul(
-                    rot_mat_chain[:, parents[indices]],
-                    rot_mat,
-                )
-                rot_mat_local[:, indices] = rot_mat
+            # Update rot_mat_chain: Parent’s cumulative rotation × local rotation.
+            rot_mat_chain[:, indices] = torch.matmul(
+                rot_mat_chain[:, parents[indices]],
+                rot_mat,
+            )
+            rot_mat_local[:, indices] = rot_mat
 
         else:
             len_indices = len(indices)
             # (B, K, 3, 1)
+            # child_final_loc: Vector from joint to child in pose, transformed to parent’s local frame, since `rel_pose_skeleton` denotes relative joints to its parenets positions in global frame.
             child_final_loc = torch.matmul(
                     rot_mat_chain[:, parents[indices]].transpose(2, 3),
                     rel_pose_skeleton[:, children[indices]],
             )
 
+            # (B, K, 3, 1)
+            # child_rest_loc: Vector from joint to child in rest pose (global frame)
+            # child_rest_loc don't need rotation back, as in restpose, every joint's pose relative to its parent is identity.
             child_rest_loc = rel_rest_pose[:, children[indices]] # need rotation back ?
             # (B, K, 1, 1)
             child_final_norm = torch.norm(child_final_loc, dim=2, keepdim=True)
             child_rest_norm = torch.norm(child_rest_loc, dim=2, keepdim=True)
 
             # (B, K, 3, 1)
+            # Cross product gives rotation axis
             axis = torch.cross(child_rest_loc, child_final_loc, dim=2)
             axis_norm = torch.norm(axis, dim=2, keepdim=True)
 
@@ -992,6 +971,7 @@ def batch_inverse_kinematics_transform_naive(
 
             # Convert location revolve to rot_mat by rodrigues
             # (B, K, 1, 1)
+            # Location Rotation Matrix (Rodrigues’ Formula)
             rx, ry, rz = torch.split(axis, 1, dim=2)
             zeros = torch.zeros((batch_size, len_indices, 1, 1), dtype=dtype, device=device)
 
@@ -1004,6 +984,7 @@ def batch_inverse_kinematics_transform_naive(
             # (B, K, 3, 1)
             spin_axis = child_rest_loc / (child_rest_norm + 1e-8)
             # (B, K, 1, 1)
+            # Spin Rotation Matrix (Rodrigues’ Formula), Spin axis: Normalized rest pose bone vector.
             rx, ry, rz = torch.split(spin_axis, 1, dim=2)
             zeros = torch.zeros((batch_size, len_indices, 1, 1), dtype=dtype, device=device)
             K = torch.cat([zeros, -rz, ry, rz, zeros, -rx, -ry, rx, zeros], dim=2) \
@@ -1015,13 +996,19 @@ def batch_inverse_kinematics_transform_naive(
             cos = torch.unsqueeze(cos, dim=3)
             sin = torch.unsqueeze(sin, dim=3)
             rot_mat_spin = ident + sin * K + (1 - cos) * torch.matmul(K, K)
+
+            # Local rotation: rot_mat_loc × rot_mat_spin.
             rot_mat = torch.matmul(rot_mat_loc, rot_mat_spin)
 
+            # Update cumulative and local rotation tensors.
             rot_mat_chain[:, indices] = torch.matmul(
                     rot_mat_chain[:, parents[indices]],
                     rot_mat,
             )
             rot_mat_local[:, indices] = rot_mat
+
+            # Update rotate_rest_pose. Not present in original code.
+            rotate_rest_pose[:, indices] = rotate_rest_pose[:, parents[indices]] + torch.matmul(rot_mat_chain[:, parents[indices]], rel_rest_pose[:, indices])
 
     # (B, K + 1, 3, 3)
     # rot_mats = torch.stack(rot_mat_local, dim=1)
@@ -1033,26 +1020,8 @@ def batch_inverse_kinematics_transform_naive(
 
 def batch_get_pelvis_orient_svd(rel_pose_skeleton, rel_rest_pose, parents, children, dtype):
     """
-    Purpose
-    This function estimates the optimal rotation matrix for the pelvis (root joint) using the Singular Value Decomposition (SVD) method, which is robust and mathematically elegant.
-
-    Core Workflow
-    Identify the children of the pelvis (root joint)
-    Collect the relative positions of these children in both rest pose and target pose
-    Form correlation matrices and apply SVD to find the optimal rotation
-    Ensure the resulting rotation is a valid rotation matrix (with determinant 1)
-    Mathematical Explanation
-    The SVD approach implements the Kabsch algorithm for finding the optimal rotation between two point sets:
-
-    Data Collection: For each child joint of the pelvis, collect vectors from pelvis to the child:
-    In rest pose: $\mathbf{X} = {x_1, x_2, ..., x_n}$
-    In target pose: $\mathbf{Y} = {y_1, y_2, ..., y_n}$
-    Correlation Matrix: Compute $\mathbf{S} = \mathbf{X}\mathbf{Y}^T$, which captures how each dimension in the rest pose correlates with dimensions in the target pose.
-    SVD: Decompose $\mathbf{S} = \mathbf{U}\mathbf{\Sigma}\mathbf{V}^T$
-    Rotation Calculation: The optimal rotation is given by $\mathbf{R} = \mathbf{V}\mathbf{D}\mathbf{U}^T$, where:
-    $\mathbf{D}$ is a diagonal matrix that ensures $\det(\mathbf{R}) = 1$ (proper rotation)
-    $\mathbf{D} = \mathbf{I}$ except $D_{3,3} = \det(\mathbf{V}\mathbf{U}^T)$
-    This ensures we find the rotation that minimizes the sum of squared distances between the transformed rest pose vectors and target pose vectors.
+    Estimates the pelvis’s optimal rotation matrix using Singular Value Decomposition (SVD), implementing the Kabsch algorithm, which find the rotation that best aligns two sets of 3D points
+    In this case, the two sets of 3D points are the positions of the pelvis’s child joints in the rest pose and the target pose.
     """
     pelvis_child = [int(children[0])]
     for i in range(1, parents.shape[0]):
@@ -1067,6 +1036,7 @@ def batch_get_pelvis_orient_svd(rel_pose_skeleton, rel_rest_pose, parents, child
 
     rest_mat = torch.cat(rest_mat, dim=2)
     target_mat = torch.cat(target_mat, dim=2)
+    # S represents the cross-covariance between the rest and target position sets, capturing how they correlate across dimensions.
     S = rest_mat.bmm(target_mat.transpose(1, 2))
 
     mask_zero = S.sum(dim=(1, 2))
@@ -1097,29 +1067,7 @@ def batch_get_pelvis_orient_svd(rel_pose_skeleton, rel_rest_pose, parents, child
 
 def batch_get_pelvis_orient(rel_pose_skeleton, rel_rest_pose, parents, children, dtype):
     """
-    Purpose
-    An alternative method for pelvis orientation that is more anatomy-aware, handling the spine and hip separately.
-
-    Core Workflow
-    First calculate the rotation for the spine direction
-    Then calculate a secondary rotation around the spine for the hip alignment
-    Combine these rotations for the final pelvis orientation
-    Mathematical Explanation
-    This function uses a two-step approach:
-
-    Spine Alignment:
-    Find the rotation that aligns the spine direction from rest to target pose
-    This is done using the vectors2rotmat function that creates a rotation matrix to align two vectors
-    Hip Orientation:
-    Compute the average position of hip joints (pelvis children excluding spine)
-    Apply the spine rotation to the rest hip center
-    Project both hip centers to be perpendicular to the spine axis
-    Calculate the rotation around the spine axis using the Rodrigues formula:
-    Find rotation axis: $\mathbf{k} = \mathbf{a} \times \mathbf{b}$ (cross product)
-    Find rotation angle: $\cos(\theta) = \frac{\mathbf{a} \cdot \mathbf{b}}{|\mathbf{a}||\mathbf{b}|}$
-    Apply Rodrigues formula: $\mathbf{R} = \mathbf{I} + \sin(\theta)\mathbf{K} + (1-\cos(\theta))\mathbf{K}^2$ where $\mathbf{K}$ is the skew-symmetric matrix of axis $\mathbf{k}$
-    Combined Rotation: $\mathbf{R}{pelvis} = \mathbf{R}{hip} \mathbf{R}_{spine}$
-    This approach ensures that the orientation respects the biomechanical constraints of the human body, particularly the relationship between spine direction and hip orientation.
+    Considers the human body’s structure by separately aligning the spine direction and then adjusting the hip orientation around the spine axis, aiming for a more biomechanically plausible result.
     """
     batch_size = rel_pose_skeleton.shape[0]
     device = rel_pose_skeleton.device
@@ -1130,6 +1078,7 @@ def batch_get_pelvis_orient(rel_pose_skeleton, rel_rest_pose, parents, children,
         if parents[i] == 0 and i not in pelvis_child:
             pelvis_child.append(i)
 
+    # Spine Alignment
     spine_final_loc = rel_pose_skeleton[:, int(children[0])].clone()
     spine_rest_loc = rel_rest_pose[:, int(children[0])].clone()
     spine_norm = torch.norm(spine_final_loc, dim=1, keepdim=True)
@@ -1148,6 +1097,8 @@ def batch_get_pelvis_orient(rel_pose_skeleton, rel_rest_pose, parents, children,
     assert torch.sum(
         torch.isnan(rot_mat_spine),
     ) == 0, ('rot_mat_spine', rot_mat_spine)
+
+    # Compute the average position of hip joints (excluding the spine)
     center_final_loc = 0
     center_rest_loc = 0
     for child in pelvis_child:
@@ -1158,8 +1109,10 @@ def batch_get_pelvis_orient(rel_pose_skeleton, rel_rest_pose, parents, children,
     center_final_loc = center_final_loc / (len(pelvis_child) - 1)
     center_rest_loc = center_rest_loc / (len(pelvis_child) - 1)
 
+    # Apply the spine rotation to the rest hip center: center_rest_loc = rot_mat_spine * center_rest_loc.
     center_rest_loc = torch.matmul(rot_mat_spine, center_rest_loc)
 
+    # Project both hip centers onto the plane perpendicular to the spine axis:
     center_final_loc = center_final_loc - torch.sum(center_final_loc * spine_norm, dim=1, keepdim=True) * spine_norm
     center_rest_loc = center_rest_loc - torch.sum(center_rest_loc * spine_norm, dim=1, keepdim=True) * spine_norm
 
@@ -1167,6 +1120,7 @@ def batch_get_pelvis_orient(rel_pose_skeleton, rel_rest_pose, parents, children,
     center_rest_loc_norm = torch.norm(center_rest_loc, dim=1, keepdim=True)
 
     # (B, 3, 1)
+    # Compute the rotation axis and angle to align the projected hip centers, via Rodrigues Formula
     axis = torch.cross(center_rest_loc, center_final_loc, dim=1)
     axis_norm = torch.norm(axis, dim=1, keepdim=True)
 
@@ -1199,28 +1153,6 @@ def batch_get_pelvis_orient(rel_pose_skeleton, rel_rest_pose, parents, children,
 
 
 def batch_get_3children_orient_svd(rel_pose_skeleton, rel_rest_pose, rot_mat_chain_parent, children_list, dtype):
-    """
-    Purpose
-    Handles joints with three children (like shoulders or the spine base), where multiple constraints need to be satisfied simultaneously.
-
-    Core Workflow
-    Collect the relative positions of all children in rest and target poses
-    Apply the parent's inverse rotation to the target positions
-    Use SVD to find the optimal rotation that aligns all children simultaneously
-    Mathematical Explanation
-    Similar to the first function, but designed for cases with multiple children:
-
-    Data Preparation:
-    For each child, get its relative position in rest pose and target pose
-    Transform target positions to parent's local coordinate frame: $\mathbf{y}i^{local} = \mathbf{R}{parent}^T \mathbf{y}_i$
-    SVD-Based Rotation:
-    Combine all vectors into matrices: $\mathbf{X} = [x_1, x_2, x_3]$ and $\mathbf{Y} = [y_1^{local}, y_2^{local}, y_3^{local}]$
-    Compute correlation matrix: $\mathbf{S} = \mathbf{X}\mathbf{Y}^T$
-    Apply SVD: $\mathbf{S} = \mathbf{U}\mathbf{\Sigma}\mathbf{V}^T$
-    Calculate rotation with proper determinant: $\mathbf{R} = \mathbf{V}\mathbf{D}\mathbf{U}^T$
-    This approach finds a single rotation that best satisfies all constraints from multiple children simultaneously, which is crucial for joints like shoulders where multiple bones articulate from a single point.
-    """
-
     rest_mat = []
     target_mat = []
     for c, child in enumerate(children_list):
