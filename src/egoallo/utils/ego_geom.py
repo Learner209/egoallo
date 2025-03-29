@@ -32,6 +32,8 @@ from egoallo.utils.transformation import transform_vec_t
 from egoallo.utils.utils import NDArray
 from pytorch3d import transforms
 from scipy.spatial.transform import Rotation as sRot
+from jaxtyping import Float, jaxtyped
+import typeguard
 
 logger = setup_logger(output=None, name=__name__)
 
@@ -935,3 +937,12 @@ def quat_fk_torch(lrot_mat, lpos, kintree):
     res = torch.cat(gr, dim=-2), torch.cat(gp, dim=-2)
 
     return res
+
+
+@jaxtyped(typechecker=typeguard.typechecked)
+def project_rotmats_via_svd(
+    rotmats: Float[torch.Tensor, "*batch 3 3"],
+) -> Float[torch.Tensor, "*batch 3 3"]:
+    u, s, vh = torch.linalg.svd(rotmats)
+    del s
+    return torch.einsum("...ij,...jk->...ik", u, vh)
