@@ -9,11 +9,11 @@ import numpy as np
 import torch
 import open3d as o3d
 import cv2
-from egoallo.fncsmpl_library import SE3, SO3
+from egoallo.transforms import SE3, SO3
 from egoallo.setup_logger import setup_logger
-from egoallo.types import DenoiseTrajType
-import egoallo.fncsmpl_library as fncsmpl
+from egoallo.type_stubs import DenoiseTrajType
 from .utils import create_skeleton_point_cloud
+from egoallo.constants import SmplFamilyMetaModelZoo, SmplFamilyMetaModelName
 
 logger = setup_logger(output=None, name=__name__)
 
@@ -48,7 +48,7 @@ class SMPLViewer:
     def render_sequence(
         self,
         traj: "DenoiseTrajType",
-        smplh_model_path: Path,
+        smpl_family_model_basedir: Path,
         output_path: str = "output.mp4",
         online_render: bool = False,
     ):
@@ -56,7 +56,7 @@ class SMPLViewer:
 
         Args:
             traj: Denoised trajectory data
-            smplh_model_path: Path to SMPL-H model
+            smpl_family_model_basedir: Path to SMPL-H model
             output_path: Path to save the output video
             online_render: If True, use Open3D's interactive viewer for real-time rendering
         """
@@ -78,7 +78,7 @@ class SMPLViewer:
             traj.t_world_root,
         ).parameters()
 
-        batch_size = reduce(lambda x, y: x * y, traj.betas.shape[:-1])
+        _batch_size = reduce(lambda x, y: x * y, traj.betas.shape[:-1])
 
         # Get keypoints data
         if traj.metadata.dataset_type in ("AriaDataset", "EgoExoDataset"):
@@ -147,11 +147,11 @@ class SMPLViewer:
         )
 
         posed = traj.apply_to_body(
-            fncsmpl.SmplhModel.load(
-                smplh_model_path,
-                use_pca=False,
-                batch_size=batch_size,
-            ).to(device),
+            SmplFamilyMetaModelZoo[SmplFamilyMetaModelName]
+            .load(
+                smpl_family_model_basedir,
+            )
+            .to(device),
         )
 
         posed = posed.map(lambda x: x.squeeze(0))

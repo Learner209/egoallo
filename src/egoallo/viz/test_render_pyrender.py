@@ -16,11 +16,11 @@ def main():
     test_traj_path = "exp/test-amass-Mar-18/test/Gym_010_cooking1_0_775.npz_t0_775/gt_test/Gym_010_cooking1_0_775.npz_t0_775.pt"
 
     # Path to SMPL model
-    smplh_model_path = (
+    smpl_family_model_basedir = (
         project_root / "assets" / "smpl_based_model" / "smplh" / "SMPLH_MALE.pkl"
     )
-    if not os.path.exists(smplh_model_path):
-        print(f"SMPL model file not found at {smplh_model_path}")
+    if not os.path.exists(smpl_family_model_basedir):
+        print(f"SMPL model file not found at {smpl_family_model_basedir}")
         print("Please specify a valid SMPL model path")
         return
 
@@ -39,7 +39,7 @@ def main():
 
         EgoTrainingData.visualize_ego_training_data(
             traj,
-            smplh_model_path,
+            smpl_family_model_basedir,
             output_path,
         )
         print(f"Rendering complete. Output saved to {output_path}")

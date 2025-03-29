@@ -10,9 +10,11 @@ from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Optional
 
-from egoallo.viz.smpl_pyrender_viewer import SMPLViewer, RendererConfig
-from egoallo.fncsmpl_library import SE3, SO3
-import egoallo.fncsmpl_library as fncsmpl
+from egoallo.transforms import SE3, SO3
+from egoallo.middleware.third_party.HybrIK.hybrik.models.layers.smplh.fncsmplh import (
+    SmplhModel,
+)
+from egoallo import training_utils
 
 
 @dataclass
@@ -89,7 +91,7 @@ def create_mock_trajectory(
     # Create body shape parameters (zeros for neutral shape)
     betas = torch.zeros(seq_len, num_betas)
 
-    body_model = fncsmpl.SmplhModel.load(
+    body_model = SmplhModel.load(
         smplh_model_path,
         use_pca=False,
         batch_size=seq_len,
@@ -127,51 +129,25 @@ def create_mock_trajectory(
     return mock_traj
 
 
-def simplified_render_sequence(
-    traj,
-    smplh_model_path,
-    output_path="output.mp4",
-    online_render=True,
-):
-    """Simplified version of SMPLViewer.render_sequence that works with our mock data"""
-    # Initialize the viewer
-    viewer = SMPLViewer(RendererConfig(resolution=(800, 600), fps=30.0))
-
-    # Call the actual render_sequence method
-    viewer.render_sequence(
-        traj=traj,
-        smplh_model_path=smplh_model_path,
-        output_path=output_path,
-        online_render=online_render,
-    )
-
-
 def main():
     # Path to SMPL-H model - replace with actual path
-    smplh_model_path = Path("assets/smpl_based_model/smplh/SMPLH_MALE.pkl")
+    smpl_family_model_basedir = Path("assets/smpl_based_model")
 
     # Check if the model path exists
-    if not smplh_model_path.exists():
-        print(f"Warning: SMPL-H model not found at {smplh_model_path}")
+    if not smpl_family_model_basedir.exists():
+        print(f"Warning: SMPL-H model not found at {smpl_family_model_basedir}")
         print("Please provide a valid path to the SMPL-H model")
         print("You can download it from https://mano.is.tue.mpg.de/")
         return
 
     # Create mock trajectory
-    mock_traj = create_mock_trajectory(
+    _mock_traj = create_mock_trajectory(
         seq_len=600,
         num_betas=16,
-        smplh_model_path=smplh_model_path,
-    )
-
-    # Render the sequence
-    simplified_render_sequence(
-        traj=mock_traj,
-        smplh_model_path=smplh_model_path,
-        output_path="test_render.mp4",
-        online_render=True,  # Set to True for interactive visualization
+        smplh_model_path=smpl_family_model_basedir,
     )
 
 
 if __name__ == "__main__":
+    training_utils.ipdb_safety_net()
     main()

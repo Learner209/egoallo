@@ -15,8 +15,12 @@ from functools import reduce
 
 import numpy as np
 import torch
-from egoallo.fncsmpl_library import SE3
-from egoallo.fncsmpl_library import SO3
+from egoallo.middleware.third_party.HybrIK.hybrik.models.layers.smplh.fncsmplh import (
+    SE3,
+)
+from egoallo.middleware.third_party.HybrIK.hybrik.models.layers.smplh.fncsmplh import (
+    SO3,
+)
 from egoallo.fncsmpl_extensions_library import get_T_world_cpf
 from tqdm import tqdm
 from videoio import VideoWriter
@@ -24,11 +28,12 @@ from egoallo.setup_logger import setup_logger
 from OpenGL import GL as gl
 
 
-import egoallo.fncsmpl_library as fncsmpl
+import egoallo.middleware.third_party.HybrIK.hybrik.models.layers.smplh.fncsmplh as fncsmpl
 from .utils import create_skeleton_point_cloud, blend_with_background
+from egoallo.constants import SmplFamilyMetaModelZoo, SmplFamilyMetaModelName
 
 if TYPE_CHECKING:
-    from egoallo.types import DenoiseTrajType
+    from egoallo.type_stubs import DenoiseTrajType
 
 
 VIZ_UTILS_IMPORT = True
@@ -267,7 +272,7 @@ class SMPLViewer(BaseRenderer):
     def render_sequence(
         self,
         traj: DenoiseTrajType,
-        smplh_model_path: Path,
+        smpl_family_model_basedir: Path,
         output_path: str = "output.mp4",
     ) -> None:
         """Render SMPL sequence to video using denoised trajectory data."""
@@ -293,13 +298,13 @@ class SMPLViewer(BaseRenderer):
         traj = traj.map(
             lambda x: x.unsqueeze(0),
         )  # prepend a new axis to incorporate changes in `apply_to_body` function.
-        batch_size = reduce(lambda x, y: x * y, traj.betas.shape[:-1])
+        _batch_size = reduce(lambda x, y: x * y, traj.betas.shape[:-1])
         posed: fncsmpl.SmplhShapedAndPosed = traj.apply_to_body(
-            fncsmpl.SmplhModel.load(
-                smplh_model_path,
-                use_pca=False,
-                batch_size=batch_size,
-            ).to(
+            SmplFamilyMetaModelZoo[SmplFamilyMetaModelName]
+            .load(
+                smpl_family_model_basedir,
+            )
+            .to(
                 device,
             ),
         )
@@ -438,11 +443,15 @@ class SMPLViewer(BaseRenderer):
         )
 
         # Render frames
-        body_model = fncsmpl.SmplhModel.load(
-            smplh_model_path,
-            use_pca=False,
-            batch_size=1,
-        ).to(device)
+        body_model = (
+            SmplFamilyMetaModelZoo[SmplFamilyMetaModelName]
+            .load(
+                smpl_family_model_basedir,
+                use_pca=False,
+                batch_size=1,
+            )
+            .to(device)
+        )
         with (
             VideoWriter(
                 output_path,

@@ -13,9 +13,14 @@ from contextlib import nullcontext
 import numpy as np
 import torch
 from tqdm import tqdm
-from egoallo.fncsmpl_library import SE3
-from egoallo.fncsmpl_library import SO3
+from egoallo.middleware.third_party.HybrIK.hybrik.models.layers.smplh.fncsmplh import (
+    SE3,
+)
+from egoallo.middleware.third_party.HybrIK.hybrik.models.layers.smplh.fncsmplh import (
+    SO3,
+)
 from egoallo.setup_logger import setup_logger
+from egoallo.constants import SmplFamilyMetaModelZoo, SmplFamilyMetaModelName
 
 import os
 import cv2
@@ -24,13 +29,12 @@ import pyrender
 from pyrender.trackball import Trackball
 
 import trimesh
-from egoallo.types import DenoiseTrajType
+from egoallo.type_stubs import DenoiseTrajType
 
-import egoallo.fncsmpl_library as fncsmpl
 from .utils import create_skeleton_point_cloud
 
 if TYPE_CHECKING:
-    from egoallo.types import DenoiseTrajType
+    from egoallo.type_stubs import DenoiseTrajType
 
 logger = setup_logger(output=None, name=__name__)
 sys.path.append(str(Path(__file__).parent.parent.parent.parent))
@@ -70,7 +74,7 @@ class SMPLViewer:
     def render_sequence(
         self,
         traj: "DenoiseTrajType",
-        smplh_model_path: Path,
+        smpl_family_model_basedir: Path | None = None,
         output_path: str = "output.mp4",
         online_render: bool = False,
     ):
@@ -78,7 +82,7 @@ class SMPLViewer:
 
         Args:
             traj: Denoised trajectory data
-            smplh_model_path: Path to SMPL-H model
+            smpl_family_model_basedir: Path to SMPL-H model
             output_path: Path to save the output video
             online_render: If True, use pyrender's interactive viewer for real-time rendering
         """
@@ -102,7 +106,7 @@ class SMPLViewer:
 
         # Move trajectory to CPU
         device = torch.device("cpu")
-        traj = traj.to(device)
+        traj: "DenoiseTrajType" = traj.to(device)
 
         # Get transformation matrices
         T_world_root = SE3.from_rotation_and_translation(
@@ -121,7 +125,7 @@ class SMPLViewer:
                 .numpy(force=True)
             )
             vis_masks = (
-                traj.metadata.aux_visible_joints_mask_placeholder[0, :]
+                traj.metadata.aux_visible_joints_mask_placeholder.bool()[0, :]
                 .cpu()
                 .numpy(force=True)
                 if traj.metadata.aux_visible_joints_mask_placeholder is not None
@@ -135,7 +139,7 @@ class SMPLViewer:
             seq_len = traj.joints_wrt_world.shape[0]
             jnts = traj.joints_wrt_world.cpu().numpy(force=True)
             vis_masks = (
-                traj.visible_joints_mask.cpu().numpy(force=True)
+                traj.visible_joints_mask.bool().cpu().numpy(force=True)
                 if traj.visible_joints_mask is not None
                 else np.ones_like(jnts[..., 0], dtype=bool)
             )
@@ -156,8 +160,8 @@ class SMPLViewer:
                 (visible_skeleton_points, visible_skeleton_colors),
                 (invisible_skeleton_points, invisible_skeleton_colors),
             ) = create_skeleton_point_cloud(
-                joints_wrt_world=_jnt,
-                visible_joints_mask=_vis_m,
+                joints_wrt_world=_jnt[:22],
+                visible_joints_mask=_vis_m[:22],
                 input_smplh=in_smplh_flag,
                 num_samples_per_bone=50,
                 return_colors=True,
@@ -176,16 +180,16 @@ class SMPLViewer:
                 },
             )
 
-        traj = traj.map(
+        traj: "DenoiseTrajType" = traj.map(
             lambda x: x.unsqueeze(0),
         )
 
         posed = traj.apply_to_body(
-            fncsmpl.SmplhModel.load(
-                smplh_model_path,
-                use_pca=False,
-                batch_size=batch_size,
-            ).to(device),
+            SmplFamilyMetaModelZoo[SmplFamilyMetaModelName]
+            .load(
+                smpl_family_model_basedir,
+            )
+            .to(device),
         )
 
         posed = posed.map(lambda x: x.squeeze(0))
