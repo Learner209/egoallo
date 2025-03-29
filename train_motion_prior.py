@@ -63,7 +63,6 @@ def get_experiment_dir(experiment_name: str, version: int = 0) -> Path:
 def run_training(
     train_cfg: EgoAlloTrainConfig,
     inference_cfg: InferenceConfig,
-    debug_mode: bool = False,
 ) -> None:
     # Set up experiment directory + HF accelerate.
     # We're getting to manage logging, checkpoint directories, etc manually,
@@ -74,16 +73,15 @@ def run_training(
         else None
     )
 
-    if debug_mode:
+    debug = train_cfg.debug
+    if debug:
         import builtins
 
         builtins.breakpoint()  # noqa
 
     if restore_checkpoint_dir:
         train_cfg: EgoAlloTrainConfig = load_runtime_config(restore_checkpoint_dir)
-        train_cfg.batch_size = 64  # FIXME: this is a temporary fix to distill a large model trained on thecluster to local machine.
-        # experiment_dir =  restore_checkpoint_dir.parent
-        experiment_dir = get_experiment_dir(train_cfg.experiment_name)
+        experiment_dir = restore_checkpoint_dir.parent
     else:
         experiment_dir = get_experiment_dir(train_cfg.experiment_name)
         assert not experiment_dir.exists()
@@ -285,7 +283,7 @@ def run_training(
                 previous_loss = current_loss
 
             # Wrap optimization steps in debug_mode check
-            if not debug_mode:
+            if not debug:
                 accelerator.backward(loss)
                 if accelerator.sync_gradients:
                     accelerator.clip_grad_norm_(
@@ -356,7 +354,7 @@ def run_training(
                         wandb.log({f"losses/{term_name}": value}, step=step)
 
                 # Add gradient norms if not in debug mode
-                if not debug_mode and step % 400 == 0:
+                if not debug and step % 400 == 0:
                     total_grad_norm = 0.0
                     param_norm = 0.0
                     for p in model.parameters():
