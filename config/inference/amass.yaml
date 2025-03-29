@@ -4,14 +4,15 @@ start_index: 0
 traj_length: 128
 num_samples: 1
 batch_size: 1
-smplh_model_path: assets/smpl_based_model/smplh/SMPLH_MALE.pkl
+smpl_family_model_basedir: assets/smpl_based_model/
 output_dir: ./exp/test-amass-Mar17
 device: cuda
 annotation_path: ./data/egoexo-default-gt-output
 checkpoint_dir: experiments/robot-01-Mar-15-spatial-0.75-temporal-0.3/v4/checkpoints_10000
 
 visualize_traj: true
-random_visualize: false
+random_visualize: true
+online_render: false
 
 guidance_post: false
 guidance_inner: false
