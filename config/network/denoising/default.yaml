@@ -1,6 +1,6 @@
 _target_: egoallo.network.DenoisingConfig
 
-denoising_mode: absolute
+denoising_mode: AbsoluteDenoiseTraj
 joint_cond_mode: absrel
 include_hands: false
 
