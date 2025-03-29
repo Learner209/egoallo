@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import numpy as np
 import torch.utils.data
 from jaxtyping import Bool, Float
+from egoallo.type_stubs import EgoTrainingDataType
 from egoallo.transforms import SO3, SE3
 from torch import Tensor
 from typing import Generator
@@ -119,7 +120,7 @@ class EgoTrainingData(TensorDataclass):
         data_path: Path,
         include_hands: bool,
         device: torch.device,
-    ) -> Generator[tuple["EgoTrainingData", tuple[int, int]], None, None]:
+    ) -> Generator[tuple["EgoTrainingDataType", tuple[int, int]], None, None]:
         """Load a single trajectory from a (processed_30fps) npz file."""
         raw_fields = {
             k: torch.from_numpy(v.astype(np.float32) if v.dtype == np.float64 else v)
@@ -283,7 +284,7 @@ class EgoTrainingData(TensorDataclass):
         )
 
     @jaxtyped(typechecker=typeguard.typechecked)
-    def preprocess(self, _rotate_radian: None | Tensor = None) -> "EgoTrainingData":
+    def preprocess(self, _rotate_radian: None | Tensor = None) -> "EgoTrainingDataType":
         """
         Modifies the current EgoTrainingData instance by:
         1. Aligning x,y coordinates to the first frame
@@ -436,7 +437,7 @@ class EgoTrainingData(TensorDataclass):
         return self
 
     @jaxtyped(typechecker=typeguard.typechecked)
-    def postprocess(self) -> "EgoTrainingData":
+    def postprocess(self) -> "EgoTrainingDataType":
         """
         Modifies the current EgoTrainingData instance by:
         """

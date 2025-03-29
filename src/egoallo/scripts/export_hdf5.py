@@ -34,6 +34,7 @@ def main(
     output_file: Path = Path(""),
     output_list_file: Path = Path(""),
     include_hands: bool = True,
+    visualize: bool = False,
 ) -> None:
     assert torch.cuda.is_available()
 
@@ -72,28 +73,29 @@ def main(
                     "The data should be test data."
                 )
 
-                # test_data = test_data.preprocess()
-                test_data.metadata.stage = "preprocessed"
+                test_data = test_data.preprocess()
 
-                denoising = network.DenoisingConfig()
+                denoising = network.DenoisingConfig(
+                    denoising_mode="AbsoluteDenoiseTrajAADecomp",
+                )
 
                 traj = denoising.from_ego_data(
                     test_data,
                     include_hands=include_hands,
                     smpl_family_model_basedir=smpl_family_model_dir,
                 )
-                # test_data = test_data.postprocess()
-                # traj = test_data._post_process(traj)
+                test_data = test_data.postprocess()
+                traj = test_data._post_process(traj)
                 traj = test_data._set_traj(traj)
-                traj.metadata.stage = "postprocessed"
 
                 # breakpoint()
-                DataClass.visualize_ego_training_data(
-                    traj,
-                    smpl_family_model_dir,
-                    online_render=True,
-                    output_path="./test.mp4",
-                )
+                if visualize:
+                    DataClass.visualize_ego_training_data(
+                        traj,
+                        smpl_family_model_dir,
+                        online_render=True,
+                        output_path="./test.mp4",
+                    )
 
                 for data_npz_dir in data_npz_dirs:
                     if str(data_npz_dir) in str(npz_path):

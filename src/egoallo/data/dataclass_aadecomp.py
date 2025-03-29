@@ -6,9 +6,12 @@ from dataclasses import dataclass
 import numpy as np
 import torch.utils.data
 from jaxtyping import Bool, Float
+from egoallo.type_stubs import EgoTrainingDataType
 from egoallo.transforms import SO3, SE3
 from torch import Tensor
 from typing import Generator
+
+from egoallo.type_stubs import DenoiseTrajTypeLiteral
 
 
 if TYPE_CHECKING:
@@ -115,7 +118,7 @@ class EgoTrainingDataAADecomp(TensorDataclass):
 
     def to_denoise_traj(
         self,
-        denoising_mode: str,
+        denoising_mode: "DenoiseTrajTypeLiteral",
         include_hands: bool = True,
         smpl_family_model_basedir: Path = None,
     ) -> "DenoiseTrajType":
@@ -131,12 +134,13 @@ class EgoTrainingDataAADecomp(TensorDataclass):
         Returns:
             Appropriate trajectory object based on denoising mode
         """
-        from egoallo.denoise_traj_aadecomp import AbsoluteDenoiseTrajAADecomp
+        assert denoising_mode == "AbsoluteDenoiseTrajAADecomp"
+        from egoallo.denoising import AbsoluteDenoiseTrajAADecomp
 
         # Extract rotation and translation from T_world_root
         *batch, time, _ = self.T_world_root.shape
         _R_world_root = SO3(self.T_world_root[..., :4]).as_matrix()
-        t_world_root = self.T_world_root[..., 4:7]
+        _t_world_root = self.T_world_root[..., 4:7]
 
         # Handle hand data if present and requested
         hand_rotmats = None
@@ -153,7 +157,6 @@ class EgoTrainingDataAADecomp(TensorDataclass):
             cos_sin_phis=cos_sin_phis,
             contacts=self.contacts[..., :24],
             hand_rotmats=hand_rotmats,
-            t_world_root=t_world_root,
             joints_wrt_world=self.joints_wrt_world,
             visible_joints_mask=self.visible_joints_mask,
             metadata=EgoTrainingDataAADecomp.MetaData(
@@ -171,7 +174,7 @@ class EgoTrainingDataAADecomp(TensorDataclass):
         data_path: Path,
         include_hands: bool,
         device: torch.device,
-    ) -> Generator[tuple["EgoTrainingDataAADecomp", tuple[int, int]], None, None]:
+    ) -> Generator[tuple["EgoTrainingDataType", tuple[int, int]], None, None]:
         """Load a single trajectory from a (processed_30fps) npz file."""
         # Import needed modules
         import sys
@@ -353,20 +356,23 @@ class EgoTrainingDataAADecomp(TensorDataclass):
 
             logger.info("Creating InteractiveSMPLViewer instance...")
 
-            ind = 25
-            viewer = InteractiveSMPLViewer(
-                smpl_aadecomp_model=smpl_aadecomp_model,
-                pose_skeleton=smpl_jnts[ind] * 1,
-                betas=betas[0, :10],
-                transl=transl[ind],
-                initial_phis=cos_sin_phis[ind],
-                # global_orient=SO3.exp(global_orient[ind]).as_matrix().reshape(3, 3),
-                global_orient=None,
-                device=device,
-                num_hybrik_joints=24,  # Standard for SMPL output from hybrik
-                coordinate_transform=True,
-            )
-            viewer.show()
+            ps_vis = False
+            if ps_vis:
+                ind = 25
+                viewer = InteractiveSMPLViewer(
+                    smpl_aadecomp_model=smpl_aadecomp_model,
+                    pose_skeleton=smpl_jnts[ind] * 1,
+                    betas=betas[0, :10],
+                    transl=transl[ind],
+                    initial_phis=cos_sin_phis[ind],
+                    # global_orient=SO3.exp(global_orient[ind]).as_matrix().reshape(3, 3),
+                    global_orient=None,
+                    device=device,
+                    num_hybrik_joints=24,  # Standard for SMPL output from hybrik
+                    leaf_thetas=None,
+                    coordinate_transform=True,
+                )
+                viewer.show()
 
             # Run hybrik function
             smpl_model_output = smpl_aadecomp_model.model.hybrik(
@@ -447,7 +453,7 @@ class EgoTrainingDataAADecomp(TensorDataclass):
         )
 
     @jaxtyped(typechecker=typeguard.typechecked)
-    def preprocess(self, _rotate_radian: None | Tensor = None) -> "EgoTrainingData":
+    def preprocess(self, _rotate_radian: None | Tensor = None) -> "EgoTrainingDataType":
         """
         Modifies the current EgoTrainingData instance by:
         1. Aligning x,y coordinates to the first frame
@@ -516,12 +522,6 @@ class EgoTrainingDataAADecomp(TensorDataclass):
             2,
         )  # Add dims for broadcasting
 
-        # FIXME: the in-place operations just won't work, indictaed by the increasing loss and finally nan values.
-        # FIXME: and the problem only occurs at the in-place operations with self.T_world_root, not others?
-        # self.T_world_root[..., 4:6].sub_(initial_xy) # [*batch, timesteps, 2]
-        # self.joints_wrt_world[..., :2].sub_(expanded_xy) # [*batch, timesteps, 22, 2]
-        # self.T_world_cpf[..., 4:6].sub_(initial_xy) # [*batch, timesteps, 2]
-
         self.T_world_root = torch.cat(
             [
                 self.T_world_root[..., :4],
@@ -537,19 +537,6 @@ class EgoTrainingDataAADecomp(TensorDataclass):
             ],
             dim=-1,
         )
-        self.T_world_cpf = torch.cat(
-            [
-                self.T_world_cpf[..., :4],
-                self.T_world_cpf[..., 4:6] - initial_xy,
-                self.T_world_cpf[..., 6:],
-            ],
-            dim=-1,
-        )
-
-        # Subtract floor height using existing height_from_floor attribute
-        # self.joints_wrt_world[..., :, :, 2:3].sub_(self.height_from_floor.unsqueeze(-2)) # [*batch, timesteps, 22, 1]
-        # self.T_world_root[..., :, 6:7].sub_(self.height_from_floor) # [*batch, timesteps, 1]
-        # self.T_world_cpf[..., :, 6:7].sub_(self.height_from_floor) # [*batch, timesteps, 1]
 
         self.joints_wrt_world = torch.cat(
             [
@@ -565,14 +552,6 @@ class EgoTrainingDataAADecomp(TensorDataclass):
                 self.T_world_root[..., :6],
                 self.T_world_root[..., 6:7] - self.height_from_floor,
                 self.T_world_root[..., 7:],
-            ],
-            dim=-1,
-        )
-        self.T_world_cpf = torch.cat(
-            [
-                self.T_world_cpf[..., :6],
-                self.T_world_cpf[..., 6:7] - self.height_from_floor,
-                self.T_world_cpf[..., 7:],
             ],
             dim=-1,
         )
@@ -600,7 +579,7 @@ class EgoTrainingDataAADecomp(TensorDataclass):
         return self
 
     @jaxtyped(typechecker=typeguard.typechecked)
-    def postprocess(self) -> "EgoTrainingData":
+    def postprocess(self) -> "EgoTrainingDataType":
         """
         Modifies the current EgoTrainingData instance by:
         """
@@ -626,10 +605,6 @@ class EgoTrainingDataAADecomp(TensorDataclass):
                 self.metadata.rotate_radian.to(dtype=dtype, device=device) * -1,
             )
 
-        # self.joints_wrt_world[..., :, :, 2:3].add_(self.height_from_floor.unsqueeze(-2)) # [*batch, timesteps, 22, 1]
-        # self.T_world_root[..., :, 6:7].add_(self.height_from_floor) # [*batch, timesteps, 1]
-        # self.T_world_cpf[..., :, 6:7].add_(self.height_from_floor) # [*batch, timesteps, 1]
-
         self.joints_wrt_world = torch.cat(
             [
                 self.joints_wrt_world[..., :2],
@@ -647,15 +622,6 @@ class EgoTrainingDataAADecomp(TensorDataclass):
             ],
             dim=-1,
         )
-        self.T_world_cpf = torch.cat(
-            [
-                self.T_world_cpf[..., :6],
-                self.T_world_cpf[..., 6:7] + self.height_from_floor,
-                self.T_world_cpf[..., 7:],
-            ],
-            dim=-1,
-        )
-
         # Add initial x,y position offset
         # Expand initial_xy to match broadcast dimensions like in preprocess()
         expanded_xy = self.metadata.initial_xy.view(
@@ -664,10 +630,6 @@ class EgoTrainingDataAADecomp(TensorDataclass):
             1,
             2,
         )  # Add dims for broadcasting
-
-        # self.T_world_root[..., 4:6].add_(self.metadata.initial_xy.unsqueeze(-2).to(device)) # [*batch, timesteps, 2]
-        # self.joints_wrt_world[..., :2].add_(expanded_xy.to(device)) # [*batch, timesteps, 22, 2]
-        # self.T_world_cpf[..., 4:6].add_(self.metadata.initial_xy.unsqueeze(-2).to(device)) # [*batch, timesteps, 2]
 
         self.T_world_root = torch.cat(
             [
@@ -686,15 +648,6 @@ class EgoTrainingDataAADecomp(TensorDataclass):
             ],
             dim=-1,
         )
-        self.T_world_cpf = torch.cat(
-            [
-                self.T_world_cpf[..., :4],
-                self.T_world_cpf[..., 4:6]
-                + self.metadata.initial_xy.unsqueeze(-2).to(device),
-                self.T_world_cpf[..., 6:],
-            ],
-            dim=-1,
-        )
 
         self.metadata.stage = "postprocessed"
 
@@ -702,49 +655,8 @@ class EgoTrainingDataAADecomp(TensorDataclass):
 
     def _post_process(self, traj: "DenoiseTrajType") -> "DenoiseTrajType":
         """
-        Postprocess the DenoiseTrajType.
-        1. If the traj has been already rotated, rotate back.
-        2. Add initial x,y position offset.
-        3. Add initial height offset.
+        No-op.
         """
-        from egoallo.network import AbsoluteDenoiseTraj
-
-        assert self.metadata.stage == "postprocessed"
-        assert traj.metadata.stage == "raw", (
-            "Only raw data is supported for postprocessing."
-        )
-        assert isinstance(traj, AbsoluteDenoiseTraj), (
-            "Only AbsoluteDenoiseTraj is supported for postprocessing."
-        )
-        # postprocess the DenoiseTrajType
-        device = traj.t_world_root.device
-
-        # NOTE: remember to rotate back traj's root translation since the network operates on the rotated traj.
-        if self.metadata.rotate_radian is not None:
-            dtype, device = traj.t_world_root.dtype, traj.t_world_root.device
-
-            assert self.metadata.rotate_radian.shape[0] == traj.R_world_root.shape[0]
-            assert self.metadata.rotate_radian.shape[0] == traj.t_world_root.shape[0]
-
-            inv_so3_rot = SO3.from_z_radians(
-                theta=self.metadata.rotate_radian.to(dtype=dtype, device=device) * -1,
-            )
-            # Rotate translation
-            traj.t_world_root = inv_so3_rot.apply(target=traj.t_world_root)
-            # Rotate rotation matrices
-            traj.R_world_root = inv_so3_rot.multiply(
-                SO3.from_matrix(traj.R_world_root),
-            ).as_matrix()
-
-        traj.t_world_root = torch.cat(
-            [
-                traj.t_world_root[..., :, :2]
-                + self.metadata.initial_xy.unsqueeze(-2).to(device),
-                traj.t_world_root[..., :, 2:3] + self.height_from_floor.to(device),
-                traj.t_world_root[..., :, 3:],
-            ],
-            dim=-1,
-        )
         return traj
 
     def _set_traj(self, traj: "DenoiseTrajType") -> "DenoiseTrajType":
