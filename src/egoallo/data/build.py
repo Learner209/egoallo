@@ -5,7 +5,7 @@ import torch.utils.data
 
 if TYPE_CHECKING:
     from egoallo.config.train.train_config import EgoAlloTrainConfig
-    from egoallo.data.dataclass import EgoTrainingData
+    from egoallo.type_stubs import EgoTrainingDataType
 
 from .datasets.amass_dataset import AdaptiveAmassHdf5Dataset, VanillaEgoAmassHdf5Dataset
 from .datasets.egoexo_dataset import EgoExoDataset
@@ -20,7 +20,7 @@ logger = setup_logger(output=None, name=__name__)
 
 def build_dataset(
     cfg: "EgoAlloTrainConfig",
-) -> type[torch.utils.data.Dataset["EgoTrainingData"]]:
+) -> type[torch.utils.data.Dataset["EgoTrainingDataType"]]:
     """Build dataset(s) from config."""
     if cfg.dataset_type == "AdaptiveAmassHdf5Dataset":
         return AdaptiveAmassHdf5Dataset

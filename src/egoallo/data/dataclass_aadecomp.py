@@ -15,11 +15,8 @@ if TYPE_CHECKING:
     from egoallo.type_stubs import DenoiseTrajType
     from egoallo.type_stubs import DatasetType
 
-from .. import fncsmpl_extensions_library as fncsmpl_extensions
 from .. import transforms as tf
 from ..tensor_dataclass import TensorDataclass
-import typeguard
-from jaxtyping import jaxtyped
 from typing import Optional, TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
@@ -28,13 +25,16 @@ if TYPE_CHECKING:
 from ..viz.smpl_pyrender_viewer import SMPLViewer
 
 from egoallo.setup_logger import setup_logger
+import typeguard
+from jaxtyping import jaxtyped
+from egoallo.viz.hybrik_twist_angle_visualizer import InteractiveSMPLViewer
 
 logger = setup_logger(output=None, name=__name__)
 
 
 @jaxtyped(typechecker=typeguard.typechecked)
-class EgoTrainingData(TensorDataclass):
-    """Dictionary of tensors we use for EgoAllo training."""
+class EgoTrainingDataAADecomp(TensorDataclass):
+    """Dictionary of tensors we use for EgoAllo training with AA decomposition."""
 
     # NOTE: if the attr is tensor/np.ndarray type, then it must has a leading batch dimension, whether it can be broadcasted or not.
     # NOTE: since the `tensor_dataclass` will convert the tensor to a single element tensor, we need to make sure the leading dimension is always there.
@@ -42,26 +42,20 @@ class EgoTrainingData(TensorDataclass):
     T_world_root: Float[Tensor, "*batch timesteps 7"]
     """Transformation from the world frame to the root frame at each timestep."""
 
-    contacts: Float[Tensor, "*batch timesteps 22"]
+    contacts: Float[Tensor, "*batch timesteps 52"]
     """Contact boolean for each joint."""
 
-    betas: Float[Tensor, "*batch 1 16"]
-    """Body shape parameters."""
+    betas: Float[Tensor, "*batch 1 10"]
+    """Body shape parameters. Default to 10 when using smplx model."""
 
-    joints_wrt_world: Float[Tensor, "*batch timesteps 22 3"]
+    joints_wrt_world: Float[Tensor, "*batch timesteps 24 3"]
     """Joint positions relative to the world frame."""
 
     body_quats: Float[Tensor, "*batch timesteps 21 4"]
     """Local orientations for each body joint."""
 
-    T_world_cpf: Float[Tensor, "*batch timesteps 7"]
-    """Transformation from the world frame to the central pupil frame at each timestep."""
-
     height_from_floor: Float[Tensor, "*batch timesteps 1"]
     """Distance from CPF to floor at each timestep."""
-
-    joints_wrt_cpf: Float[Tensor, "*batch timesteps 22 3"]
-    """Joint positions relative to the central pupil frame."""
 
     mask: Bool[Tensor, "*batch timesteps"]
     """Mask to support variable-length sequence."""
@@ -69,12 +63,18 @@ class EgoTrainingData(TensorDataclass):
     hand_quats: Float[Tensor, "*batch timesteps 30 4"] | None
     """Local orientations for each hand joint."""
 
-    visible_joints_mask: Bool[Tensor, "*batch timesteps 22"] | None
+    visible_joints_mask: Bool[Tensor, "*batch timesteps 24"]
     """Boolean mask indicating which joints are visible (not masked)"""
+
+    body_twists: Float[Tensor, "*batch timesteps 23 1"]
+    """Twist parameters for body joints."""
 
     @dataclass
     class MetaData:
         """Metadata about the trajectory."""
+
+        smpl_family_model_basedir: Path
+        """Base directory of the smpl family model."""
 
         take_name: tuple[str, ...] | tuple[tuple[str, ...], ...] = ()
         """Name of the take."""
@@ -91,16 +91,16 @@ class EgoTrainingData(TensorDataclass):
         scope: Literal["train", "test"] = "train"
         """Scope of the data: 'train' or 'test'."""
 
-        original_invalid_joints: Optional[Float[Tensor, "*batch timesteps 22 3"]] = None
+        original_invalid_joints: Optional[Float[Tensor, "*batch timesteps 24 3"]] = None
         """Original values of invalid joints before zeroing"""
 
         aux_joints_wrt_world_placeholder: Optional[
-            Float[Tensor, "*batch timesteps 22 3"]
+            Float[Tensor, "*batch timesteps 24 3"]
         ] = None
         """Placeholder for auxiliary joints, used in EgoExoDataset helper."""
 
         aux_visible_joints_mask_placeholder: Optional[
-            Float[Tensor, "*batch timesteps 22"]
+            Float[Tensor, "*batch timesteps 24"]
         ] = None
         """Placeholder for auxiliary joints, used in EgoExoDataset helper."""
 
@@ -113,14 +113,81 @@ class EgoTrainingData(TensorDataclass):
     metadata: MetaData = dataclasses.field(default_factory=MetaData)
     """Metadata about the trajectory."""
 
+    def to_denoise_traj(
+        self,
+        denoising_mode: str,
+        include_hands: bool = True,
+        smpl_family_model_basedir: Path = None,
+    ) -> "DenoiseTrajType":
+        """Convert EgoTrainingDataAADecomp to appropriate DenoiseTraj based on denoising mode.
+
+        This method implements the conversion logic from EgoTrainingDataAADecomp to various
+        DenoiseTraj subclasses based on the specified denoising mode.
+
+        Args:
+            denoising_mode: The denoising mode to determine which trajectory type to create
+            include_hands: Whether to include hand data in the output trajectory
+
+        Returns:
+            Appropriate trajectory object based on denoising mode
+        """
+        from egoallo.denoise_traj_aadecomp import AbsoluteDenoiseTrajAADecomp
+
+        # Extract rotation and translation from T_world_root
+        *batch, time, _ = self.T_world_root.shape
+        _R_world_root = SO3(self.T_world_root[..., :4]).as_matrix()
+        t_world_root = self.T_world_root[..., 4:7]
+
+        # Handle hand data if present and requested
+        hand_rotmats = None
+        if self.hand_quats is not None and include_hands:
+            hand_rotmats = SO3(self.hand_quats).as_matrix()
+
+        # For absolute mode, create AbsoluteDenoiseTraj
+        cos_sin_phis = torch.cat(
+            [torch.cos(self.body_twists), torch.sin(self.body_twists)],
+            dim=-1,
+        )
+        return AbsoluteDenoiseTrajAADecomp(
+            betas=self.betas.expand((*batch, time, -1)),
+            cos_sin_phis=cos_sin_phis,
+            contacts=self.contacts[..., :24],
+            hand_rotmats=hand_rotmats,
+            t_world_root=t_world_root,
+            joints_wrt_world=self.joints_wrt_world,
+            visible_joints_mask=self.visible_joints_mask,
+            metadata=EgoTrainingDataAADecomp.MetaData(
+                take_name=self.metadata.take_name,
+                frame_keys=self.metadata.frame_keys,
+                scope=self.metadata.scope,
+                stage="raw",
+                smpl_family_model_basedir=self.metadata.smpl_family_model_basedir,
+            ),
+        )
+
     @staticmethod
     def load_from_npz(
         smpl_family_model_dir: Path,
         data_path: Path,
         include_hands: bool,
         device: torch.device,
-    ) -> Generator[tuple["EgoTrainingData", tuple[int, int]], None, None]:
+    ) -> Generator[tuple["EgoTrainingDataAADecomp", tuple[int, int]], None, None]:
         """Load a single trajectory from a (processed_30fps) npz file."""
+        # Import needed modules
+        import sys
+        import os
+        from pathlib import Path
+
+        # Add project root to path to help with imports
+        project_root = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "../../.."),
+        )
+        if project_root not in sys.path:
+            sys.path.append(project_root)
+
+        gender = np.load(data_path, allow_pickle=True)["gender"].item()
+        assert gender in ["male", "female", "neutral"]
+
         raw_fields = {
             k: torch.from_numpy(v.astype(np.float32) if v.dtype == np.float64 else v)
             for k, v in np.load(data_path, allow_pickle=True).items()
@@ -130,9 +197,6 @@ class EgoTrainingData(TensorDataclass):
         timesteps = raw_fields["root_orient"].shape[0]
 
         # preprocessing
-        gender = np.load(data_path, allow_pickle=True)["gender"].item()
-        assert gender in ["male", "female", "neutral"]
-
         betas = (
             raw_fields["betas"]
             if raw_fields["betas"].ndim == 2
@@ -140,7 +204,12 @@ class EgoTrainingData(TensorDataclass):
         )
         # If betas is 10-dimensional, pad with zeros to make it 16-dimensional
         if betas.shape[-1] == 10:
-            padding = torch.zeros(*betas.shape[:-1], 6, dtype=betas.dtype)
+            padding = torch.zeros(
+                *betas.shape[:-1],
+                6,
+                dtype=betas.dtype,
+                device=betas.device,
+            )
             betas = torch.cat([betas, padding], dim=-1)
         assert betas.shape == (1, 16), (
             f"Expected betas shape (1, 16), got {betas.shape}"
@@ -149,13 +218,8 @@ class EgoTrainingData(TensorDataclass):
         assert raw_fields["root_orient"].shape == (timesteps, 3)
         assert raw_fields["pose_body"].shape == (timesteps, 63)
         assert raw_fields["pose_hand"].shape == (timesteps, 90)
-        assert raw_fields["contacts"].shape == (timesteps, 52) or raw_fields[
-            "contacts"
-        ].shape == (timesteps, 22)
-        assert raw_fields["joints"].shape == (timesteps, 22, 3)
-        if raw_fields["betas"].shape[0] == 10:
-            raw_fields["betas"] = torch.cat([raw_fields["betas"], torch.zeros(6)])
-        assert raw_fields["betas"].shape[0] == 16
+        assert raw_fields["contacts"].shape == (timesteps, 52)
+        assert raw_fields["joints"].shape == (timesteps, 52, 3)
 
         T_world_root = torch.cat(
             [
@@ -173,92 +237,194 @@ class EgoTrainingData(TensorDataclass):
         ).wxyz.to(device)
 
         window_size = 30000
-
-        smpl_model_path = smpl_family_model_dir / "smplh" / gender / "model.npz"
-        assert smpl_model_path.exists()
-
         for i in range(0, timesteps, window_size):
             end_idx = min(i + window_size, timesteps)
             batch_size = end_idx - i
+
+            body_twists = None
+            # Get twists using forward_get_twist - use a try-except block to handle potential import/initialization issues
+            smpl_aadecomp_model = None
+            smplx_output = None
+
             from egoallo.constants import (
                 SmplFamilyMetaModelZoo,
                 SmplFamilyMetaModelName,
             )
 
-            body_model = (
+            assert SmplFamilyMetaModelName == "SmplModelAADecomp"
+            smpl_aadecomp_model = (
                 SmplFamilyMetaModelZoo[SmplFamilyMetaModelName]
-                .load(
-                    smpl_model_path,
-                )
+                .load(smpl_family_model_dir, gender=gender, num_joints=24)
                 .to(device)
             )
 
-            shaped_batch = body_model.with_shape(
-                raw_fields["betas"].unsqueeze(0).repeat(batch_size, 1).to(device),
+            # smplx_aadecomp_model = SmplxModelAADecomp.load(
+            #     smpl_family_model_dir, gender=gender,
+            # ).to(device)
+
+            # Convert data to format expected by SMPLXLayer
+            global_orient = (
+                raw_fields["root_orient"][i:end_idx]
+                .reshape(batch_size, 3)
+                .clone()
+                .to(device)
+            )
+            body_pose = (
+                raw_fields["pose_body"][i:end_idx]
+                .reshape(batch_size, 21, 3)
+                .clone()
+                .to(device)
             )
 
-            T_world_root_batch = T_world_root[i:end_idx].to(device)
-            body_quats_batch = body_quats[i:end_idx].to(device)
+            # left_hand_pose = (
+            #     raw_fields["pose_hand"][i:end_idx, :45]
+            #     .reshape(batch_size, 15, 3)
+            #     .clone()
+            #     .to(device)
+            # )
+            # right_hand_pose = (
+            #     raw_fields["pose_hand"][i:end_idx, 45:]
+            #     .reshape(batch_size, 15, 3)
+            #     .clone()
+            #     .to(device)
+            # )
 
-            posed_batch = shaped_batch.with_pose_decomposed(
-                T_world_root=T_world_root_batch,
-                body_quats=body_quats_batch,
+            transl = (
+                raw_fields["trans"][i:end_idx].reshape(batch_size, 3).clone().to(device)
+            )
+            betas_batch = betas.repeat(batch_size, 1).clone().to(device)
+
+            # test on `SmplxModelAADecomp` class first, which is the original impl. of forward_get_twist func.
+            # body_twists = smplx_aadecomp_model.model.forward_get_twist(
+            #     betas=betas_batch[..., :11],  # type: ignore
+            #     global_orient=SO3.exp(global_orient).as_matrix().reshape(batch_size, 1, 3, 3),  # type: ignore
+            #     body_pose=SO3.exp(body_pose).as_matrix().reshape(batch_size, 21, 3, 3),  # type: ignore
+            #     left_hand_pose=SO3.exp(left_hand_pose).as_matrix().reshape(batch_size, 15, 3, 3),  # type: ignore
+            #     right_hand_pose=SO3.exp(right_hand_pose).as_matrix().reshape(batch_size, 15, 3, 3),  # type: ignore
+            #     transl=transl,  # type: ignore
+            #     expression=None,
+            #     jaw_pose=None,
+            #     leye_pose=None,
+            #     reye_pose=None,
+            #     full_pose=None,
+            # )
+
+            smpl_body_pose = torch.cat(
+                [
+                    SO3.exp(body_pose).as_matrix().reshape(batch_size, 21, 3, 3),
+                    torch.eye(3).unsqueeze(0).repeat(batch_size, 2, 1, 1).to(device),
+                ],
+                dim=1,
+            )
+            # smpl_body_pose[..., 21, :3, :3] = SO3.exp(left_hand_pose[..., 0, :3]).as_matrix().reshape(batch_size, 3, 3)
+            # smpl_body_pose[..., 22, :3, :3] = SO3.exp(right_hand_pose[..., 0, :3]).as_matrix().reshape(batch_size, 3, 3)
+
+            body_twists = smpl_aadecomp_model.model.forward_get_twist(
+                betas=betas_batch[..., :10],  # type: ignore
+                global_orient=SO3.exp(global_orient)
+                .as_matrix()
+                .reshape(batch_size, 1, 3, 3),  # type: ignore
+                body_pose=smpl_body_pose,  # type: ignore
             )
 
-            # Align T_world_cpf (only x,y translation component)
-            T_world_cpf = (
-                tf.SE3(posed_batch.Ts_world_joint[:, 14, :])  # T_world_head
-                @ tf.SE3(fncsmpl_extensions.get_T_head_cpf(shaped_batch))
-            ).parameters()
+            # test on `forward_simple_with_pose_decomposed` func.
+            # smplx_output = smplx_aadecomp_model.model.forward_simple_with_pose_decomposed(
+            #     betas=betas_batch[..., :11],  # type: ignore
+            #     global_orient=SO3.exp(global_orient).as_matrix().reshape(batch_size, 1, 3, 3),  # type: ignore
+            #     body_pose=SO3.exp(body_pose).as_matrix().reshape(batch_size, 21, 3, 3),  # type: ignore
+            #     left_hand_pose=SO3.exp(left_hand_pose).as_matrix().reshape(batch_size, 15, 3, 3),  # type: ignore
+            #     right_hand_pose=SO3.exp(right_hand_pose).as_matrix().reshape(batch_size, 15, 3, 3),  # type: ignore
+            #     transl=transl,  # type: ignore
+            #     expression=None,
+            #     jaw_pose=None,
+            #     leye_pose=None,
+            #     reye_pose=None,
+            #     return_verts=True,
+            #     use_pose_mean=False
+            # )
 
-            joints_wrt_world = raw_fields["joints"]
+            # We need extended joint positions for HybrIK smpl integration.
+            smpl_jnts = raw_fields["joints"][..., :24, :]
 
-            # let take_name be the stem of data_path suffixed with window start and end like: "_window_{start}_{end}" using pathlib functionliaty.
+            cos_sin_phis = torch.cat(
+                [torch.cos(body_twists), torch.sin(body_twists)],
+                dim=-1,
+            )
+
+            logger.info("Creating InteractiveSMPLViewer instance...")
+
+            ind = 25
+            viewer = InteractiveSMPLViewer(
+                smpl_aadecomp_model=smpl_aadecomp_model,
+                pose_skeleton=smpl_jnts[ind] * 1,
+                betas=betas[0, :10],
+                transl=transl[ind],
+                initial_phis=cos_sin_phis[ind],
+                # global_orient=SO3.exp(global_orient[ind]).as_matrix().reshape(3, 3),
+                global_orient=None,
+                device=device,
+                num_hybrik_joints=24,  # Standard for SMPL output from hybrik
+                coordinate_transform=True,
+            )
+            viewer.show()
+
+            # Run hybrik function
+            smpl_model_output = smpl_aadecomp_model.model.hybrik(
+                betas=betas_batch[..., :10],  # type: ignore
+                pose_skeleton=smpl_jnts,  # type: ignore
+                phis=cos_sin_phis,  # type: ignore
+                transl=transl,  # type: ignore
+                # global_orient=SO3.exp(global_orient).as_matrix().reshape(batch_size, 3, 3), # Setting global orient to None as `batch_get_pelvis_orient` or `batch_get_pelvis_orient_svd` would guess it from pose_skeletons.
+            )
+            # breakpoint()
+
+            # let take_name be the stem of data_path suffixed with window start and end
             take_name = (
-                Path(data_path).stem + "_window_{start}_{end}" + Path(data_path).suffix
+                Path(data_path).stem + f"_window_{i}_{end_idx}" + Path(data_path).suffix
             )
 
-            # METADATA can be omittted and set as default param.
-            yield (
-                EgoTrainingData(
-                    T_world_root=T_world_root[i:end_idx],
-                    contacts=raw_fields["contacts"][
-                        i:end_idx,
-                        :22,
-                    ],  # root is included.
-                    betas=raw_fields["betas"].unsqueeze(0),
-                    joints_wrt_world=joints_wrt_world[
-                        i:end_idx,
-                        :,
-                    ],  # root is included.
-                    body_quats=body_quats[i:end_idx],
-                    # CPF frame stuff.
-                    T_world_cpf=T_world_cpf,
-                    height_from_floor=T_world_cpf[:, 6:7],
-                    joints_wrt_cpf=(
-                        # unsqueeze so both shapes are (timesteps, joints, dim)
-                        tf.SE3(T_world_cpf[:, None, :]).inverse()
-                        @ joints_wrt_world[i:end_idx].to(T_world_cpf.device)
-                    ),
-                    mask=torch.ones((end_idx - i,), dtype=torch.bool),
-                    hand_quats=hand_quats[i:end_idx] if include_hands else None,
-                    visible_joints_mask=None,
-                    metadata=EgoTrainingData.MetaData(  # default metadata.
-                        take_name=(take_name,),
-                        frame_keys=tuple(),  # Convert to tuple of ints
-                        stage="raw",
-                        scope="test",
-                    ),
+            # Temporary fix: Update T_world_root to align with pose_skeleton.
+            T_world_root[i:end_idx, ..., 4:7] = smpl_model_output.joints[
+                i:end_idx,
+                ...,
+                0,
+                :,
+            ]
+
+            # Create the EgoTrainingDataAADecomp instance
+            data_dict = {
+                "T_world_root": T_world_root[i:end_idx],
+                "contacts": raw_fields["contacts"][i:end_idx],
+                "betas": raw_fields["betas"][..., :10].unsqueeze(0),
+                "joints_wrt_world": smpl_model_output.joints[i:end_idx],
+                "body_quats": body_quats[i:end_idx],
+                "height_from_floor": T_world_root[i:end_idx, 6:7],
+                "mask": torch.ones((end_idx - i,), dtype=torch.bool),
+                "hand_quats": hand_quats[i:end_idx] if include_hands else None,
+                "visible_joints_mask": torch.ones_like(
+                    smpl_model_output.joints[i:end_idx, ..., 0],
+                    dtype=torch.bool,
                 ),
-                (i, end_idx),
-            )
+                "body_twists": body_twists,
+                "metadata": EgoTrainingDataAADecomp.MetaData(
+                    take_name=(take_name,),
+                    frame_keys=tuple(),
+                    stage="raw",
+                    scope="test",
+                    smpl_family_model_basedir=smpl_family_model_dir,
+                ),
+            }
 
-            del shaped_batch
-            del posed_batch
-            del body_model
-            del T_world_root_batch
-            del body_quats_batch
-            del T_world_cpf
+            ego_data = EgoTrainingDataAADecomp(**data_dict)
+
+            # Yield the created instance and the window indices
+            yield (ego_data, (i, end_idx))
+
+            del body_twists
+            if smpl_aadecomp_model is not None:
+                del smpl_aadecomp_model
+            if smplx_output is not None:
+                del smplx_output
 
             import gc
 
@@ -267,9 +433,7 @@ class EgoTrainingData(TensorDataclass):
     @staticmethod
     def visualize_ego_training_data(
         data: "DenoiseTrajType",
-        smpl_family_model_basedir: Path = Path(
-            "assets/smpl_based_model/smplh/SMPLH_MALE.pkl",
-        ),
+        smpl_family_model_basedir: Path | None = None,
         output_path: str = "output.mp4",
         online_render: bool = False,
         **kwargs,
@@ -543,9 +707,14 @@ class EgoTrainingData(TensorDataclass):
         2. Add initial x,y position offset.
         3. Add initial height offset.
         """
+        from egoallo.network import AbsoluteDenoiseTraj
+
         assert self.metadata.stage == "postprocessed"
         assert traj.metadata.stage == "raw", (
             "Only raw data is supported for postprocessing."
+        )
+        assert isinstance(traj, AbsoluteDenoiseTraj), (
+            "Only AbsoluteDenoiseTraj is supported for postprocessing."
         )
         # postprocess the DenoiseTrajType
         device = traj.t_world_root.device
@@ -584,9 +753,9 @@ class EgoTrainingData(TensorDataclass):
         Set the joints_wrt_world and visible_joints_mask.
         Set the metadata.
         """
-        assert traj.joints_wrt_world is None and traj.visible_joints_mask is None, (
-            "joints_wrt_world and visible_joints_mask should be None for postprocessing."
-        )
+        # assert traj.joints_wrt_world is None and traj.visible_joints_mask is None, (
+        #     "joints_wrt_world and visible_joints_mask should be None for postprocessing."
+        # )
         traj.joints_wrt_world = self.joints_wrt_world.clone()
         if self.visible_joints_mask is not None:
             # assert self.metadata.scope == "train", "visible_joints_mask should only be set for train data."
@@ -625,144 +794,3 @@ class EgoTrainingData(TensorDataclass):
         )  # [*batch, timesteps, 22, 3]
 
         return self
-
-    def to_denoise_traj(
-        self,
-        denoising_mode: str,
-        include_hands: bool = True,
-        smpl_family_model_basedir: Path = None,
-    ) -> "DenoiseTrajType":
-        """Convert EgoTrainingData to appropriate DenoiseTraj based on denoising mode.
-
-        This method implements the conversion logic from EgoTrainingData to various
-        DenoiseTraj subclasses based on the specified denoising mode.
-
-        Args:
-            denoising_mode: The denoising mode to determine which trajectory type to create
-            include_hands: Whether to include hand data in the output trajectory
-
-        Returns:
-            Appropriate trajectory object based on denoising mode
-        """
-        from egoallo.denoising import (
-            JointsOnlyTraj,
-            AbsoluteDenoiseTraj,
-            VelocityDenoiseTraj,
-        )
-
-        # Extract rotation and translation from T_world_root
-        *batch, time, _ = self.T_world_root.shape
-        R_world_root = SO3(self.T_world_root[..., :4]).as_matrix()
-        t_world_root = self.T_world_root[..., 4:7]
-
-        # Convert body quaternions to rotation matrices
-        body_rotmats = SO3(self.body_quats).as_matrix()
-
-        # Handle hand data if present and requested
-        hand_rotmats = None
-        if self.hand_quats is not None and include_hands:
-            hand_rotmats = SO3(self.hand_quats).as_matrix()
-
-        # Create appropriate trajectory based on denoising mode
-        if denoising_mode == "joints_only":
-            return JointsOnlyTraj(
-                joints=self.joints_wrt_world,
-            )
-        elif "vel" in denoising_mode:
-            # For velocity mode, create VelocityDenoiseTraj
-            traj = VelocityDenoiseTraj(
-                betas=self.betas.expand((*batch, time, 16)),
-                body_rotmats=body_rotmats,
-                contacts=self.contacts,
-                hand_rotmats=hand_rotmats,
-                R_world_root=R_world_root,
-                t_world_root=t_world_root,
-            )
-            # VelocityDenoiseTraj will compute temporal offsets in __post_init__
-            return traj
-        else:
-            # For absolute mode, create AbsoluteDenoiseTraj
-            return AbsoluteDenoiseTraj(
-                betas=self.betas.expand((*batch, time, 16)),
-                body_rotmats=body_rotmats,
-                contacts=self.contacts,
-                hand_rotmats=hand_rotmats,
-                R_world_root=R_world_root,
-                t_world_root=t_world_root,
-                joints_wrt_world=None,
-                visible_joints_mask=None,
-                metadata=EgoTrainingData.MetaData(
-                    take_name=self.metadata.take_name,
-                    frame_keys=self.metadata.frame_keys,
-                    scope=self.metadata.scope,
-                    stage="raw",
-                ),
-            )
-
-    def __getitem__(self, index) -> Self:
-        """Implements native Python slicing for TensorDataclass.
-
-        Supports numpy/torch-style indexing including:
-        - Single index: data[0]
-        - Multiple indices: data[0,1]
-        - Slices: data[0:10]
-        - Mixed indexing: data[0, :10, 2:4]
-        - Ellipsis: data[..., 0]
-
-        Args:
-            index: Index specification. Can be int, slice, tuple, or ellipsis.
-            recursive_depth: How deep to recurse into nested structures. -1 means unlimited.
-
-        Returns:
-            A new TensorDataclass with sliced data.
-
-        Examples:
-            >>> data = TensorDataclass(...)
-            >>> # Single index
-            >>> first_item = data[0]
-            >>> # Multiple indices
-            >>> specific_item = data[0, 10]
-            >>> # Slice
-            >>> first_ten = data[:10]
-            >>> # Mixed indexing
-            >>> subset = data[0, :10, 2:4]
-            >>> # Limit recursion depth
-            >>> shallow_slice = data[0, recursive_depth=1]
-        """
-        # Convert single index to tuple for uniform handling
-        if not isinstance(index, tuple):
-            index = (index,)
-
-        def _getitem_impl[GetItemT](val: GetItemT, idx: tuple, depth: int) -> GetItemT:
-            if depth == 0:
-                return val
-
-            if isinstance(val, torch.Tensor):
-                try:
-                    return val[idx]
-                except IndexError as e:
-                    raise IndexError(
-                        f"Invalid index {idx} for tensor of shape {val.shape}",
-                    ) from e
-            elif isinstance(val, TensorDataclass):
-                # Don't slice betas since it's a per-sequence attribute
-                vars_dict = vars(val)
-                if "betas" in vars_dict:
-                    # Keep original betas tensor
-                    vars_dict["betas"] = val.betas
-                return type(val)(
-                    **{
-                        k: _getitem_impl(v, idx, depth - 1) if k != "betas" else v
-                        for k, v in vars_dict.items()
-                    },
-                )
-            elif isinstance(val, (list, tuple)):
-                return type(val)(_getitem_impl(v, idx, depth - 1) for v in val)
-            elif isinstance(val, dict):
-                assert type(val) is dict  # No subclass support
-                return {k: _getitem_impl(v, idx, depth - 1) for k, v in val.items()}  # type: ignore
-            else:
-                return val
-
-        # ! Only slicing the highest level of attributes in the dataclass.
-        return _getitem_impl(self, index, 2)
