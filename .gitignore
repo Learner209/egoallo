@@ -19,6 +19,9 @@ outputs/
 blendify_assets/
 wandb/
 node_modules/
+res_dance/
+res_dance_smpl/
+model_files/
 
 package.json
 package-lock.json
