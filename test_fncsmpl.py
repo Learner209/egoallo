@@ -5,7 +5,9 @@ from smplx import SMPLH
 from egoallo.training_utils import ipdb_safety_net
 import pyvista as pv
 
-from egoallo.fncsmpl_library import SmplhModel as SmplhModel
+from egoallo.middleware.third_party.HybrIK.hybrik.models.layers.smplh.fncsmplh import (
+    SmplhModel as SmplhModel,
+)
 
 
 def aa_to_quaternion(axis_angle: torch.Tensor) -> torch.Tensor:

@@ -469,6 +469,8 @@ if __name__ == "__main__":
     import hydra
     from omegaconf import DictConfig
 
+    training_utils.ipdb_safety_net()
+
     @hydra.main(version_base="1.3", config_path="config")
     def main(cfg: DictConfig) -> None:
         train_config: EgoAlloTrainConfig = instantiate(cfg.train)

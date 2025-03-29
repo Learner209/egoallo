@@ -19,6 +19,8 @@ from pathlib import Path
 import torch
 import numpy as np
 from scipy.signal import savgol_filter
+import typeguard
+from jaxtyping import jaxtyped
 
 from torch.utils.data import Dataset
 
@@ -303,7 +305,7 @@ class Dataset_EgoExo(Dataset):
                 poses.append([float("nan")] * 3)  # not visible
         return poses, flags
 
-    # @jaxtyped(typechecker=typeguard.typechecked)
+    @jaxtyped(typechecker=typeguard.typechecked)
     def _process_joints(
         self,
         data: Float[Tensor, "timesteps 17 3"],
@@ -475,7 +477,7 @@ class Dataset_EgoExo(Dataset):
 
         return joints_world, joints_world_coco
 
-    # @jaxtyped(typechecker=typeguard.typechecked)
+    @jaxtyped(typechecker=typeguard.typechecked)
     def apply_kinematic_constraints(
         self,
         joints_world: Float[Tensor, "timesteps 22 3"],  # SMPLH joints: (T, 22, 3)

@@ -56,15 +56,19 @@ class SmplhModel(TensorDataclass):
 
     @classmethod
     def load(cls, model_path: Path, **kwargs) -> "SmplhModel":
-        model = smplx.SMPLH(model_path, **kwargs)
+        gender = kwargs.get("gender", "neutral")
+        model_path = model_path / "smplh" / f"SMPLH_{gender.upper()}.pkl"
+        model = smplx.SMPLH(str(model_path), ext='pkl', **kwargs)
         parent_indices = tuple((model.parents[1:] - 1).tolist())  # Exclude root
         faces = torch.from_numpy(model.faces.astype(np.int32))
+        num_verts = model.J_regressor.shape[1]
+        num_jnts = model.J_regressor.shape[0] - 1
         return cls(
             faces=faces,
             J_regressor=model.J_regressor,
             parent_indices=parent_indices,
             weights=model.lbs_weights,
-            posedirs=model.posedirs,
+            posedirs=model.posedirs.transpose(0,1).reshape(num_verts, 3, num_jnts * 9),
             v_template=model.v_template,
             shapedirs=model.shapedirs,
             hands_components_l=None,
