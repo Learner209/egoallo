@@ -21,8 +21,10 @@ from torch import Tensor
 
 from .network import EgoDenoiser
 from .network import EgoDenoiserConfig
-from .tensor_dataclass import TensorDataclass
-from .transforms import SE3
+from egoallo.tensor_dataclass import TensorDataclass
+from egoallo.transforms import SE3
+import typeguard
+from jaxtyping import jaxtyped
 
 logger = setup_logger(output=None, name=__name__, level=logging.INFO)
 
@@ -153,7 +155,7 @@ class InferenceTrajectoryPaths:
         )
 
 
-# @jaxtyped(typechecker=typeguard.typechecked)
+@jaxtyped(typechecker=typeguard.typechecked)
 class InferenceInputTransforms(TensorDataclass):
     """Some relevant transforms for inference."""
 

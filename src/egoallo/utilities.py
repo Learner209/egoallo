@@ -19,12 +19,23 @@ from egoallo.utils.setup_logger import setup_logger
 from jaxtyping import Float
 from torch import Tensor
 from yacs.config import CfgNode as CN
+import typeguard
+from jaxtyping import jaxtyped
+import importlib
+
 # from egoego.config import make_cfg, CONFIG_FILE
 # from egoego.utils.setup_logger import setup_logger
 # local_config_file = CONFIG_FILE
 # CFG = make_cfg(config_name="defaults", config_file=local_config_file, cli_args=[])
 
 local_logger = setup_logger(output=None, name=__name__)
+
+
+def get_class_from_path(class_path: str):
+    """Dynamically import a class from a string path."""
+    module_path, class_name = class_path.rsplit(".", 1)
+    module = importlib.import_module(module_path)
+    return getattr(module, class_name)
 
 
 def find_numerical_key_in_dict(d):
@@ -296,7 +307,7 @@ def ensure_path(path: str | Path) -> Path:
     return Path(path) if not isinstance(path, Path) else path
 
 
-# @jaxtyped(typechecker=typeguard.typechecked)
+@jaxtyped(typechecker=typeguard.typechecked)
 def procrustes_align(
     points_y: Float[Tensor, "*batch time 3"],
     points_x: Float[Tensor, "*batch time 3"],

@@ -24,13 +24,17 @@ import torch
 from jax import numpy as jnp
 from jaxtyping import Float, Int
 from torch import Tensor
+from jaxtyping import jaxtyped
 
-from . import fncsmpl_library as fncsmpl
+from .middleware.third_party.HybrIK.hybrik.models.layers.smplh import (
+    fncsmplh as fncsmpl,
+)
 from . import fncsmpl_jax, network
 from .transforms._so3 import SO3
+import typeguard
 
 
-# @jaxtyped(typechecker=typeguard.typechecked)
+@jaxtyped(typechecker=typeguard.typechecked)
 def do_guidance_optimization(
     T_world_root: Float[Tensor, "*batch time 7"],
     traj: network.AbsoluteDenoiseTraj,

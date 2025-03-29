@@ -16,12 +16,13 @@ from torch.nn.parallel import DistributedDataParallel
 
 if TYPE_CHECKING:
     from egoallo.config.train.train_config import EgoAlloTrainConfig
-    from egoallo.types import DenoiseTrajType
+    from egoallo.type_stubs import DenoiseTrajType
 
 from . import network
 from .data.dataclass import EgoTrainingData
 from .sampling import CosineNoiseScheduleConstants
-from .transforms import SO3
+from egoallo.transforms import SO3
+from egoallo import denoising
 
 local_config_file = CONFIG_FILE
 CFG = make_cfg(config_name="defaults", config_file=local_config_file, cli_args=[])
@@ -176,6 +177,7 @@ class TrainingLossComputer:
             **train_config.denoising.from_ego_data(
                 train_batch,
                 include_hands=unwrapped_model.config.include_hands,
+                smpl_family_model_basedir=train_config.smpl_family_model_basedir,
             ).__dict__,
         )
 
@@ -277,11 +279,11 @@ class TrainingLossComputer:
         )
 
         if train_config.denoising.denoising_mode == "joints_only":
-            assert isinstance(x_0, network.JointsOnlyTraj)
+            assert isinstance(x_0, denoising.JointsOnlyTraj)
         else:
             assert isinstance(
                 x_0,
-                (network.AbsoluteDenoiseTraj, network.VelocityDenoiseTraj),
+                (denoising.AbsoluteDenoiseTraj, denoising.VelocityDenoiseTraj),
             )
             # Add joint position loss calculation
             # Get predicted joint positions through forward kinematics

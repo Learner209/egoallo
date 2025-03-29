@@ -47,37 +47,67 @@ class TensorDataclass:
 
         return _to_dict(self)
 
-    def map(self, fn: Callable[[torch.Tensor], torch.Tensor]):
-        """Apply a function to all tensors in the dataclass.
+    def map(self, fn: Callable[[Any], Any]) -> Self:
+        """Apply a function `fn` recursively to attributes where the call is valid.
 
-        Also recurses into lists, tuples, and dictionaries.
+        Recurses into lists, tuples, dictionaries, and nested TensorDataclasses.
+        For any attribute `val` that is not one of the recursive types, it attempts
+        to compute `fn(val)`. If this call succeeds, the result is used.
+        If the call raises TypeError or AttributeError (common for inapplicable functions),
+        the original attribute `val` is kept. Other exceptions raised by `fn` will propagate.
 
         Args:
-            fn: The function to apply to each tensor.
+            fn: The function to apply. It can potentially accept and return any type.
 
         Returns:
-            A new dataclass.
+            A new dataclass instance potentially containing results of `fn`.
         """
-
         MapT = TypeVar("MapT")
 
         def _map_impl(
-            fn: Callable[[torch.Tensor], torch.Tensor],
+            fn: Callable[[Any], Any],
             val: MapT,
         ) -> MapT:
-            if isinstance(val, torch.Tensor):
-                return fn(val)
-            elif isinstance(val, TensorDataclass):
-                return type(val)(**_map_impl(fn, vars(val)))
+            if isinstance(val, TensorDataclass):
+                # Recurse into TensorDataclass fields
+                # Use fields() to correctly handle dataclass structure
+                new_vals = {
+                    f.name: _map_impl(fn, getattr(val, f.name))
+                    for f in dataclasses.fields(val)
+                }
+                return type(val)(**new_vals)
             elif isinstance(val, (list, tuple)):
+                # Recurse into sequence elements
                 return type(val)(_map_impl(fn, v) for v in val)
             elif isinstance(val, dict):
-                assert type(val) is dict  # No subclass support.
+                # Recurse into dictionary values
+                # Keep assertion or relax if dict subclasses are needed
+                assert type(val) is dict
                 return {k: _map_impl(fn, v) for k, v in val.items()}  # type: ignore
             else:
-                return val
+                # Not a container type we explicitly recurse into.
+                # Try applying fn to this leaf value.
+                try:
+                    # Attempt to apply the function
+                    result = fn(val)
+                    # Handle cases where functions might return NotImplemented
+                    # (e.g., in operator overloading) indicating incompatibility.
+                    if result is NotImplemented:
+                        return val  # Treat NotImplemented as failure to apply
+                    return result
+                except (TypeError, AttributeError):
+                    # If fn raises TypeError or AttributeError,
+                    # assume it's not applicable to this type of value.
+                    # Return the original value unchanged.
+                    return val
+                # Allow other exceptions (ValueError, RuntimeError, etc.)
+                # raised by fn to propagate, as they might indicate actual errors.
 
-        return _map_impl(fn, self)
+        # Apply the implementation starting from self.
+        # The type hint Self indicates the top-level return is the same type as the instance.
+        # We ignore the type checker here because _map_impl returns MapT, but for the
+        # initial call where val=self, MapT is indeed Self.
+        return _map_impl(fn, self)  # type: ignore
 
     def reduce[T](self, fn: Callable[[T, T], T]) -> T:
         """Reduce all tensors in the dataclass to a single value.

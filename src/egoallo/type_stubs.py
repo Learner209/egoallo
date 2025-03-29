@@ -9,10 +9,10 @@ import numpy as np
 import torch
 
 if TYPE_CHECKING:
-    from egoallo.network import AbsoluteDenoiseTraj
-    from egoallo.network import JointsOnlyTraj
-    from egoallo.network import VelocityDenoiseTraj
-    from egoallo.network_aadecomp import AbsoluteDenoiseTrajAADecomp
+    from egoallo.denoising import AbsoluteDenoiseTraj
+    from egoallo.denoising import JointsOnlyTraj
+    from egoallo.denoising import VelocityDenoiseTraj
+    from egoallo.denoising import AbsoluteDenoiseTrajAADecomp
 
     from egoallo.data.dataclass import EgoTrainingData
     from egoallo.data.dataclass_aadecomp import EgoTrainingDataAADecomp
@@ -124,6 +124,7 @@ DenoiseTrajTypeLiteral = Literal[
     "AbsoluteDenoiseTraj",
     "JointsOnlyTraj",
     "VelocityDenoiseTraj",
+    "AbsoluteDenoiseTrajAADecomp",
 ]
 
 EgoTrainingDataType = Union["EgoTrainingData", "EgoTrainingDataAADecomp"]

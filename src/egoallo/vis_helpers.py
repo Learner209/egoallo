@@ -13,13 +13,17 @@ from jaxtyping import Float
 from plyfile import PlyData
 from torch import Tensor
 
-from . import fncsmpl_library as fncsmpl
+from .middleware.third_party.HybrIK.hybrik.models.layers.smplh.fncsmplh import (
+    fncsmplh as fncsmpl,
+)
 
 from . import network
 from .hand_detection_structs import CorrespondedAriaHandWristPoseDetections
 from .hand_detection_structs import CorrespondedHamerDetections
-from .transforms import SE3
-from .transforms import SO3
+from egoallo.transforms import SE3
+from egoallo.transforms import SO3
+import typeguard
+from jaxtyping import jaxtyped
 
 
 class SplatArgs(TypedDict):
@@ -138,7 +142,7 @@ def add_splat_to_viser(
     )
 
 
-# @jaxtyped(typechecker=typeguard.typechecked)
+@jaxtyped(typechecker=typeguard.typechecked)
 def visualize_traj_and_hand_detections(
     server: viser.ViserServer,
     T_world_root: Float[Tensor, "timesteps 7"],

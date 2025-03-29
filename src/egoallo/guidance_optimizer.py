@@ -6,7 +6,9 @@ from jaxtyping import Float
 
 from .network import EgoDenoiseTraj
 
-from .fncsmpl_library import SmplhModel
+from .middleware.third_party.HybrIK.hybrik.models.layers.smplh.fncsmplh import (
+    SmplhModel,
+)
 from .hand_detection_structs import (
     CorrespondedAriaHandWristPoseDetections,
     CorrespondedHamerDetections,

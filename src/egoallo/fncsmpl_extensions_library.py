@@ -7,12 +7,14 @@ import torch
 from jaxtyping import Float
 from torch import Tensor
 
-from . import fncsmpl_library
+from egoallo.middleware.third_party.HybrIK.hybrik.models.layers.smplh import fncsmplh
 from . import transforms
+import typeguard
+from jaxtyping import jaxtyped
 
 
-# @jaxtyped(typechecker=typeguard.typechecked)
-def get_T_world_cpf(mesh: fncsmpl_library.SmplMesh) -> Float[Tensor, "*batch 7"]:
+@jaxtyped(typechecker=typeguard.typechecked)
+def get_T_world_cpf(mesh: fncsmplh.SmplhMesh) -> Float[Tensor, "*batch 7"]:
     """Get the central pupil frame from a mesh. This assumes that we're using the SMPL-H model."""
 
     assert mesh.vertices.shape[-2:] == (6890, 3), "Not using SMPL-H model!"
@@ -27,8 +29,8 @@ def get_T_world_cpf(mesh: fncsmpl_library.SmplMesh) -> Float[Tensor, "*batch 7"]
     return torch.cat([cpf_orientation, cpf_pos], dim=-1)
 
 
-# @jaxtyped(typechecker=typeguard.typechecked)
-def get_T_head_cpf(shaped: fncsmpl_library.SmplhShaped) -> Float[Tensor, "*batch 7"]:
+@jaxtyped(typechecker=typeguard.typechecked)
+def get_T_head_cpf(shaped: fncsmplh.SmplhShaped) -> Float[Tensor, "*batch 7"]:
     """Get the central pupil frame with respect to the head (joint 14). This
     assumes that we're using the SMPL-H model."""
 
@@ -41,7 +43,7 @@ def get_T_head_cpf(shaped: fncsmpl_library.SmplhShaped) -> Float[Tensor, "*batch
     # CPF is between the two eyes.
     cpf_pos_wrt_head = (right_eye + left_eye) / 2.0 - shaped.joints_zero[..., 14, :]
 
-    return fncsmpl_library.broadcasting_cat(
+    return fncsmplh.broadcasting_cat(
         [
             transforms.SO3.identity(
                 device=cpf_pos_wrt_head.device,
@@ -53,9 +55,9 @@ def get_T_head_cpf(shaped: fncsmpl_library.SmplhShaped) -> Float[Tensor, "*batch
     )
 
 
-# @jaxtyped(typechecker=typeguard.typechecked)
+@jaxtyped(typechecker=typeguard.typechecked)
 def get_T_world_root_from_cpf_pose(
-    posed: fncsmpl_library.SmplhShapedAndPosed,
+    posed: fncsmplh.SmplhShapedAndPosed,
     Ts_world_cpf: Float[Tensor | np.ndarray, "... 7"],
 ) -> Float[Tensor, "... 7"]:
     """Get the root transform that would align the CPF frame of `posed` to `Ts_world_cpf`."""
@@ -81,9 +83,9 @@ def get_T_world_root_from_cpf_pose(
     return T_world_root.wxyz_xyz
 
 
-# @jaxtyped(typechecker=typeguard.typechecked)
+@jaxtyped(typechecker=typeguard.typechecked)
 def get_T_world_cpf_from_root_pose(
-    posed: fncsmpl_library.SmplhShapedAndPosed,
+    posed: fncsmplh.SmplhShapedAndPosed,
     T_world_root: Float[Tensor, "... 7"],
 ) -> Float[Tensor, "... 7"]:
     """Get the CPF transform from root transform and posed model.

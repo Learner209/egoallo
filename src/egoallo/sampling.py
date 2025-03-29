@@ -11,16 +11,20 @@ from torch import Tensor
 from egoallo.setup_logger import setup_logger
 from tqdm import tqdm
 
-from . import fncsmpl_library as fncsmpl
+from .middleware.third_party.HybrIK.hybrik.models.layers.smplh import (
+    fncsmplh as fncsmpl,
+)
 
 from . import network
 from .guidance_optimizer_jax import do_guidance_optimization
 from .guidance_optimizer_jax import GuidanceMode
 from .hand_detection_structs import CorrespondedAriaHandWristPoseDetections
 from .hand_detection_structs import CorrespondedHamerDetections
-from .tensor_dataclass import TensorDataclass
-from .transforms import SE3
-from .transforms import SO3
+from egoallo.tensor_dataclass import TensorDataclass
+from egoallo.transforms import SE3
+from egoallo.transforms import SO3
+import typeguard
+from jaxtyping import jaxtyped
 
 if TYPE_CHECKING:
     from .data.dataclass import EgoTrainingData
@@ -48,7 +52,7 @@ def linear_ts(timesteps: int) -> np.ndarray:
     return np.arange(start_step, end_step - 1, -1)
 
 
-# @jaxtyped(typechecker=typeguard.typechecked)
+@jaxtyped(typechecker=typeguard.typechecked)
 class CosineNoiseScheduleConstants(TensorDataclass):
     """Constants used for cosine noise scheduling."""
 
@@ -90,7 +94,7 @@ class CosineNoiseScheduleConstants(TensorDataclass):
         )
 
 
-# # @jaxtyped(typechecker=typeguard.typechecked)
+# @jaxtyped(typechecker=typeguard.typechecked)
 # def run_sampling_with_stitching(
 #     denoiser_network: network.EgoDenoiser,
 #     body_model: fncsmpl.SmplhModel,
@@ -263,7 +267,7 @@ class CosineNoiseScheduleConstants(TensorDataclass):
 #         return x_t_list[-1]
 
 
-# @jaxtyped(typechecker=typeguard.typechecked)
+@jaxtyped(typechecker=typeguard.typechecked)
 def run_sampling_with_masked_data(
     denoiser_network: network.EgoDenoiser,
     body_model: fncsmpl.SmplhModel,
@@ -462,7 +466,7 @@ def run_sampling_with_masked_data(
 
 
 # # Implementation of DDPM sampling
-# # @jaxtyped(typechecker=typeguard.typechecked)
+# @jaxtyped(typechecker=typeguard.typechecked)
 # def run_sampling_with_masked_data_ddpm(
 #     denoiser_network: network.EgoDenoiser,
 #     body_model: fncsmpl.SmplhModel,
