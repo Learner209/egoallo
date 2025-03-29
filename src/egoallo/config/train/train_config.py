@@ -4,10 +4,10 @@ from typing import Literal
 
 from egoallo import network
 from egoallo import training_loss
-from egoallo.types import DatasetSliceStrategy
-from egoallo.types import DatasetSplit
-from egoallo.types import DatasetType
-from egoallo.types import JointCondMode
+from egoallo.type_stubs import DatasetSliceStrategy
+from egoallo.type_stubs import DatasetSplit
+from egoallo.type_stubs import DatasetType
+from egoallo.type_stubs import JointCondMode
 
 
 @dataclasses.dataclass
@@ -26,7 +26,9 @@ class EgoAlloTrainConfig:
     experiment_dir: Path = Path("")
     dataset_hdf5_path: Path = Path("data/egoalgo_no_skating_dataset.hdf5")
     dataset_files_path: Path = Path("data/egoalgo_no_skating_dataset_files.txt")
-    smplh_model_path: Path = Path("assets/smpl_based_model/smplh/SMPLH_MALE.pkl")
+    smpl_family_model_basedir: Path = Path(
+        "assets/smpl_based_model/smplh/SMPLH_MALE.pkl",
+    )
 
     # MAE params.
     spatial_mask_ratio: float = 0.75

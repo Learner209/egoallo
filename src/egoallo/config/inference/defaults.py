@@ -5,7 +5,7 @@ from pathlib import Path
 
 import torch
 
-from egoallo.types import DatasetType, DatasetSliceStrategy, DatasetSplit
+from egoallo.type_stubs import DatasetType, DatasetSliceStrategy, DatasetSplit
 from egoallo.guidance_optimizer_jax import GuidanceMode
 from typing import Optional
 
@@ -26,7 +26,7 @@ class InferenceConfig:
     batch_size: int = 1
     """Batch size for inference"""
 
-    smplh_model_path: Path = Path("assets/smpl_based_model/smplh/SMPLH_MALE.pkl")
+    smpl_family_model_basedir: Path = Path("assets/smpl_based_model")
     """Path to SMPL+H model file"""
 
     output_dir: Path = Path("./exp/test-amass")

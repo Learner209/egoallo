@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import dataclasses
 
-from egoallo.types import DatasetSliceStrategy
-from egoallo.types import DatasetType
+from egoallo.type_stubs import DatasetSliceStrategy
+from egoallo.type_stubs import DatasetType
 from typing import Any
 from egoallo.config.inference.defaults import InferenceConfig
 from egoallo.config.data.egoexo.defaults import EgoExoConfig
