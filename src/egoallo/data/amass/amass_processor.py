@@ -11,15 +11,23 @@ import numpy as np
 import torch
 from egoallo.data.motion_processing import MotionProcessor
 
-from egoallo.fncsmpl_library import SmplhModel
-from egoallo.fncsmpl_library import SmplhShaped
-from egoallo.fncsmpl_library import SmplhShapedAndPosed
+from egoallo.middleware.third_party.HybrIK.hybrik.models.layers.smplh.fncsmplh_aadecomp import (
+    SmplhModelAADecomp as SmplhModel,
+)
+from egoallo.middleware.third_party.HybrIK.hybrik.models.layers.smplh.fncsmplh_aadecomp import (
+    SmplhShapedAADecomp as SmplhShaped,
+)
+from egoallo.middleware.third_party.HybrIK.hybrik.models.layers.smplh.fncsmplh_aadecomp import (
+    _SmplhShapedAndPosedAADecomp,
+)
 from egoallo.transforms import SE3
 from egoallo.transforms import SO3
 from egoallo.utils.setup_logger import setup_logger
 from jaxtyping import Float
 from numpy import ndarray as Array
 from torch import Tensor
+import typeguard
+from jaxtyping import jaxtyped
 
 logger = setup_logger(output="logs/amass_processor", name=__name__)
 
@@ -30,7 +38,7 @@ class AMASSProcessor:
     def __init__(
         self,
         amass_dir: str,
-        smplh_dir: str,
+        smpl_family_model_basedir: str,
         output_dir: str,
         fps: int = 30,
         include_velocities: bool = True,
@@ -41,7 +49,7 @@ class AMASSProcessor:
 
         Args:
             amass_dir: Path to AMASS dataset root
-            smplh_dir: Path to SMPL model files
+            smpl_family_model_basedir: Path to SMPL model files
             output_dir: Output directory for processed sequences
             fps: Target frames per second
             include_velocities: Whether to compute velocities
@@ -49,7 +57,7 @@ class AMASSProcessor:
             device: Device to use for processing
         """
         self.amass_dir = Path(amass_dir)
-        self.smplh_dir = Path(smplh_dir)
+        self.smpl_family_model_basedir = Path(smpl_family_model_basedir)
         self.output_dir = Path(output_dir)
         self.target_fps = fps
         self.include_velocities = include_velocities
@@ -77,10 +85,13 @@ class AMASSProcessor:
         # Load SMPL-H models for each gender
         self.body_models = {}
         for gender in ["male", "female", "neutral"]:
-            model_path = self.smplh_dir / f"{gender}/model.npz"
-            self.body_models[gender] = SmplhModel.load(model_path, use_pca=False)
+            self.body_models[gender] = SmplhModel.load(
+                self.smpl_family_model_basedir,
+                use_pca=False,
+                gender=gender,
+            )
 
-    # @jaxtyped(typechecker=typeguard.typechecked)
+    @jaxtyped(typechecker=typeguard.typechecked)
     def _convert_rotations(
         self,
         root_orient: Float[Tensor, "... 3"],
@@ -193,31 +204,57 @@ class AMASSProcessor:
 
         # Process through SMPL-H pipeline
         body_model: SmplhModel = self.body_models[gender].to(self.device)
-        shaped: SmplhShaped = body_model.with_shape(betas[None])  # Add batch dim
-        posed: SmplhShapedAndPosed = shaped.with_pose_decomposed(
+        shaped: SmplhShaped = body_model.with_shape(
+            betas.repeat(len(T_world_root), 1),
+        )  # Add batch dim
+        posed: _SmplhShapedAndPosedAADecomp = shaped.with_pose_decomposed(
             T_world_root=T_world_root,
             body_quats=body_quats,
             left_hand_quats=left_hand_quats,
             right_hand_quats=right_hand_quats,
         )
         # mesh: SmplMesh = posed.lbs()
+        # test_smplh_model: smplx.SMPLH = smplx.create(model_path=str(self.smpl_family_model_basedir), model_type='smplh', ext='pkl', use_pca=False)
+        # test_smplh_model.to(self.device)
+        # output = test_smplh_model.forward(
+        #     betas=betas.repeat(len(T_world_root), 1),
+        #     body_pose=poses[:, 3:66],
+        #     left_hand_pose=poses[:, 66:66+15*3],
+        #     right_hand_pose=poses[:, 66+15*3:66+15*3+15*3],
+        #     global_orient=root_orient,
+        #     transl=trans,
+        # )
+
+        # test_smpl_model: smplx.SMPL = smplx.create(
+        #     model_path=str(self.smpl_family_model_basedir),
+        #     model_type="smpl",
+        #     ext="pkl",
+        #     use_pca=False,
+        # )
+        # test_smpl_model.to(self.device)
+        # output = test_smpl_model.forward(
+        #     betas=betas.repeat(len(T_world_root), 1)[..., :10],
+        #     body_pose=poses[:, 3:72],
+        #     global_orient=root_orient,
+        #     transl=trans,
+        # )
 
         # Extract joint positions (22 SMPL-H joints)
         joints = (
             torch.cat(
                 [
                     posed.T_world_root[..., None, 4:7],  # Root position
-                    posed.Ts_world_joint[..., :21, 4:7],  # Other joint positions
+                    posed.ts_world_joint[..., :51, :],  # Other joint positions
                 ],
                 dim=-2,
             )
             .detach()
             .cpu()
             .numpy()
-        )  # (N, 22, 3)
+        )  # (N, 52, 3)
 
         assert joints.ndim == 3 and joints.shape[-2:] == (
-            22,
+            52,
             3,
         ), f"joints shape is {joints.shape}"
 
@@ -226,7 +263,7 @@ class AMASSProcessor:
             joints,
             self.joint_indices,
         )
-        contacts: Float[Array, "*batch timesteps 22"] = contacts[..., :22]
+        contacts: Float[Array, "*batch timesteps 52"] = contacts[..., :52]
 
         # Adjust heights
         trans[:, 2] -= floor_height
@@ -278,7 +315,7 @@ class AMASSProcessor:
         # Prepare output data
         sequence_data = {
             "poses": poses.cpu().numpy(force=True),
-            "trans": trans.cpu().numpy(force=True),
+            "trans": T_world_root[..., 4:7].cpu().numpy(force=True),
             "betas": betas.cpu().numpy(force=True),
             "gender": gender,
             "fps": fps,

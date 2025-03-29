@@ -10,13 +10,18 @@ import numpy as np
 import torch.utils.data
 import scipy
 
+from egoallo.utilities import get_class_from_path
+
 if TYPE_CHECKING:
     from egoallo.config.train.train_config import EgoAlloTrainConfig
 
 from egoallo.config import CONFIG_FILE, make_cfg
 
-from ..dataclass import EgoTrainingData
+from egoallo.type_stubs import EgoTrainingDataType
 from egoallo.utils.setup_logger import setup_logger
+import typeguard
+from jaxtyping import jaxtyped
+from egoallo.constants import EgoTrainingDataName, EgoTrainingDataZoo
 
 local_config_file = CONFIG_FILE
 CFG = make_cfg(config_name="defaults", config_file=local_config_file, cli_args=[])
@@ -63,7 +68,7 @@ AMASS_SPLITS = {
 
 
 # range
-class VanillaEgoAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
+class VanillaEgoAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingDataType]):
     """Dataset which loads from our preprocessed hdf5 file.
 
     Args:
@@ -150,7 +155,7 @@ class VanillaEgoAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
 
         self._cache: dict[str, dict[str, Any]] | None = {} if cache_files else None
 
-    def __getitem__(self, index: int) -> EgoTrainingData:
+    def __getitem__(self, index: int) -> EgoTrainingDataType:
         group_index = index % len(self._groups)
         slice_index = index // len(self._groups)
         del index
@@ -310,21 +315,21 @@ class VanillaEgoAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         )
 
         # Create metadata object first
-        metadata = EgoTrainingData.MetaData()
+        metadata = EgoTrainingDataType.MetaData()
         metadata.stage = "raw"  # Set initial stage
         # uid servers as a null value just for compatibility with EgoExoDataset
         metadata.take_name = (f"name_{group}_uid_{group}_t{start_t}_{end_t}",)
         metadata.scope = "train"
         metadata.dataset_type = "VanillaAmassHdf5Dataset"
 
-        # Add metadata to kwargs before creating EgoTrainingData
+        # Add metadata to kwargs before creating EgoTrainingDataType
         kwargs["metadata"] = metadata
 
         # Close the file if we opened it.
         if hdf5_file is not None:
             hdf5_file.close()
 
-        return EgoTrainingData(**kwargs)
+        return EgoTrainingDataType(**kwargs)
 
     def __len__(self) -> int:
         return self._approximated_length
@@ -353,7 +358,7 @@ class VanillaEgoAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
 # endrange
 
 
-class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
+class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingDataType]):
     """Dataset that loads from a preprocessed HDF5 file with dynamic window support."""
 
     def __init__(self, config: "EgoAlloTrainConfig") -> None:
@@ -458,14 +463,14 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
             for g in self._groups
         ]
 
-    def __getitem__(self, index: int) -> EgoTrainingData:
+    def __getitem__(self, index: int) -> EgoTrainingDataType:
         """Retrieve an item from the dataset.
 
         Args:
             index (int): Index of the item to retrieve.
 
         Returns:
-            EgoTrainingData: Data object containing the requested item.
+            EgoTrainingDataType: Data object containing the requested item.
         """
         if self._slice_strategy == "full_sequence":
             group = self._groups[index]
@@ -626,24 +631,29 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingData]):
         kwargs["joints_wrt_world"] = masked_joints
 
         # Create metadata object first
-        metadata = EgoTrainingData.MetaData()
+        DataClass: EgoTrainingDataType = get_class_from_path(
+            EgoTrainingDataZoo[EgoTrainingDataName],
+        )
+        metadata = DataClass.MetaData(
+            smpl_family_model_basedir=self.config.smpl_family_model_basedir,
+        )
         metadata.stage = "raw"  # Set initial stage
         # uid servers as a null value just for compatibility with EgoExoDataset
         metadata.take_name = (f"{group}_t{start_t}_{end_t}",)
         metadata.scope = "train"
         metadata.dataset_type = self.__class__.__name__
 
-        # Add metadata to kwargs before creating EgoTrainingData
+        # Add metadata to kwargs before creating EgoTrainingDataType
         kwargs["metadata"] = metadata
 
-        ret = EgoTrainingData(**kwargs)  # Create with metadata
+        ret = DataClass(**kwargs)  # Create with metadata
         ret = ret.preprocess(
             _rotate_radian=torch.rand(1) * 2 * np.pi if self._traj_aug else None,
         )  # Preprocess data (will update metadata.stage)
 
         return ret
 
-    # @jaxtyped(typechecker=typeguard.typechecked)
+    @jaxtyped(typechecker=typeguard.typechecked)
     def resample_data(
         self,
         data: Float[np.ndarray, "time *dim"] | Bool[np.ndarray, "time *dim"],
