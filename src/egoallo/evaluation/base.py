@@ -4,17 +4,22 @@ from typing import Optional
 
 import torch
 
-from egoallo import fncsmpl_library as fncsmpl
-from egoallo.types import Device
-from egoallo.types import MetricsDict
-from egoallo.types import PathLike
-from egoallo.types import ProcrustesMode
-from egoallo.types import ProcrustesOutput
+from egoallo.middleware.third_party.HybrIK.hybrik.models.layers.smplh.fncsmplh import (
+    SmplhModel as fncsmpl,
+)
+
+from egoallo.type_stubs import Device
+from egoallo.type_stubs import MetricsDict
+from egoallo.type_stubs import PathLike
+from egoallo.type_stubs import ProcrustesMode
+from egoallo.type_stubs import ProcrustesOutput
 from jaxtyping import Float
 from torch import Tensor
 
 from .utils import ensure_path
 from .utils import get_device
+import typeguard
+from jaxtyping import jaxtyped
 
 
 class BaseEvaluator(ABC):
@@ -34,7 +39,7 @@ class BaseEvaluator(ABC):
 
     @classmethod
     @abstractmethod
-    # @jaxtyped(typechecker=typeguard.typechecked)
+    @jaxtyped(typechecker=typeguard.typechecked)
     def procrustes_align(
         cls,
         points_y: Float[Tensor, "*batch time 3"],

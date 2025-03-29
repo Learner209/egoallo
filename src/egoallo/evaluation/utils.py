@@ -3,8 +3,8 @@ from typing import Optional
 from typing import Tuple
 
 import torch
-from egoallo.types import Device
-from egoallo.types import PathLike
+from egoallo.type_stubs import Device
+from egoallo.type_stubs import PathLike
 from torch import Tensor
 
 

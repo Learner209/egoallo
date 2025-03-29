@@ -15,16 +15,18 @@ import yaml
 from egoallo.constants import EGOEXO_NAMES_LEFT
 from egoallo.constants import EGOEXO_NAMES_RIGHT
 from egoallo.constants import VERTEX_IDS
-from egoallo.types import EvalMode
-from egoallo.types import FloatArray
-from egoallo.types import HandSide
-from egoallo.types import MetricsDict
-from egoallo.types import ModelType
-from egoallo.types import PathLike
-from egoallo.types import ProcrustesMode
-from egoallo.types import ProcrustesOutput
+from egoallo.type_stubs import EvalMode
+from egoallo.type_stubs import FloatArray
+from egoallo.type_stubs import HandSide
+from egoallo.type_stubs import MetricsDict
+from egoallo.type_stubs import ModelType
+from egoallo.type_stubs import PathLike
+from egoallo.type_stubs import ProcrustesMode
+from egoallo.type_stubs import ProcrustesOutput
 from egoallo.utilities import procrustes_align
 from egoallo.utils.setup_logger import setup_logger
+import typeguard
+from jaxtyping import jaxtyped
 
 from .base import BaseEvaluator
 
@@ -164,7 +166,7 @@ class HandEvaluator(BaseEvaluator):
 
         return a - aligned_b
 
-    # @jaxtyped(typechecker=typeguard.typechecked)
+    @jaxtyped(typechecker=typeguard.typechecked)
     def procrustes_align(
         self,
         points_y: Float[Tensor, "*batch time 3"],

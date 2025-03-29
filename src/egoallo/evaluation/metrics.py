@@ -8,8 +8,11 @@ import numpy as np
 import torch
 import yaml
 
+import typeguard
+from jaxtyping import jaxtyped
 
-# @jaxtyped(typechecker=typeguard.typechecked)
+
+@jaxtyped(typechecker=typeguard.typechecked)
 @dataclass
 class EgoAlloEvaluationMetrics:
     """Container for EgoAllo evaluation metrics.
