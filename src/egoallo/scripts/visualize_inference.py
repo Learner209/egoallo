@@ -10,7 +10,7 @@ from pathlib import Path
 from egoallo.config.inference.defaults import InferenceConfig
 from egoallo.data.dataclass import EgoTrainingData
 from egoallo.scripts.aria_inference import AriaInference
-from egoallo.types import DenoiseTrajType, DenoiseTrajTypeLiteral, DatasetType
+from egoallo.type_stubs import DenoiseTrajType, DenoiseTrajTypeLiteral, DatasetType
 from egoallo.training_utils import ipdb_safety_net
 from egoallo.mapping import SMPLH_BODY_JOINTS
 
@@ -20,7 +20,7 @@ def visualize_saved_trajectory(
     trajectory_path: tuple[Path, ...],
     trajectory_type: DenoiseTrajTypeLiteral,
     dataset_type: DatasetType,
-    smplh_model_path: Path = Path("assets/smpl_based_model/smplh/SMPLH_MALE.pkl"),
+    smpl_family_model_basedir: Path = Path("assets/smpl_based_model"),
     output_dir: Path = Path("./visualization_output"),
     device: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu"),
 ) -> None:
@@ -31,7 +31,7 @@ def visualize_saved_trajectory(
                        For COMPARISON type, provide (gt_path, pred_path).
                        For EGOEXO type, provide single trajectory path.
         dataset_type: Type of visualization - "egoexo" or "comparison"
-        smplh_model_path: Path to SMPL-H model file
+        smpl_family_model_basedir: Path to SMPL-H model file
         output_dir: Directory to save visualization outputs
     """
     # Create output directory
@@ -53,14 +53,14 @@ def visualize_saved_trajectory(
 
         EgoTrainingData.visualize_ego_training_data(
             gt_traj,
-            smplh_model_path,
+            smpl_family_model_basedir,
             str(gt_path),
             online_render=config.online_render,
         )
 
         EgoTrainingData.visualize_ego_training_data(
             pred_traj,
-            smplh_model_path,
+            smpl_family_model_basedir,
             str(pred_path),
             online_render=config.online_render,
         )
@@ -98,7 +98,7 @@ def visualize_saved_trajectory(
 
         EgoTrainingData.visualize_ego_training_data(
             pred_traj,
-            smplh_model_path,
+            smpl_family_model_basedir,
             str(pred_path),
             scene_obj=pc_container,
             online_render=config.online_render,
@@ -236,7 +236,7 @@ def main(
     trajectory_path: tuple[Path, ...],
     trajectory_type: DenoiseTrajTypeLiteral,
     dataset_type: DatasetType,
-    smplh_model_path: Path = Path("assets/smpl_based_model/smplh/SMPLH_MALE.pkl"),
+    smpl_family_model_basedir: Path = Path("assets/smpl_based_model"),
     output_dir: Path = Path("./visualization_output"),
     device: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu"),
     debug: bool = False,
@@ -246,7 +246,7 @@ def main(
     Args:
         trajectory_path: Path to saved trajectory file
         dataset_type: Type of visualization - "egoexo" or "comparison"
-        smplh_model_path: Path to SMPL-H model file
+        smpl_family_model_basedir: Path to SMPL-H model file
         output_dir: Directory to save visualization outputs
     """
     if debug:
@@ -259,7 +259,7 @@ def main(
         trajectory_path=trajectory_path,
         trajectory_type=trajectory_type,
         dataset_type=dataset_type,
-        smplh_model_path=smplh_model_path,
+        smpl_family_model_basedir=smpl_family_model_basedir,
         output_dir=output_dir,
         device=device,
     )

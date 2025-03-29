@@ -11,7 +11,9 @@ import torch
 import tyro
 import viser
 
-from egoallo import fncsmpl_library as fncsmpl
+from egoallo.middleware.third_party.HybrIK.hybrik.models.layers.smplh.fncsmplh import (
+    SmplhModel as fncsmpl,
+)
 from egoallo.data.aria_mps import load_point_cloud_and_find_ground
 from egoallo.hand_detection_structs import CorrespondedAriaHandWristPoseDetections
 from egoallo.hand_detection_structs import CorrespondedHamerDetections
@@ -24,22 +26,27 @@ from projectaria_tools.core.data_provider import create_vrs_data_provider
 from projectaria_tools.core.data_provider import VrsDataProvider
 from projectaria_tools.core.sensor_data import TimeDomain
 from tqdm import tqdm
+from egoallo.constants import SmplFamilyMetaModelZoo, SmplFamilyMetaModelName
 
 
 def main(
     search_root_dir: Path,
-    smplh_model_path: Path = Path("assets/smpl_based_model/smplh/SMPLH_MALE.pkl"),
+    smpl_family_model_basedir: Path = Path("assets/smpl_based_model"),
 ) -> None:
     """Visualization script for outputs from EgoAllo.
 
     Arguments:
         search_root_dir: Root directory where inputs/outputs are stored. All
             NPZ files in this directory will be assumed to be outputs from EgoAllo.
-        smplh_model_path: Path to the SMPLH model NPZ file.
+        smpl_family_model_basedir: Path to the SMPLH model NPZ file.
     """
     device = torch.device("cuda")
 
-    body_model = fncsmpl.SmplhModel.load(smplh_model_path, use_pca=False).to(device)
+    body_model = (
+        SmplFamilyMetaModelZoo[SmplFamilyMetaModelName]
+        .load(smpl_family_model_basedir, use_pca=False)
+        .to(device)
+    )
 
     server = viser.ViserServer()
     server.gui.configure_theme(dark_mode=True)

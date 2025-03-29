@@ -14,9 +14,11 @@ import random
 from typing import Union, Dict
 
 if TYPE_CHECKING:
-    from egoallo.types import DenoiseTrajType
+    from egoallo.type_stubs import DenoiseTrajType
 
-from egoallo import fncsmpl_library as fncsmpl
+from egoallo.middleware.third_party.HybrIK.hybrik.models.layers.smplh.fncsmplh import (
+    SmplhModel as fncsmpl,
+)
 from egoallo.config import CONFIG_FILE, make_cfg
 from egoallo.config.inference.defaults import InferenceConfig
 from egoallo.data import make_batch_collator, build_dataset
@@ -28,12 +30,12 @@ from egoallo.inference_utils import (
     load_denoiser,
     load_runtime_config,
 )
-from egoallo.network import (
-    EgoDenoiser,
+from egoallo.denoising import (
     AbsoluteDenoiseTraj,
     JointsOnlyTraj,
     VelocityDenoiseTraj,
 )
+from egoallo.network import EgoDenoiser
 from egoallo.sampling import (
     run_sampling_with_masked_data,
 )
@@ -41,6 +43,7 @@ from egoallo.transforms import SE3, SO3
 from egoallo.utils.setup_logger import setup_logger
 from egoallo.training_utils import ipdb_safety_net
 from egoallo.scripts.visualize_inference import main as visualize_inference_cli
+from egoallo.constants import SmplFamilyMetaModelZoo, SmplFamilyMetaModelName
 # from egoallo.egoexo import EGOEXO_UTILS_INST
 
 torch.multiprocessing.set_sharing_strategy("file_system")
@@ -139,7 +142,11 @@ class SequenceProcessor:
             num_samples=1,
             device=self.device,
         )
-        gt_traj = runtime_config.denoising.from_ego_data(batch, include_hands=True)
+        gt_traj = runtime_config.denoising.from_ego_data(
+            batch,
+            include_hands=True,
+            smpl_family_model_basedir=inference_config.smpl_family_model_basedir,
+        )
 
         post_batch = batch.postprocess()
         # no need to postprocess denoised_traj since its' already been postprocessed.
@@ -194,12 +201,14 @@ class TestRunner:
         runtime_config.fps_aug = False
         # runtime_config.dataset_slice_strategy = "random_uniform_len"
 
-        self.body_model = fncsmpl.SmplhModel.load(
-            runtime_config.smplh_model_path,
-            use_pca=False,
-            batch_size=ds_init_config.batch_size * runtime_config.subseq_len,
-        ).to(
-            self.device,
+        self.body_model = (
+            SmplFamilyMetaModelZoo[SmplFamilyMetaModelName]
+            .load(
+                runtime_config.smpl_family_model_basedir,
+            )
+            .to(
+                self.device,
+            )
         )
         self.dataloader = torch.utils.data.DataLoader(
             dataset=build_dataset(cfg=runtime_config)(config=ds_init_config),
@@ -332,7 +341,7 @@ class TestRunner:
         """Compute evaluation metrics on processed sequences."""
         # try:
         evaluator = BodyEvaluator(
-            body_model_path=self.runtime_config.smplh_model_path,
+            body_model_path=self.runtime_config.smpl_family_model_basedir,
             device=self.device,
         )
 
@@ -411,12 +420,14 @@ class TestRunner:
                     {
                         "gt_traj": gt_traj.map(lambda x: x.detach().cpu()),
                         "est_traj": est_traj.map(lambda x: x.detach().cpu()),
-                        "body_model": fncsmpl.SmplhModel.load(
-                            self.runtime_config.smplh_model_path,
+                        "body_model": SmplFamilyMetaModelZoo[SmplFamilyMetaModelName]
+                        .load(
+                            self.runtime_config.smpl_family_model_basedir,
                             use_pca=False,
                             batch_size=est_traj.betas.shape[0]
                             * est_traj.betas.shape[1],
-                        ).to(torch.device("cpu")),
+                        )
+                        .to(torch.device("cpu")),
                         # "body_model": self.body_model.to(torch.device("cpu")),
                         "device": torch.device("cpu"),
                     },
@@ -526,7 +537,7 @@ class TestRunner:
                         trajectory_path=(gt_path, est_path),
                         trajectory_type=denoise_traj_type,
                         dataset_type=self.inference_config.dataset_type,
-                        smplh_model_path=self.runtime_config.smplh_model_path,
+                        smpl_family_model_basedir=self.runtime_config.smpl_family_model_basedir,
                         output_dir=temp_output_dir / id,
                     )
 
@@ -539,7 +550,7 @@ class TestRunner:
                     #     "--trajectory-type",
                     #     denoise_traj_type,
                     #     "--smplh-model-path",
-                    #     str(self.runtime_config.smplh_model_path),
+                    #     str(self.runtime_config.smpl_family_model_basedir),
                     #     "--output-dir",
                     #     str(temp_output_dir / id),
                     #     "--dataset-type",

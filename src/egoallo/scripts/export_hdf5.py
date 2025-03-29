@@ -3,17 +3,23 @@
 import queue
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import h5py
 import torch.cuda
 import tyro
 
-from egoallo import training_utils
-from egoallo.data.dataclass import EgoTrainingData
-from egoallo import network
-
 # faulthandler.enable()
 import os
+
+
+from egoallo import training_utils
+from egoallo.constants import EgoTrainingDataName, EgoTrainingDataZoo
+
+if TYPE_CHECKING:
+    from egoallo.type_stubs import EgoTrainingDataType
+from egoallo import network
+from egoallo.utilities import get_class_from_path
 
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
@@ -23,7 +29,7 @@ os.environ["NUMEXPR_NUM_THREADS"] = "1"
 
 
 def main(
-    smplh_model_path: Path = Path("assets/smpl_based_model/smplh/SMPLH_MALE.pkl"),
+    smpl_family_model_dir: Path = Path("assets/smpl_based_model"),
     data_npz_dirs: list[Path] = [Path("")],
     output_file: Path = Path(""),
     output_list_file: Path = Path(""),
@@ -51,8 +57,13 @@ def main(
                 break
 
             print(f"Processing {npz_path} on device {device_idx}...")
-            for test_data, (start_idx, end_idx) in EgoTrainingData.load_from_npz(
-                smplh_model_path,
+            # Get the actual class from the string path
+            DataClass: EgoTrainingDataType = get_class_from_path(
+                EgoTrainingDataZoo[EgoTrainingDataName],
+            )
+
+            for test_data, (start_idx, end_idx) in DataClass.load_from_npz(
+                smpl_family_model_dir,
                 npz_path,
                 include_hands=include_hands,
                 device=torch.device("cpu"),
@@ -66,16 +77,21 @@ def main(
 
                 denoising = network.DenoisingConfig()
 
-                traj = denoising.from_ego_data(test_data, include_hands=include_hands)
+                traj = denoising.from_ego_data(
+                    test_data,
+                    include_hands=include_hands,
+                    smpl_family_model_basedir=smpl_family_model_dir,
+                )
                 # test_data = test_data.postprocess()
                 # traj = test_data._post_process(traj)
                 traj = test_data._set_traj(traj)
                 traj.metadata.stage = "postprocessed"
 
                 # breakpoint()
-                EgoTrainingData.visualize_ego_training_data(
+                DataClass.visualize_ego_training_data(
                     traj,
-                    smplh_model_path,
+                    smpl_family_model_dir,
+                    online_render=True,
                     output_path="./test.mp4",
                 )
 
@@ -106,10 +122,10 @@ def main(
                         continue
 
                     # Chunk into 32 timesteps at a time.
-                    if k not in ("contacts", "mask"):
+                    if k not in ("contacts") and "mask" not in k:
                         assert v.dtype == torch.float32, f"{k} {v.dtype}"
 
-                    if v.shape[0] == test_data.T_world_cpf.shape[0]:
+                    if v.shape[0] == test_data.T_world_root.shape[0]:
                         chunks = (min(32, v.shape[0]),) + v.shape[1:]
                     else:
                         assert v.shape[0] == 1

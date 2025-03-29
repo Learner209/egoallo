@@ -68,6 +68,9 @@ def main(config: AMASSDatasetConfig) -> None:
 
     # Add sequences to queue
     all_datasets = config.train_datasets + config.val_datasets + config.test_datasets
+    # all_datasets = ["BMLhandball"]
+    # logger.warning(f"Only using BMLhandball: {all_datasets}")
+
     for dataset in all_datasets:
         dataset_dir = config.amass_dir / dataset
         if not dataset_dir.exists():
