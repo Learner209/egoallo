@@ -239,6 +239,13 @@ class EgoDenoiserConfig:
         if isinstance(self.smpl_family_model_basedir, str):
             self.smpl_family_model_basedir = Path(self.smpl_family_model_basedir)
 
+        # Create joint embeddings if enabled
+        if self.use_joint_embeddings:
+            self.joint_embeddings = nn.Embedding(
+                CFG.smplh.num_joints,
+                self.joint_emb_dim,
+            )
+
     @cached_property
     def d_cond(self) -> int:
         """Dimensionality of conditioning vector."""
@@ -296,14 +303,14 @@ class EgoDenoiserConfig:
         # !joints must be masked to prevent further motion information from being used
         masked_joints = joints.clone()
 
-        # Create joint embeddings if enabled
         if self.use_joint_embeddings:
-            joint_embeddings = nn.Embedding(
-                CFG.smplh.num_joints,
-                self.joint_emb_dim,
-            ).to(device)
             all_indices = torch.arange(CFG.smplh.num_joints, device=device)
-            index_embeddings = joint_embeddings(all_indices).expand(batch, time, -1, -1)
+            index_embeddings = self.joint_embeddings.to(device)(all_indices).expand(
+                batch,
+                time,
+                -1,
+                -1,
+            )
         else:
             index_embeddings = None
 
