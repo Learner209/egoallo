@@ -1,5 +1,5 @@
 defaults:
-  - inference: amass
+  - inference: amass_hybrik
   - _self_
 
 hydra:

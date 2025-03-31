@@ -1,7 +1,7 @@
 defaults:
-  - train: default
-  - inference: amass
-  - network/ego_denoiser: default
+  - train: hybrik
+  - inference: amass_hybrik
+  - network/ego_denoiser: hybrik
   - network/denoising: absolute_aadecomp_traj
   - train/loss: default
   - _self_

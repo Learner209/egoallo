@@ -8,22 +8,21 @@ smpl_family_model_basedir:
   _target_: pathlib.Path
   _args_:
     - assets/smpl_based_model/
+smpl_family_meta_model_name: SmplhModel
 output_dir:
   _target_: pathlib.Path
   _args_:
-    - ./exp/test-amass-Mar17
+    - experiments/test_Mar_31/v26/checkpoints_0
 device: cuda
-annotation_path:
-  _target_: pathlib.Path
-  _args_:
-    - ./data/egoexo-default-gt-output
+annotation_path: ./data/egoexo-default-gt-output
 checkpoint_dir:
   _target_: pathlib.Path
   _args_:
-    - experiments/robot-01-Mar-15-spatial-0.75-temporal-0.3/v4/checkpoints_10000
+    - experiments/test_Mar_31/v26/checkpoints_0
 
 visualize_traj: true
 random_visualize: true
+online_render: false
 
 guidance_post: false
 guidance_inner: false
@@ -34,4 +33,4 @@ dataset_slice_strategy: full_sequence
 splits:
   - test
 
-debug_max_iters: 10
+debug_max_iters: null

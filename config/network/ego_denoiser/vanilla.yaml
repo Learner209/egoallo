@@ -25,10 +25,16 @@ joint_cond_mode: absrel
 joint_emb_dim: 8
 
 # SMPL-H model path
-smpl_family_model_basedir: assets/smpl_based_model/
+smpl_family_model_basedir:
+  _target_: pathlib.Path
+  _args_:
+    - assets/smpl_based_model/
+smpl_family_meta_model_name: SmplhModel
 
 use_fourier_in_masked_joints: true
 use_joint_embeddings: true
+
+num_joints: 22
 
 # Batch settings
 batch_size: 64
