@@ -377,7 +377,7 @@ class EgoTrainingDataAADecomp(TensorDataclass):
             # )
 
             # We need extended joint positions for HybrIK smpl integration.
-            smpl_jnts = raw_fields["joints"][..., :24, :]
+            smpl_jnts = raw_fields["joints"][..., np.r_[:22, 27, 42], :]
 
             cos_sin_phis = torch.cat(
                 [torch.cos(body_twists), torch.sin(body_twists)],

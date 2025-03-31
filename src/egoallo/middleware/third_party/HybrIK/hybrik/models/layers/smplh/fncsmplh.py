@@ -24,6 +24,7 @@ from egoallo.transforms import SE3, SO3
 from torch import Tensor
 from egoallo.tensor_dataclass import TensorDataclass
 from jaxtyping import jaxtyped
+from einops import einsum
 
 
 @jaxtyped(typechecker=typeguard.typechecked)
@@ -75,6 +76,57 @@ class SmplhModel(TensorDataclass):
             hands_components_r=None,
             model=model,
         )
+
+    @classmethod
+    def pca_to_aa(
+        cls,
+        hand_pose_pca: Float[Tensor, "*#batch num_pca"],
+        hand_components: Float[Tensor, "num_pca 45"],
+    ) -> Float[Tensor, "*#batch 15 3"]:
+        """Convert PCA coefficients to axis-angle rotations for hand poses.
+
+        Args:
+            hand_pose_pca: PCA coefficients for hand pose
+            hand_components: Hand components matrix (left or right)
+
+        Returns:
+            Hand joint rotations in axis-angle format
+        """
+        # Multiply PCA coefficients with components to get axis-angle values
+        hand_pose = einsum(
+            hand_pose_pca,
+            hand_components,
+            "... num_pca, num_pca joints3 -> ... joints3",
+        )
+        # Reshape to (batch_size, 15, 3) format
+        return hand_pose.reshape(*hand_pose.shape[:-1], 15, 3)
+
+    def convert_hand_poses(
+        self,
+        left_hand_pca: Float[Tensor, "*#batch num_pca"] | None = None,
+        right_hand_pca: Float[Tensor, "*#batch num_pca"] | None = None,
+    ) -> tuple[
+        Float[Tensor, "*#batch 15 3"] | None, Float[Tensor, "*#batch 15 3"] | None,
+    ]:
+        """Convert both hand PCA coefficients to axis-angle format.
+
+        Args:
+            left_hand_pca: PCA coefficients for left hand pose
+            right_hand_pca: PCA coefficients for right hand pose
+
+        Returns:
+            Tuple of (left_hand_pose, right_hand_pose) in axis-angle format
+        """
+        left_hand_pose = None
+        right_hand_pose = None
+
+        if left_hand_pca is not None:
+            left_hand_pose = self.pca_to_aa(left_hand_pca, self.hands_components_l)
+
+        if right_hand_pca is not None:
+            right_hand_pose = self.pca_to_aa(right_hand_pca, self.hands_components_r)
+
+        return left_hand_pose, right_hand_pose
 
     def get_num_joints(self) -> int:
         return len(self.parent_indices)

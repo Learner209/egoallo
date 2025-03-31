@@ -60,9 +60,11 @@ class RICHDataProcessor:
         # Initialize SMPL-H models for each gender
         self.body_models = {}
         for gender in ["male", "female", "neutral"]:
-            model_path = self.smplh_model_dir / f"SMPLH_{gender.upper()}.pkl"
-            # the rich data left/right hand annotations has 12 components.
-            self.body_models[gender] = SmplhModel.load(model_path, use_pca=False).to(
+            self.body_models[gender] = SmplhModel.load(
+                self.smplh_model_dir,
+                use_pca=False,
+                gender=gender,
+            ).to(
                 self.device,
             )
 
@@ -449,7 +451,7 @@ class RICHDataProcessor:
                 torch.cat(
                     [
                         posed.T_world_root[..., None, 4:7],
-                        posed.Ts_world_joint[..., :21, 4:7],
+                        posed.Ts_world_joint[..., :, 4:7],
                     ],
                     dim=-2,
                 )
@@ -458,7 +460,7 @@ class RICHDataProcessor:
                 .numpy()
             )
             assert joints.ndim == 3 and joints.shape[-2:] == (
-                22,
+                52,
                 3,
             ), f"joints shape is {joints.shape}"
             all_joints.append(joints)
