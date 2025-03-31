@@ -23,7 +23,7 @@ training_utils.ipdb_safety_net()
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__)))
 
 # Import SMPLX model
-from egoallo.constants import SmplFamilyMetaModelZoo, SmplFamilyMetaModelName
+from egoallo.constants import SmplFamilyMetaModelZoo
 from egoallo.type_stubs import SmplFamilyModelType
 from src.egoallo.middleware.third_party.HybrIK.hybrik.models.layers.smplx.body_models import SMPLXLayer
 

@@ -131,9 +131,10 @@ class AbsoluteDenoiseTraj(BaseDenoiseTraj):
         body_model = (
             SmplFamilyMetaModelZoo[body_model_name]
             .load(
-                self.metadata.smpl_family_model_dir,
+                self.metadata.smpl_family_model_basedir,
                 gender=self.metadata.gender,
                 num_joints=num_joints,
+                batch_size=batch * time,
             )
             .to(device)
         )
@@ -260,7 +261,7 @@ class AbsoluteDenoiseTraj(BaseDenoiseTraj):
             Total dimension of packed state vector.
         """
         # 16 (betas) + 21*9 (body_rotmats) + 21 (contacts) + 9 (R_world_root) + 3 (t_world_root)
-        num_smplh_jnts = CFG.smplh.num_joints
+        num_smplh_jnts = 22
         packed_dim = 16 + (num_smplh_jnts - 1) * 9 + (num_smplh_jnts) + 9 + 3
         if include_hands:
             packed_dim += 30 * 9  # hand_rotmats
@@ -328,6 +329,7 @@ class AbsoluteDenoiseTraj(BaseDenoiseTraj):
         """Unpack trajectory from a single flattened vector."""
         (*batch, time, d_state) = x.shape
         assert d_state == cls.get_packed_dim(include_hands)
+        num_joints = 22
 
         if include_hands:
             (
@@ -341,8 +343,8 @@ class AbsoluteDenoiseTraj(BaseDenoiseTraj):
                 x,
                 [
                     16,
-                    (CFG.smplh.num_joints - 1) * 9,
-                    CFG.smplh.num_joints,
+                    (num_joints - 1) * 9,
+                    num_joints,
                     9,
                     3,
                     30 * 9,
@@ -350,7 +352,7 @@ class AbsoluteDenoiseTraj(BaseDenoiseTraj):
                 dim=-1,
             )
             body_rotmats = body_rotmats_flat.reshape(
-                (*batch, time, (CFG.smplh.num_joints - 1), 3, 3),
+                (*batch, time, (num_joints - 1), 3, 3),
             )
             hand_rotmats = hand_rotmats_flat.reshape((*batch, time, 30, 3, 3))
         else:
@@ -362,11 +364,11 @@ class AbsoluteDenoiseTraj(BaseDenoiseTraj):
                 t_world_root,
             ) = torch.split(
                 x,
-                [16, (CFG.smplh.num_joints - 1) * 9, CFG.smplh.num_joints, 9, 3],
+                [16, (num_joints - 1) * 9, num_joints, 9, 3],
                 dim=-1,
             )
             body_rotmats = body_rotmats_flat.reshape(
-                (*batch, time, (CFG.smplh.num_joints - 1), 3, 3),
+                (*batch, time, (num_joints - 1), 3, 3),
             )
             hand_rotmats = None
 
@@ -656,13 +658,11 @@ class AbsoluteDenoiseTraj(BaseDenoiseTraj):
         Returns:
             Dictionary mapping modality names to their dimensions
         """
-        num_smplh_jnts = CFG.smplh.num_joints
-
         # Base modalities for absolute mode
         modality_dims = {
             "betas": 16,
-            "body_rotmats": (num_smplh_jnts - 1) * 9,
-            "contacts": num_smplh_jnts,
+            "body_rotmats": 21 * 9,
+            "contacts": 22,
             "R_world_root": 9,  # 3x3 rotation matrix
             "t_world_root": 3,  # 3D translation vector
         }

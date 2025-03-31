@@ -15,7 +15,7 @@ from torch import nn
 from torch import Tensor
 import typeguard
 from jaxtyping import jaxtyped
-from egoallo.constants import SmplFamilyMetaModelZoo, SmplFamilyMetaModelName
+from egoallo.constants import SmplFamilyMetaModelZoo
 from egoallo.type_stubs import EgoTrainingDataType
 
 # Move type imports inside TYPE_CHECKING block to avoid circular imports
@@ -77,7 +77,7 @@ class AbsoluteDenoiseTrajAADecomp(BaseDenoiseTraj):
 
     @property
     def R_world_root(self) -> Float[Tensor, "*batch timesteps 3 3"]:
-        smpl = SmplFamilyMetaModelZoo[SmplFamilyMetaModelName].load(
+        smpl = SmplFamilyMetaModelZoo[self.metadata.smpl_family_meta_model_name].load(
             self.metadata.smpl_family_model_basedir,
         )
         t_world_root = self.joints_wrt_world[..., 0, :]

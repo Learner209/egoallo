@@ -9,6 +9,7 @@ from jaxtyping import Bool
 from jaxtyping import Float
 from torch import Tensor
 from egoallo.type_stubs import EgoTrainingDataType, SmplFamilyModelType
+from egoallo.data.dataclass import EgoTrainingData
 from .base_traj import BaseDenoiseTraj
 import dataclasses
 from egoallo.config import make_cfg
@@ -26,6 +27,11 @@ class JointsOnlyTraj(BaseDenoiseTraj):
 
     joints: Float[Tensor, "*batch timesteps 22 3"]
     """3D joint positions."""
+
+    metadata: EgoTrainingData.MetaData = dataclasses.field(
+        default_factory=EgoTrainingData.MetaData,
+    )
+    """Metadata for the trajectory."""
 
     def __init__(
         self,
@@ -82,7 +88,7 @@ class JointsOnlyTraj(BaseDenoiseTraj):
             Total dimension of packed state vector.
         """
         # 22 joints * 3 coordinates per joint
-        return CFG.smplh.num_joints * 3
+        return 22 * 3
 
     def pack(self) -> Float[Tensor, "*batch timesteps d_state"]:
         """Pack trajectory into a single flattened vector."""
@@ -100,7 +106,7 @@ class JointsOnlyTraj(BaseDenoiseTraj):
         (*batch, time, d_state) = x.shape
         assert d_state == cls.get_packed_dim(include_hands)
 
-        joints = x.reshape(*batch, time, CFG.smplh.num_joints, 3)
+        joints = x.reshape(*batch, time, metadata.num_joints, 3)
         return cls(joints=joints)
 
     def apply_to_body(self, body_model: "SmplFamilyModelType") -> "SmplFamilyModelType":
@@ -173,7 +179,7 @@ class JointsOnlyTraj(BaseDenoiseTraj):
         Returns:
             Dictionary mapping modality names to their dimensions
         """
-        num_smplh_jnts = CFG.smplh.num_joints
+        num_smplh_jnts = JointsOnlyTraj.metadata.num_joints
         return {
             "joints": num_smplh_jnts * 3,  # x,y,z coordinates for each joint
         }

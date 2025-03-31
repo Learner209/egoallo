@@ -22,7 +22,7 @@ sys.path.append(str(project_root))
 sys.path.append(str(project_root / 'src' / 'egoallo' / 'middleware' / 'third_party' / 'HybrIK'))
 
 # Import SMPLH model
-from egoallo.constants import SmplFamilyMetaModelZoo, SmplFamilyMetaModelName
+from egoallo.constants import SmplFamilyMetaModelZoo
 from egoallo.type_stubs import SmplFamilyModelType, SmplFamilyModelTypeLiteral
 from src.egoallo.middleware.third_party.HybrIK.hybrik.models.layers.smplx.body_models import SMPLXLayer
 
@@ -36,7 +36,7 @@ def parse_args():
     )
     parser.add_argument(
         '--smpl_family_model_basedir', type=str,
-        default='model_files/smplh/SMPLH_MALE.npz',
+        default='',
         help='Path to the SMPLH model file',
     )
     parser.add_argument(

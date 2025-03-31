@@ -111,7 +111,7 @@ class VelocityDenoiseTraj(BaseDenoiseTraj):
             Total dimension of packed state vector.
         """
         # 16 (betas) + 21*9 (body_rotmats) + 21 (contacts) + 9 (R_world_root_tm1_t) + 3 (t_world_root_tm1_t)
-        num_smplh_jnts = CFG.smplh.num_joints
+        num_smplh_jnts = 22
         packed_dim = 16 + (num_smplh_jnts - 1) * 9 + num_smplh_jnts + 9 + 3
         if include_hands:
             packed_dim += 30 * 9  # hand_rotmats
@@ -253,6 +253,7 @@ class VelocityDenoiseTraj(BaseDenoiseTraj):
         Reconstructs absolute positions from temporal offsets."""
         (*batch, time, d_state) = x.shape
         assert d_state == cls.get_packed_dim(include_hands)
+        num_joints = metadata.num_joints
 
         if include_hands:
             (
@@ -266,8 +267,8 @@ class VelocityDenoiseTraj(BaseDenoiseTraj):
                 x,
                 [
                     16,
-                    (CFG.smplh.num_joints - 1) * 9,
-                    CFG.smplh.num_joints,
+                    (num_joints - 1) * 9,
+                    num_joints,
                     9,
                     3,
                     30 * 9,
@@ -275,7 +276,7 @@ class VelocityDenoiseTraj(BaseDenoiseTraj):
                 dim=-1,
             )
             body_rotmats = body_rotmats_flat.reshape(
-                (*batch, time, (CFG.smplh.num_joints - 1), 3, 3),
+                (*batch, time, (num_joints - 1), 3, 3),
             )
             hand_rotmats = hand_rotmats_flat.reshape((*batch, time, 30, 3, 3))
         else:
@@ -289,15 +290,15 @@ class VelocityDenoiseTraj(BaseDenoiseTraj):
                 x,
                 [
                     16,
-                    (CFG.smplh.num_joints - 1) * 9,
-                    CFG.smplh.num_joints,
+                    (num_joints - 1) * 9,
+                    num_joints,
                     9,
                     3,
                 ],
                 dim=-1,
             )
             body_rotmats = body_rotmats_flat.reshape(
-                (*batch, time, (CFG.smplh.num_joints - 1), 3, 3),
+                (*batch, time, (num_joints - 1), 3, 3),
             )
             hand_rotmats = None
 
@@ -624,7 +625,7 @@ class VelocityDenoiseTraj(BaseDenoiseTraj):
         Returns:
             Dictionary mapping modality names to their dimensions
         """
-        num_smplh_jnts = CFG.smplh.num_joints
+        num_smplh_jnts = VelocityDenoiseTraj.metadata.num_joints
 
         # Base modalities for velocity mode
         modality_dims = {
