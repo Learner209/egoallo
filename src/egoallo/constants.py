@@ -79,10 +79,8 @@ SmplFamilyMetaModelZoo: Dict[SmplFamilyModelTypeLiteral, SmplFamilyModelType] = 
     "SmplhModelAADecomp": SmplhModelAADecomp,
     "SmplModelAADecomp": SmplModelAADecomp,
 }
-SmplFamilyMetaModelName: SmplFamilyModelTypeLiteral = "SmplModelAADecomp"
 
 EgoTrainingDataZoo: Dict[EgoTrainingDataTypeLiteral, str] = {
     "EgoTrainingData": "egoallo.data.dataclass.EgoTrainingData",
     "EgoTrainingDataAADecomp": "egoallo.data.dataclass_aadecomp.EgoTrainingDataAADecomp",
 }
-EgoTrainingDataName: EgoTrainingDataTypeLiteral = "EgoTrainingDataAADecomp"

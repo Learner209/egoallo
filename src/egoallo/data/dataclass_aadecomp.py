@@ -7,7 +7,7 @@ import h5py
 import numpy as np
 import torch.utils.data
 from jaxtyping import Bool, Float
-from egoallo.type_stubs import EgoTrainingDataType
+from egoallo.type_stubs import EgoTrainingDataType, SmplFamilyModelTypeLiteral
 from egoallo.transforms import SO3
 from torch import Tensor
 from typing import Generator
@@ -78,6 +78,9 @@ class EgoTrainingDataAADecomp(TensorDataclass):
         smpl_family_model_basedir: Path = Path("./assets/smpl_base_model")
         """Base directory of the smpl family model."""
 
+        smpl_family_meta_model_name: SmplFamilyModelTypeLiteral = "SmplModelAADecomp"
+        """Name of the smpl family model."""
+
         take_name: tuple[str, ...] | tuple[tuple[str, ...], ...] = ()
         """Name of the take."""
 
@@ -114,6 +117,8 @@ class EgoTrainingDataAADecomp(TensorDataclass):
 
         gender: Literal["male", "female", "neutral"] = "male"
         """Gender of the subject."""
+
+        num_joints: int = 24
 
     metadata: MetaData = dataclasses.field(default_factory=MetaData)
     """Metadata about the trajectory."""
@@ -208,7 +213,7 @@ class EgoTrainingDataAADecomp(TensorDataclass):
 
     @staticmethod
     def load_from_npz(
-        smpl_family_model_dir: Path,
+        smpl_family_model_basedir: Path,
         data_path: Path,
         include_hands: bool,
         device: torch.device,
@@ -281,18 +286,17 @@ class EgoTrainingDataAADecomp(TensorDataclass):
 
             from egoallo.constants import (
                 SmplFamilyMetaModelZoo,
-                SmplFamilyMetaModelName,
             )
 
-            assert SmplFamilyMetaModelName == "SmplModelAADecomp"
+            smpl_family_meta_model_name = "SmplModelAADecomp"
             smpl_aadecomp_model = (
-                SmplFamilyMetaModelZoo[SmplFamilyMetaModelName]
-                .load(smpl_family_model_dir, gender=gender, num_joints=24)
+                SmplFamilyMetaModelZoo[smpl_family_meta_model_name]
+                .load(smpl_family_model_basedir, gender=gender, num_joints=24)
                 .to(device)
             )
 
             # smplx_aadecomp_model = SmplxModelAADecomp.load(
-            #     smpl_family_model_dir, gender=gender,
+            #     smpl_family_model_basedir, gender=gender,
             # ).to(device)
 
             # Convert data to format expected by SMPLXLayer
@@ -439,7 +443,7 @@ class EgoTrainingDataAADecomp(TensorDataclass):
                     frame_keys=tuple(),
                     stage="raw",
                     scope="test",
-                    smpl_family_model_basedir=smpl_family_model_dir,
+                    smpl_family_model_basedir=smpl_family_model_basedir,
                     gender=gender,
                 ),
             }
@@ -462,15 +466,21 @@ class EgoTrainingDataAADecomp(TensorDataclass):
     @staticmethod
     def visualize_ego_training_data(
         data: "DenoiseTrajType",
-        smpl_family_model_basedir: Path | None = None,
+        smpl_family_model_basedir: Path = Path(
+            "assets/smpl_based_model",
+        ),
+        smpl_family_meta_model_name: SmplFamilyModelTypeLiteral = "SmplhModel",
         output_path: str = "output.mp4",
         online_render: bool = False,
         **kwargs,
     ):
-        viewer = SMPLViewer(**kwargs)
+        viewer = SMPLViewer(
+            smpl_family_model_basedir=smpl_family_model_basedir,
+            smpl_family_meta_model_name=smpl_family_meta_model_name,
+            **kwargs,
+        )
         viewer.render_sequence(
             data,
-            smpl_family_model_basedir,
             output_path,
             online_render=online_render,
         )

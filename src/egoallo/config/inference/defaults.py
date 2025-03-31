@@ -8,6 +8,7 @@ import torch
 from egoallo.type_stubs import DatasetType, DatasetSliceStrategy, DatasetSplit
 from egoallo.guidance_optimizer_jax import GuidanceMode
 from typing import Optional
+from egoallo.type_stubs import SmplFamilyModelTypeLiteral
 
 
 @dataclasses.dataclass
@@ -28,6 +29,9 @@ class InferenceConfig:
 
     smpl_family_model_basedir: Path = Path("assets/smpl_based_model")
     """Path to SMPL+H model file"""
+
+    smpl_family_meta_model_name: SmplFamilyModelTypeLiteral = "SmplhModel"
+    """Name of the smpl family model."""
 
     output_dir: Path = Path("./exp/test-amass")
     """Directory to save inference outputs"""

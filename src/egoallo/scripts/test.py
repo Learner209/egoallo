@@ -13,6 +13,8 @@ import multiprocessing
 import random
 from typing import Union, Dict
 
+from egoallo.type_stubs import SmplFamilyModelType
+
 if TYPE_CHECKING:
     from egoallo.type_stubs import DenoiseTrajType
 
@@ -43,7 +45,7 @@ from egoallo.transforms import SE3, SO3
 from egoallo.utils.setup_logger import setup_logger
 from egoallo.training_utils import ipdb_safety_net
 from egoallo.scripts.visualize_inference import main as visualize_inference_cli
-from egoallo.constants import SmplFamilyMetaModelZoo, SmplFamilyMetaModelName
+from egoallo.constants import SmplFamilyMetaModelZoo
 # from egoallo.egoexo import EGOEXO_UTILS_INST
 
 torch.multiprocessing.set_sharing_strategy("file_system")
@@ -62,7 +64,7 @@ def compute_single_metrics(
     *,
     gt_traj: DenoiseTrajType,
     est_traj: DenoiseTrajType,
-    body_model: fncsmpl.SmplhModel,
+    body_model: SmplFamilyModelType,
     device: torch.device,
 ) -> Dict[str, float]:
     return est_traj._compute_metrics(gt_traj, body_model=body_model, device=device)
@@ -168,11 +170,11 @@ class TestRunner:
     def _initialize_components(self) -> None:
         """Initialize all required components."""
         runtime_config: EgoAlloTrainConfig = load_runtime_config(
-            Path(self.inference_config.checkpoint_dir),
+            self.inference_config.checkpoint_dir,
         )
         self.runtime_config = runtime_config
         self.denoiser, self.model_config = load_denoiser(
-            Path(self.inference_config.checkpoint_dir),
+            self.inference_config.checkpoint_dir,
             runtime_config,
         )
         self.denoiser = self.denoiser.to(self.device)
@@ -202,7 +204,7 @@ class TestRunner:
         # runtime_config.dataset_slice_strategy = "random_uniform_len"
 
         self.body_model = (
-            SmplFamilyMetaModelZoo[SmplFamilyMetaModelName]
+            SmplFamilyMetaModelZoo[self.inference_config.smpl_family_meta_model_name]
             .load(
                 runtime_config.smpl_family_model_basedir,
             )
@@ -420,7 +422,9 @@ class TestRunner:
                     {
                         "gt_traj": gt_traj.map(lambda x: x.detach().cpu()),
                         "est_traj": est_traj.map(lambda x: x.detach().cpu()),
-                        "body_model": SmplFamilyMetaModelZoo[SmplFamilyMetaModelName]
+                        "body_model": SmplFamilyMetaModelZoo[
+                            self.inference_config.smpl_family_meta_model_name
+                        ]
                         .load(
                             self.runtime_config.smpl_family_model_basedir,
                             use_pca=False,

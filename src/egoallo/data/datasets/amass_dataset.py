@@ -21,7 +21,7 @@ from egoallo.type_stubs import EgoTrainingDataType
 from egoallo.utils.setup_logger import setup_logger
 import typeguard
 from jaxtyping import jaxtyped
-from egoallo.constants import EgoTrainingDataName, EgoTrainingDataZoo
+from egoallo.constants import EgoTrainingDataZoo
 
 local_config_file = CONFIG_FILE
 CFG = make_cfg(config_name="defaults", config_file=local_config_file, cli_args=[])
@@ -273,7 +273,7 @@ class VanillaEgoAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingDataType]):
             self._subseq_len if self._slice_strategy != "full_sequence" else total_t
         )
         # Generate MAE-style masking
-        num_joints = CFG.smplh.num_joints
+        num_joints = kwargs["joints_wrt_world"].shape[-2]
         device = kwargs["joints_wrt_world"].device
 
         # Generate random mask for sequence
@@ -485,7 +485,7 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingDataType]):
 
         # ensure DataClass type and delegate entity-checking responsibility to the DataClass
         DataClass: EgoTrainingDataType = get_class_from_path(
-            EgoTrainingDataZoo[EgoTrainingDataName],
+            EgoTrainingDataZoo[self.config.ego_training_data_name],
         )
         representative_key = self._data_type_representative_key
         assert representative_key in DataClass.__dataclass_fields__, (

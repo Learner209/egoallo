@@ -13,6 +13,7 @@ from egoallo.type_stubs import EgoTrainingDataType
 from egoallo.transforms import SO3, SE3
 from torch import Tensor
 from typing import Generator
+from egoallo.type_stubs import SmplFamilyModelTypeLiteral
 
 
 if TYPE_CHECKING:
@@ -114,11 +115,16 @@ class EgoTrainingData(TensorDataclass):
         rotate_radian: Optional[Float[Tensor, "1"]] = None
         """Rotation radian for trajectory augmentation."""
 
-        smpl_family_model_dir: Path = Path("./assets/smpl_based_model")
+        smpl_family_model_basedir: Path = Path("./assets/smpl_based_model")
         """Base directory for SMPL family model."""
+
+        smpl_family_meta_model_name: SmplFamilyModelTypeLiteral = "SmplhModel"
+        """Name of the smpl family model."""
 
         gender: Literal["male", "female", "neutral"] = "male"
         """Gender of the subject."""
+
+        num_joints: int = 22
 
     metadata: MetaData = dataclasses.field(default_factory=MetaData)
     """Metadata about the trajectory."""
@@ -144,7 +150,7 @@ class EgoTrainingData(TensorDataclass):
             assert isinstance(v, (h5py.Dataset, np.ndarray))
 
             if k == "betas":
-                assert v.shape == (1, 10)
+                assert v.shape == (1, 16)
                 array = v[:]
             else:
                 assert v.shape[0] == total_t
@@ -170,7 +176,7 @@ class EgoTrainingData(TensorDataclass):
 
     @staticmethod
     def load_from_npz(
-        smpl_family_model_dir: Path,
+        smpl_family_model_basedir: Path,
         data_path: Path,
         include_hands: bool,
         device: torch.device,
@@ -229,7 +235,7 @@ class EgoTrainingData(TensorDataclass):
 
         window_size = 30000
 
-        smpl_model_path = smpl_family_model_dir / "smplh" / gender / "model.npz"
+        smpl_model_path = smpl_family_model_basedir / "smplh" / gender / "model.npz"
         assert smpl_model_path.exists()
 
         for i in range(0, timesteps, window_size):
@@ -237,11 +243,12 @@ class EgoTrainingData(TensorDataclass):
             batch_size = end_idx - i
             from egoallo.constants import (
                 SmplFamilyMetaModelZoo,
-                SmplFamilyMetaModelName,
             )
 
+            smpl_family_meta_model_name = "SmplhModel"
+
             body_model = (
-                SmplFamilyMetaModelZoo[SmplFamilyMetaModelName]
+                SmplFamilyMetaModelZoo[smpl_family_meta_model_name]
                 .load(
                     smpl_model_path,
                 )
@@ -324,16 +331,20 @@ class EgoTrainingData(TensorDataclass):
     def visualize_ego_training_data(
         data: "DenoiseTrajType",
         smpl_family_model_basedir: Path = Path(
-            "assets/smpl_based_model/smplh/SMPLH_MALE.pkl",
+            "assets/smpl_based_model",
         ),
+        smpl_family_meta_model_name: SmplFamilyModelTypeLiteral = "SmplhModel",
         output_path: str = "output.mp4",
         online_render: bool = False,
         **kwargs,
     ):
-        viewer = SMPLViewer(**kwargs)
+        viewer = SMPLViewer(
+            smpl_family_model_basedir=smpl_family_model_basedir,
+            smpl_family_meta_model_name=smpl_family_meta_model_name,
+            **kwargs,
+        )
         viewer.render_sequence(
             data,
-            smpl_family_model_basedir,
             output_path,
             online_render=online_render,
         )
@@ -581,8 +592,8 @@ class EgoTrainingData(TensorDataclass):
         3. Add initial height offset.
         """
         assert self.metadata.stage == "postprocessed"
-        assert traj.metadata.stage == "raw", (
-            "Only raw data is supported for postprocessing."
+        assert traj.metadata.stage == "preprocessed", (
+            "Only preprocessed data is supported for postprocessing."
         )
         # postprocess the DenoiseTrajType
         device = traj.t_world_root.device

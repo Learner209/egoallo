@@ -26,12 +26,14 @@ from projectaria_tools.core.data_provider import create_vrs_data_provider
 from projectaria_tools.core.data_provider import VrsDataProvider
 from projectaria_tools.core.sensor_data import TimeDomain
 from tqdm import tqdm
-from egoallo.constants import SmplFamilyMetaModelZoo, SmplFamilyMetaModelName
+from egoallo.constants import SmplFamilyMetaModelZoo
+from egoallo.type_stubs import SmplFamilyModelTypeLiteral
 
 
 def main(
     search_root_dir: Path,
     smpl_family_model_basedir: Path = Path("assets/smpl_based_model"),
+    smpl_family_meta_model_name: SmplFamilyModelTypeLiteral = "SmplhModel",
 ) -> None:
     """Visualization script for outputs from EgoAllo.
 
@@ -43,7 +45,7 @@ def main(
     device = torch.device("cuda")
 
     body_model = (
-        SmplFamilyMetaModelZoo[SmplFamilyMetaModelName]
+        SmplFamilyMetaModelZoo[smpl_family_meta_model_name]
         .load(smpl_family_model_basedir, use_pca=False)
         .to(device)
     )

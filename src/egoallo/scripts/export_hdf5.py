@@ -14,7 +14,8 @@ import os
 
 
 from egoallo import training_utils
-from egoallo.constants import EgoTrainingDataName, EgoTrainingDataZoo
+from egoallo.constants import EgoTrainingDataZoo
+from egoallo.type_stubs import EgoTrainingDataTypeLiteral
 
 if TYPE_CHECKING:
     from egoallo.type_stubs import EgoTrainingDataType
@@ -29,11 +30,12 @@ os.environ["NUMEXPR_NUM_THREADS"] = "1"
 
 
 def main(
-    smpl_family_model_dir: Path = Path("assets/smpl_based_model"),
+    smpl_family_model_basedir: Path = Path("assets/smpl_based_model"),
     data_npz_dirs: list[Path] = [Path("")],
     output_file: Path = Path(""),
     output_list_file: Path = Path(""),
     include_hands: bool = True,
+    ego_training_data_name: EgoTrainingDataTypeLiteral = "EgoTrainingDataAADecomp",
     visualize: bool = False,
 ) -> None:
     assert torch.cuda.is_available()
@@ -60,11 +62,11 @@ def main(
             print(f"Processing {npz_path} on device {device_idx}...")
             # Get the actual class from the string path
             DataClass: EgoTrainingDataType = get_class_from_path(
-                EgoTrainingDataZoo[EgoTrainingDataName],
+                EgoTrainingDataZoo[ego_training_data_name],
             )
 
             for test_data, (start_idx, end_idx) in DataClass.load_from_npz(
-                smpl_family_model_dir,
+                smpl_family_model_basedir,
                 npz_path,
                 include_hands=include_hands,
                 device=torch.device("cpu"),
@@ -82,7 +84,7 @@ def main(
                 traj = denoising.from_ego_data(
                     test_data,
                     include_hands=include_hands,
-                    smpl_family_model_basedir=smpl_family_model_dir,
+                    smpl_family_model_basedir=smpl_family_model_basedir,
                 )
 
                 test_data = test_data.postprocess()
@@ -93,7 +95,7 @@ def main(
                 if visualize:
                     DataClass.visualize_ego_training_data(
                         traj,
-                        smpl_family_model_dir,
+                        smpl_family_model_basedir,
                         online_render=True,
                         output_path="./test.mp4",
                     )

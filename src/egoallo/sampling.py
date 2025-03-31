@@ -339,7 +339,7 @@ def run_sampling_with_masked_data(
         (
             num_samples,
             masked_data.joints_wrt_world.shape[1],
-            runtime_config.denoising.d_state(),
+            runtime_config.denoising.d_state,
         ),
         device=device,
     )
@@ -375,7 +375,7 @@ def run_sampling_with_masked_data(
     overlap_weights = torch.zeros((1, seq_len, 1), device=x_t_packed.device)
 
     # Save intermediate batch for metadata assignment later.
-    preprocessed_batch = dataclasses.replace(masked_data)
+    preprocessed_batch = copy.deepcopy(masked_data)
     post_processed_batch = masked_data.postprocess()
     del masked_data
 
@@ -388,7 +388,7 @@ def run_sampling_with_masked_data(
         ]
         overlap_weights[:, start_t:end_t, :] += overlap_weights_slice
 
-        win_data = post_processed_batch[:, start_t:end_t]
+        win_data = copy.deepcopy(post_processed_batch[:, start_t:end_t])
         # FIXME: this is a hack to follow the state machine of EgoTrainingData dataclass.
         win_data.metadata.stage = "raw"
         win_data = win_data.preprocess()
@@ -492,13 +492,14 @@ def run_sampling_with_masked_data(
     pred_x_0 = x_t_list[-1]
     # Post-processing each window's denoised traj.
     for start_t, end_t, win_data, overlap_weights_slice in window_data:
-        pred_x_0_window = pred_x_0[start_t:end_t]
+        pred_x_0_window = copy.deepcopy(pred_x_0[:, start_t:end_t])
 
         win_data.postprocess()
-        post_pred_x_0 = win_data._post_process(pred_x_0_window)
+        # breakpoint()
+        post_pred_x_0 = win_data.postprocess_denoise_traj(pred_x_0_window)
         post_pred_x_0 = win_data._set_traj(post_pred_x_0)
 
-        pred_x_0[start_t:end_t] = post_pred_x_0
+        pred_x_0[:, start_t:end_t] = post_pred_x_0
 
     duration = time.time() - start_time
     logger.info(

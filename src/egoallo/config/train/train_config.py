@@ -4,10 +4,11 @@ from typing import Literal
 
 from egoallo import network
 from egoallo import training_loss
-from egoallo.type_stubs import DatasetSliceStrategy
+from egoallo.type_stubs import DatasetSliceStrategy, EgoTrainingDataTypeLiteral
 from egoallo.type_stubs import DatasetSplit
 from egoallo.type_stubs import DatasetType
 from egoallo.type_stubs import JointCondMode
+from egoallo.type_stubs import SmplFamilyModelTypeLiteral
 
 
 @dataclasses.dataclass
@@ -27,32 +28,26 @@ class EgoAlloTrainConfig:
     dataset_hdf5_path: Path = Path("data/egoalgo_no_skating_dataset.hdf5")
     dataset_files_path: Path = Path("data/egoalgo_no_skating_dataset_files.txt")
     smpl_family_model_basedir: Path = Path(
-        "assets/smpl_based_model/smplh/SMPLH_MALE.pkl",
+        "assets/smpl_based_model",
     )
+    smpl_family_meta_model_name: SmplFamilyModelTypeLiteral = "SmplhModel"
 
-    # MAE params.
     spatial_mask_ratio: float = 0.75
-    """Mask ratio for spatial dim, typically joint dimension."""
 
     temporal_mask_ratio: float = 0.3
-    """Mask ratio for temporal dim"""
 
     temporal_patch_size: int = 12
-    """Patch size for temporal masking"""
 
     random_sample_mask_ratio: bool = True
-    """If True, randomly sample mask ratio between mask_ratio / 3 ~ mask_ratio for each batch"""
 
     joint_cond_mode: JointCondMode = "absrel"
 
     # Dataset arguments.
     batch_size: int = 256
-    """Effective batch size."""
     num_workers: int = 0
     subseq_len: int = 128
     dataset_slice_strategy: DatasetSliceStrategy = "random_uniform_len"
     dataset_slice_random_variable_len_proportion: float = 0.3
-    """Only used if dataset_slice_strategy == 'random_variable_len'."""
     splits: tuple[DatasetSplit, ...] = ("train", "val")
     data_collate_fn: Literal[
         "DefaultBatchCollator",
@@ -60,9 +55,10 @@ class EgoAlloTrainConfig:
         "EgoTrainingDataBatchCollator",
         "TensorOnlyDataclassBatchCollator",
     ] = "TensorOnlyDataclassBatchCollator"
+
+    ego_training_data_name: EgoTrainingDataTypeLiteral = "EgoTrainingData"
     dataset_type: DatasetType = "AdaptiveAmassHdf5Dataset"
     bodypose_anno_dir: Path | None = None
-    """Path to body pose annotation directory, only used when dataset_type is EgoExoDataset"""
 
     # Optimizer options.
     learning_rate: float = 1e-4
