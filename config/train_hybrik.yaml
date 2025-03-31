@@ -1,0 +1,14 @@
+defaults:
+  - train: default
+  - inference: amass
+  - network/ego_denoiser: default
+  - network/denoising: absolute_aadecomp_traj
+  - train/loss: default
+  - _self_
+
+hydra:
+  run:
+    dir: outputs/${now:%Y-%m-%d}/${train.experiment_name}
+  sweep:
+    dir: multirun/${now:%Y-%m-%d}/${train.experiment_name}
+    subdir: ${hydra.job.num}
