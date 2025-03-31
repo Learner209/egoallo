@@ -3,7 +3,10 @@ from typing import TYPE_CHECKING
 from typing import Self
 import dataclasses
 from dataclasses import dataclass
+from typing import Any
+import h5py
 import numpy as np
+from typing import Union
 import torch.utils.data
 from jaxtyping import Bool, Float
 from egoallo.type_stubs import EgoTrainingDataType
@@ -111,8 +114,59 @@ class EgoTrainingData(TensorDataclass):
         rotate_radian: Optional[Float[Tensor, "1"]] = None
         """Rotation radian for trajectory augmentation."""
 
+        smpl_family_model_dir: Path = Path("./assets/smpl_based_model")
+        """Base directory for SMPL family model."""
+
+        gender: Literal["male", "female", "neutral"] = "male"
+        """Gender of the subject."""
+
     metadata: MetaData = dataclasses.field(default_factory=MetaData)
     """Metadata about the trajectory."""
+
+    @staticmethod
+    def num_joints() -> int:
+        return 22
+
+    @staticmethod
+    def _load_sequence_data(
+        group: Union[h5py.Group, dict[str, np.ndarray[Any, Any]]],
+        start_t: int,
+        end_t: int,
+        total_t: int,
+        seq_len: int,
+        dtype: torch.dtype = torch.float32,
+    ) -> dict[str, Any]:
+        kwargs: dict[str, Any] = {}
+
+        for k in group.keys():
+            v = group[k]
+            assert isinstance(k, str)
+            assert isinstance(v, (h5py.Dataset, np.ndarray))
+
+            if k == "betas":
+                assert v.shape == (1, 10)
+                array = v[:]
+            else:
+                assert v.shape[0] == total_t
+                array = v[start_t:end_t]
+
+            # Pad if necessary
+            if array.shape[0] != seq_len and k != "betas":
+                array = np.concatenate(
+                    [
+                        array,
+                        np.repeat(
+                            array[-1:,],
+                            seq_len - array.shape[0],
+                            axis=0,
+                        ),
+                    ],
+                    axis=0,
+                )
+
+            kwargs[k] = torch.from_numpy(array).to(dtype=dtype)
+
+        return kwargs
 
     @staticmethod
     def load_from_npz(
@@ -249,6 +303,7 @@ class EgoTrainingData(TensorDataclass):
                         frame_keys=tuple(),  # Convert to tuple of ints
                         stage="raw",
                         scope="test",
+                        gender=gender,
                     ),
                 ),
                 (i, end_idx),
@@ -353,12 +408,6 @@ class EgoTrainingData(TensorDataclass):
             2,
         )  # Add dims for broadcasting
 
-        # FIXME: the in-place operations just won't work, indictaed by the increasing loss and finally nan values.
-        # FIXME: and the problem only occurs at the in-place operations with self.T_world_root, not others?
-        # self.T_world_root[..., 4:6].sub_(initial_xy) # [*batch, timesteps, 2]
-        # self.joints_wrt_world[..., :2].sub_(expanded_xy) # [*batch, timesteps, 22, 2]
-        # self.T_world_cpf[..., 4:6].sub_(initial_xy) # [*batch, timesteps, 2]
-
         self.T_world_root = torch.cat(
             [
                 self.T_world_root[..., :4],
@@ -382,11 +431,6 @@ class EgoTrainingData(TensorDataclass):
             ],
             dim=-1,
         )
-
-        # Subtract floor height using existing height_from_floor attribute
-        # self.joints_wrt_world[..., :, :, 2:3].sub_(self.height_from_floor.unsqueeze(-2)) # [*batch, timesteps, 22, 1]
-        # self.T_world_root[..., :, 6:7].sub_(self.height_from_floor) # [*batch, timesteps, 1]
-        # self.T_world_cpf[..., :, 6:7].sub_(self.height_from_floor) # [*batch, timesteps, 1]
 
         self.joints_wrt_world = torch.cat(
             [
@@ -463,10 +507,6 @@ class EgoTrainingData(TensorDataclass):
                 self.metadata.rotate_radian.to(dtype=dtype, device=device) * -1,
             )
 
-        # self.joints_wrt_world[..., :, :, 2:3].add_(self.height_from_floor.unsqueeze(-2)) # [*batch, timesteps, 22, 1]
-        # self.T_world_root[..., :, 6:7].add_(self.height_from_floor) # [*batch, timesteps, 1]
-        # self.T_world_cpf[..., :, 6:7].add_(self.height_from_floor) # [*batch, timesteps, 1]
-
         self.joints_wrt_world = torch.cat(
             [
                 self.joints_wrt_world[..., :2],
@@ -502,10 +542,6 @@ class EgoTrainingData(TensorDataclass):
             2,
         )  # Add dims for broadcasting
 
-        # self.T_world_root[..., 4:6].add_(self.metadata.initial_xy.unsqueeze(-2).to(device)) # [*batch, timesteps, 2]
-        # self.joints_wrt_world[..., :2].add_(expanded_xy.to(device)) # [*batch, timesteps, 22, 2]
-        # self.T_world_cpf[..., 4:6].add_(self.metadata.initial_xy.unsqueeze(-2).to(device)) # [*batch, timesteps, 2]
-
         self.T_world_root = torch.cat(
             [
                 self.T_world_root[..., :4],
@@ -537,7 +573,7 @@ class EgoTrainingData(TensorDataclass):
 
         return self
 
-    def _post_process(self, traj: "DenoiseTrajType") -> "DenoiseTrajType":
+    def postprocess_denoise_traj(self, traj: "DenoiseTrajType") -> "DenoiseTrajType":
         """
         Postprocess the DenoiseTrajType.
         1. If the traj has been already rotated, rotate back.
@@ -606,7 +642,9 @@ class EgoTrainingData(TensorDataclass):
         return traj
 
     def _rotate(self, radian: Tensor) -> Self:
-        # assert self.metadata.stage == "preprocessed", "Only preprocessed data is supported for rotation. since preprocessing aligns data's xy to zeros. and rotation is applied only on yaw(rpy zyx convention.)"
+        assert self.metadata.stage == "preprocessed", (
+            "Only preprocessed data is supported for rotation. since preprocessing aligns data's xy to zeros. and rotation is applied only on yaw(rpy zyx convention.)"
+        )
 
         so3_rot = SO3.from_z_radians(radian)
         # 1. rotate T_world_cpf
@@ -692,12 +730,7 @@ class EgoTrainingData(TensorDataclass):
                 t_world_root=t_world_root,
                 joints_wrt_world=None,
                 visible_joints_mask=None,
-                metadata=EgoTrainingData.MetaData(
-                    take_name=self.metadata.take_name,
-                    frame_keys=self.metadata.frame_keys,
-                    scope=self.metadata.scope,
-                    stage="raw",
-                ),
+                metadata=dataclasses.replace(self.metadata),
             )
 
     def __getitem__(self, index) -> Self:
@@ -767,3 +800,6 @@ class EgoTrainingData(TensorDataclass):
 
         # ! Only slicing the highest level of attributes in the dataclass.
         return _getitem_impl(self, index, 2)
+
+    def preprocess_denoise_traj(self, traj: "DenoiseTrajType") -> "DenoiseTrajType":
+        pass

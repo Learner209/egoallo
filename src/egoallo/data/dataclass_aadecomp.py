@@ -1,15 +1,17 @@
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from typing import Self
 import dataclasses
 from dataclasses import dataclass
+import h5py
 import numpy as np
 import torch.utils.data
 from jaxtyping import Bool, Float
 from egoallo.type_stubs import EgoTrainingDataType
-from egoallo.transforms import SO3, SE3
+from egoallo.transforms import SO3
 from torch import Tensor
 from typing import Generator
+from typing import Union
 
 from egoallo.type_stubs import DenoiseTrajTypeLiteral
 
@@ -42,9 +44,6 @@ class EgoTrainingDataAADecomp(TensorDataclass):
     # NOTE: if the attr is tensor/np.ndarray type, then it must has a leading batch dimension, whether it can be broadcasted or not.
     # NOTE: since the `tensor_dataclass` will convert the tensor to a single element tensor, we need to make sure the leading dimension is always there.
 
-    T_world_root: Float[Tensor, "*batch timesteps 7"]
-    """Transformation from the world frame to the root frame at each timestep."""
-
     contacts: Float[Tensor, "*batch timesteps 52"]
     """Contact boolean for each joint."""
 
@@ -76,7 +75,7 @@ class EgoTrainingDataAADecomp(TensorDataclass):
     class MetaData:
         """Metadata about the trajectory."""
 
-        smpl_family_model_basedir: Path
+        smpl_family_model_basedir: Path = Path("./assets/smpl_base_model")
         """Base directory of the smpl family model."""
 
         take_name: tuple[str, ...] | tuple[tuple[str, ...], ...] = ()
@@ -113,8 +112,15 @@ class EgoTrainingDataAADecomp(TensorDataclass):
         rotate_radian: Optional[Float[Tensor, "1"]] = None
         """Rotation radian for trajectory augmentation."""
 
+        gender: Literal["male", "female", "neutral"] = "male"
+        """Gender of the subject."""
+
     metadata: MetaData = dataclasses.field(default_factory=MetaData)
     """Metadata about the trajectory."""
+
+    @staticmethod
+    def num_joints() -> int:
+        return 24
 
     def to_denoise_traj(
         self,
@@ -137,10 +143,7 @@ class EgoTrainingDataAADecomp(TensorDataclass):
         assert denoising_mode == "AbsoluteDenoiseTrajAADecomp"
         from egoallo.denoising import AbsoluteDenoiseTrajAADecomp
 
-        # Extract rotation and translation from T_world_root
-        *batch, time, _ = self.T_world_root.shape
-        _R_world_root = SO3(self.T_world_root[..., :4]).as_matrix()
-        _t_world_root = self.T_world_root[..., 4:7]
+        *batch, time, _, _ = self.body_twists.shape
 
         # Handle hand data if present and requested
         hand_rotmats = None
@@ -159,14 +162,49 @@ class EgoTrainingDataAADecomp(TensorDataclass):
             hand_rotmats=hand_rotmats,
             joints_wrt_world=self.joints_wrt_world,
             visible_joints_mask=self.visible_joints_mask,
-            metadata=EgoTrainingDataAADecomp.MetaData(
-                take_name=self.metadata.take_name,
-                frame_keys=self.metadata.frame_keys,
-                scope=self.metadata.scope,
-                stage="raw",
-                smpl_family_model_basedir=self.metadata.smpl_family_model_basedir,
-            ),
+            metadata=dataclasses.replace(self.metadata),
         )
+
+    @staticmethod
+    def _load_sequence_data(
+        group: Union[h5py.Group, dict[str, np.ndarray[Any, Any]]],
+        start_t: int,
+        end_t: int,
+        total_t: int,
+        seq_len: int,
+        dtype: torch.dtype = torch.float32,
+    ) -> dict[str, Any]:
+        kwargs: dict[str, Any] = {}
+
+        for k in group.keys():
+            v = group[k]
+            assert isinstance(k, str)
+            assert isinstance(v, (h5py.Dataset, np.ndarray))
+
+            if k == "betas":
+                assert v.shape == (1, 10)
+                array = v[:]
+            else:
+                assert v.shape[0] == total_t
+                array = v[start_t:end_t]
+
+            # Pad if necessary
+            if array.shape[0] != seq_len and k != "betas":
+                array = np.concatenate(
+                    [
+                        array,
+                        np.repeat(
+                            array[-1:,],
+                            seq_len - array.shape[0],
+                            axis=0,
+                        ),
+                    ],
+                    axis=0,
+                )
+
+            kwargs[k] = torch.from_numpy(array).to(dtype=dtype)
+
+        return kwargs
 
     @staticmethod
     def load_from_npz(
@@ -223,14 +261,6 @@ class EgoTrainingDataAADecomp(TensorDataclass):
         assert raw_fields["pose_hand"].shape == (timesteps, 90)
         assert raw_fields["contacts"].shape == (timesteps, 52)
         assert raw_fields["joints"].shape == (timesteps, 52, 3)
-
-        T_world_root = torch.cat(
-            [
-                tf.SO3.exp(raw_fields["root_orient"]).wxyz,
-                raw_fields["trans"],
-            ],
-            dim=-1,
-        ).to(device)
 
         body_quats = tf.SO3.exp(
             raw_fields["pose_body"].reshape(timesteps, 21, 3),
@@ -389,22 +419,14 @@ class EgoTrainingDataAADecomp(TensorDataclass):
                 Path(data_path).stem + f"_window_{i}_{end_idx}" + Path(data_path).suffix
             )
 
-            # Temporary fix: Update T_world_root to align with pose_skeleton.
-            T_world_root[i:end_idx, ..., 4:7] = smpl_model_output.joints[
-                i:end_idx,
-                ...,
-                0,
-                :,
-            ]
-
             # Create the EgoTrainingDataAADecomp instance
+            height_from_floor = torch.zeros_like(body_twists[..., 0, 0:1])
             data_dict = {
-                "T_world_root": T_world_root[i:end_idx],
                 "contacts": raw_fields["contacts"][i:end_idx],
                 "betas": raw_fields["betas"][..., :10].unsqueeze(0),
                 "joints_wrt_world": smpl_model_output.joints[i:end_idx],
                 "body_quats": body_quats[i:end_idx],
-                "height_from_floor": T_world_root[i:end_idx, 6:7],
+                "height_from_floor": height_from_floor,
                 "mask": torch.ones((end_idx - i,), dtype=torch.bool),
                 "hand_quats": hand_quats[i:end_idx] if include_hands else None,
                 "visible_joints_mask": torch.ones_like(
@@ -418,6 +440,7 @@ class EgoTrainingDataAADecomp(TensorDataclass):
                     stage="raw",
                     scope="test",
                     smpl_family_model_basedir=smpl_family_model_dir,
+                    gender=gender,
                 ),
             }
 
@@ -522,14 +545,6 @@ class EgoTrainingDataAADecomp(TensorDataclass):
             2,
         )  # Add dims for broadcasting
 
-        self.T_world_root = torch.cat(
-            [
-                self.T_world_root[..., :4],
-                self.T_world_root[..., 4:6] - initial_xy,
-                self.T_world_root[..., 6:],
-            ],
-            dim=-1,
-        )
         self.joints_wrt_world = torch.cat(
             [
                 self.joints_wrt_world[..., :2] - expanded_xy,
@@ -544,14 +559,6 @@ class EgoTrainingDataAADecomp(TensorDataclass):
                 self.joints_wrt_world[..., 2:3]
                 - self.height_from_floor.unsqueeze(-2),  # [*batch, timesteps, 22, 1]
                 self.joints_wrt_world[..., 3:],
-            ],
-            dim=-1,
-        )
-        self.T_world_root = torch.cat(
-            [
-                self.T_world_root[..., :6],
-                self.T_world_root[..., 6:7] - self.height_from_floor,
-                self.T_world_root[..., 7:],
             ],
             dim=-1,
         )
@@ -584,8 +591,8 @@ class EgoTrainingDataAADecomp(TensorDataclass):
         Modifies the current EgoTrainingData instance by:
         """
         assert self.metadata.stage == "preprocessed"
-        device = self.T_world_root.device
-        dtype = self.T_world_root.dtype
+        device = self.body_twists.device
+        dtype = self.body_twists.dtype
 
         # Restore original values of invalid joints if they exist.
         if (
@@ -597,7 +604,6 @@ class EgoTrainingDataAADecomp(TensorDataclass):
                 self.joints_wrt_world,
                 self.metadata.original_invalid_joints.to(device),
             )
-            self.metadata.original_invalid_joints = None  # Clear stored values
 
         if self.metadata.rotate_radian is not None:
             # rad = SO3(self.metadata.rotate_radian.to(dtype=dtype, device=device)).inverse().
@@ -614,14 +620,7 @@ class EgoTrainingDataAADecomp(TensorDataclass):
             ],
             dim=-1,
         )
-        self.T_world_root = torch.cat(
-            [
-                self.T_world_root[..., :6],
-                self.T_world_root[..., 6:7] + self.height_from_floor,
-                self.T_world_root[..., 7:],
-            ],
-            dim=-1,
-        )
+
         # Add initial x,y position offset
         # Expand initial_xy to match broadcast dimensions like in preprocess()
         expanded_xy = self.metadata.initial_xy.view(
@@ -630,16 +629,6 @@ class EgoTrainingDataAADecomp(TensorDataclass):
             1,
             2,
         )  # Add dims for broadcasting
-
-        self.T_world_root = torch.cat(
-            [
-                self.T_world_root[..., :4],
-                self.T_world_root[..., 4:6]
-                + self.metadata.initial_xy.unsqueeze(-2).to(device),
-                self.T_world_root[..., 6:],
-            ],
-            dim=-1,
-        )
 
         self.joints_wrt_world = torch.cat(
             [
@@ -653,53 +642,80 @@ class EgoTrainingDataAADecomp(TensorDataclass):
 
         return self
 
-    def _post_process(self, traj: "DenoiseTrajType") -> "DenoiseTrajType":
-        """
-        No-op.
-        """
+    def preprocess_denoise_traj(self, traj: "DenoiseTrajType") -> "DenoiseTrajType":
+        # the current implementation would derive traj from preprocessed dataclass, since only `from_ego_data` can be called to convert dataclass instance to traj instance.
+        # and `from_ego_data` would ensure dataclass instance has already been preprocessed.
+        # so this func is not necessary now.
+        return traj
+
+        # this func should only be called after self.preprocess() has been called.
+
+        assert self.metadata.stage == "preprocessed"
+
+        # Restore original values of invalid joints if they exist.
+        device = traj.joints_wrt_world.device
+        if (
+            self.metadata.original_invalid_joints is not None
+            and self.visible_joints_mask is not None
+        ):
+            traj.joints_wrt_world = torch.where(
+                self.visible_joints_mask.unsqueeze(-1),
+                traj.joints_wrt_world,
+                self.metadata.original_invalid_joints.to(device),
+            )
+
+        assert self.visible_joints_mask is not None
+
+        traj.preprocess(
+            visible_joints_mask=self.visible_joints_mask,
+            height_from_floor=self.height_from_floor,
+            initial_xy=self.metadata.initial_xy,
+            rotate_radian=self.metadata.rotate_radian,
+        )
+
+        traj.metadata = self.metadata
+
+        return traj
+
+    def postprocess_denoise_traj(self, traj: "DenoiseTrajType") -> "DenoiseTrajType":
+        # this func should only be called after self.postprocess() has been called.
+
+        assert self.metadata.stage == "postprocessed"
+
+        # Restore original values of invalid joints if they exist.
+        device = traj.joints_wrt_world.device
+        if (
+            self.metadata.original_invalid_joints is not None
+            and self.visible_joints_mask is not None
+        ):
+            traj.joints_wrt_world = torch.where(
+                self.visible_joints_mask.unsqueeze(-1),
+                traj.joints_wrt_world,
+                self.metadata.original_invalid_joints.to(device),
+            )
+
+        traj.postprocess(
+            height_from_floor=self.height_from_floor,
+            initial_xy=self.metadata.initial_xy,
+            rotate_radian=self.metadata.rotate_radian,
+        )
+
+        traj.metadata = self.metadata
+
         return traj
 
     def _set_traj(self, traj: "DenoiseTrajType") -> "DenoiseTrajType":
         """
-        Set the trajectory for postprocessing.
-        Set the joints_wrt_world and visible_joints_mask.
-        Set the metadata.
+        No-op
         """
-        # assert traj.joints_wrt_world is None and traj.visible_joints_mask is None, (
-        #     "joints_wrt_world and visible_joints_mask should be None for postprocessing."
-        # )
-        traj.joints_wrt_world = self.joints_wrt_world.clone()
-        if self.visible_joints_mask is not None:
-            # assert self.metadata.scope == "train", "visible_joints_mask should only be set for train data."
-            traj.visible_joints_mask = self.visible_joints_mask.clone()
-        else:
-            assert self.metadata.scope == "test", (
-                "visible_joints_mask shouldn't be set for test data."
-            )
-            traj.visible_joints_mask = torch.ones_like(
-                traj.joints_wrt_world[..., 0],
-                dtype=torch.float,
-            )
-
-        # 3. assign metadata
-        traj.metadata = self.metadata
         return traj
 
     def _rotate(self, radian: Tensor) -> Self:
-        # assert self.metadata.stage == "preprocessed", "Only preprocessed data is supported for rotation. since preprocessing aligns data's xy to zeros. and rotation is applied only on yaw(rpy zyx convention.)"
+        assert self.metadata.stage == "preprocessed", (
+            "Only preprocessed data is supported for rotation. since preprocessing aligns data's xy to zeros. and rotation is applied only on yaw(rpy zyx convention.)"
+        )
 
         so3_rot = SO3.from_z_radians(radian)
-        # 1. rotate T_world_cpf
-        self.T_world_cpf = SE3.from_rotation_and_translation(  # [*batch, timesteps, 7]
-            rotation=so3_rot.multiply(SO3(self.T_world_cpf[..., :4])),
-            translation=so3_rot.apply(self.T_world_cpf[..., 4:]),
-        ).parameters()
-        # 2. rotate T_world_root
-        self.T_world_root = SE3.from_rotation_and_translation(  # [*batch, timesteps, 7]
-            rotation=so3_rot.multiply(SO3(self.T_world_root[..., :4])),
-            translation=so3_rot.apply(self.T_world_root[..., 4:]),
-        ).parameters()
-        # 3. rotate joints_wrt_world
         expanded_rot = SO3(wxyz=so3_rot.wxyz.unsqueeze(-2))
         self.joints_wrt_world = expanded_rot.apply(
             self.joints_wrt_world,

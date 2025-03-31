@@ -84,8 +84,9 @@ def main(
                     include_hands=include_hands,
                     smpl_family_model_basedir=smpl_family_model_dir,
                 )
+
                 test_data = test_data.postprocess()
-                traj = test_data._post_process(traj)
+                traj = test_data.postprocess_denoise_traj(traj)
                 traj = test_data._set_traj(traj)
 
                 # breakpoint()
@@ -127,7 +128,7 @@ def main(
                     if k not in ("contacts") and "mask" not in k:
                         assert v.dtype == torch.float32, f"{k} {v.dtype}"
 
-                    if v.shape[0] == test_data.T_world_root.shape[0]:
+                    if v.shape[0] == test_data.joints_wrt_world.shape[0]:
                         chunks = (min(32, v.shape[0]),) + v.shape[1:]
                     else:
                         assert v.shape[0] == 1
