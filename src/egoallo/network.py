@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from functools import cache
 from functools import cached_property
 from pathlib import Path
-from typing import Any, Type
+from typing import Type
 from typing import assert_never
 from typing import Dict
 from typing import Literal
@@ -132,7 +132,8 @@ class DenoisingConfig:
         """Check if we're using velocity-based denoising."""
         return self.denoising_mode in ("VelocityDenoiseTraj")
 
-    def get_d_state(self) -> int:
+    @property
+    def d_state(self) -> int:
         """Get the dimension of the state vector."""
         return self.DenoiseTrajTypeMetaDict[self.denoising_mode].get_packed_dim(
             include_hands=self.include_hands,
@@ -175,12 +176,14 @@ class DenoisingConfig:
     def unpack_traj(
         self,
         x: Float[Tensor, "*batch timesteps d_state"],
+        metadata: EgoTrainingDataType.MetaData,
         include_hands: bool = False,
         project_rotmats: bool = False,
-    ) -> "BaseDenoiseTraj[Any]":
+    ) -> "DenoiseTrajType":
         """Unpack trajectory data using appropriate trajectory class based on configuration."""
         return self.DenoiseTrajTypeMetaDict[self.denoising_mode].unpack(
             x,
+            metadata=metadata,
             include_hands=include_hands,
             project_rotmats=project_rotmats,
         )
@@ -692,7 +695,7 @@ class EgoDenoiser(nn.Module):
     @jaxtyped(typechecker=typeguard.typechecked)
     def forward(
         self,
-        x_t_unpacked: Union[VelocityDenoiseTraj, AbsoluteDenoiseTraj, JointsOnlyTraj],
+        x_t_unpacked: "DenoiseTrajType",
         t: Int[Tensor, "batch"],
         project_output_rotmats: bool,
         joints: Float[Tensor, "batch time num_joints 3"],
@@ -704,7 +707,6 @@ class EgoDenoiser(nn.Module):
         config = self.config
 
         (batch, time, num_body_joints, _) = joints.shape
-        assert num_body_joints == 22
 
         # Encode the trajectory into a single vector per timestep.
         x_t_encoded = x_t_unpacked.encode(self.encoders, batch, time)

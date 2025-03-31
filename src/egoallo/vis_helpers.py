@@ -17,13 +17,13 @@ from .middleware.third_party.HybrIK.hybrik.models.layers.smplh.fncsmplh import (
     fncsmplh as fncsmpl,
 )
 
-from . import network
 from .hand_detection_structs import CorrespondedAriaHandWristPoseDetections
 from .hand_detection_structs import CorrespondedHamerDetections
 from egoallo.transforms import SE3
 from egoallo.transforms import SO3
 import typeguard
 from jaxtyping import jaxtyped
+from egoallo import denoising
 
 
 class SplatArgs(TypedDict):
@@ -146,7 +146,7 @@ def add_splat_to_viser(
 def visualize_traj_and_hand_detections(
     server: viser.ViserServer,
     T_world_root: Float[Tensor, "timesteps 7"],
-    traj: network.AbsoluteDenoiseTraj | None,
+    traj: denoising.AbsoluteDenoiseTraj | None,
     body_model: fncsmpl.SmplhModel,
     hamer_detections: CorrespondedHamerDetections | None = None,
     aria_detections: CorrespondedAriaHandWristPoseDetections | None = None,

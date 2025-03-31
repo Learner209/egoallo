@@ -29,21 +29,23 @@ from jaxtyping import jaxtyped
 from .middleware.third_party.HybrIK.hybrik.models.layers.smplh import (
     fncsmplh as fncsmpl,
 )
-from . import fncsmpl_jax, network
+from . import fncsmpl_jax
 from .transforms._so3 import SO3
 import typeguard
+
+from egoallo import denoising
 
 
 @jaxtyped(typechecker=typeguard.typechecked)
 def do_guidance_optimization(
     T_world_root: Float[Tensor, "*batch time 7"],
-    traj: network.AbsoluteDenoiseTraj,
+    traj: denoising.AbsoluteDenoiseTraj,
     body_model: fncsmpl.SmplhModel,
     guidance_mode: GuidanceMode,
     phase: Literal["inner", "post"],
     hamer_detections: None | CorrespondedHamerDetections,
     aria_detections: None | CorrespondedAriaHandWristPoseDetections,
-) -> tuple[network.AbsoluteDenoiseTraj, dict]:
+) -> tuple[denoising.AbsoluteDenoiseTraj, dict]:
     """Run an optimizer to apply foot contact constraints."""
 
     (*B, T, _) = T_world_root.shape

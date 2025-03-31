@@ -151,7 +151,7 @@ class SequenceProcessor:
         post_batch = batch.postprocess()
         # no need to postprocess denoised_traj since its' already been postprocessed.
         denoised_traj = post_batch._set_traj(denoised_traj)
-        gt_traj = post_batch._post_process(gt_traj)
+        gt_traj = post_batch.postprocess_denoise_traj(gt_traj)
         gt_traj = post_batch._set_traj(gt_traj)
 
         return gt_traj, denoised_traj

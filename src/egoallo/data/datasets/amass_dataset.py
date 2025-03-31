@@ -180,7 +180,12 @@ class VanillaEgoAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingDataType]):
             npz_group = hdf5_file[group]
             assert isinstance(npz_group, h5py.Group)
 
-        total_t = cast(h5py.Dataset, npz_group["T_world_root"]).shape[0]
+        representative_key = "T_world_root"
+        assert representative_key in npz_group, (
+            f"{representative_key} not in {npz_group.keys()}"
+        )
+
+        total_t = cast(h5py.Dataset, npz_group[representative_key]).shape[0]
         assert total_t >= self._subseq_len
 
         # Determine slice indexing.
@@ -376,6 +381,8 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingDataType]):
         )
         self._random_variable_len_min = 16
         self._spatial_mask_ratio = config.spatial_mask_ratio
+        # The key of the datatype this dataset contains. Through this key, we can obtain relevant information about underlying wrapped data.
+        self._data_type_representative_key = "joints_wrt_world"
 
         self._fps_aug = config.fps_aug
         if self._fps_aug:
@@ -431,7 +438,7 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingDataType]):
             if any(p.startswith(prefix) for prefix in split_prefixes)
             and cast(
                 h5py.Dataset,
-                cast(h5py.Group, hdf5_file[p])["T_world_root"],
+                cast(h5py.Group, hdf5_file[p])[self._data_type_representative_key],
             ).shape[0]
             >= self._max_seq_len
         ]
@@ -458,7 +465,10 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingDataType]):
         #     self._max_seq_len >= self._subseq_len
         # ), f"max_seq_len {self._max_seq_len} should be greater than subseq_len {self._subseq_len}"
         return [
-            cast(h5py.Dataset, cast(h5py.Group, hdf5_file[g])["T_world_root"]).shape[0]
+            cast(
+                h5py.Dataset,
+                cast(h5py.Group, hdf5_file[g])[self._data_type_representative_key],
+            ).shape[0]
             - self._max_seq_len
             for g in self._groups
         ]
@@ -472,10 +482,20 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingDataType]):
         Returns:
             EgoTrainingDataType: Data object containing the requested item.
         """
+
+        # ensure DataClass type and delegate entity-checking responsibility to the DataClass
+        DataClass: EgoTrainingDataType = get_class_from_path(
+            EgoTrainingDataZoo[EgoTrainingDataName],
+        )
+        representative_key = self._data_type_representative_key
+        assert representative_key in DataClass.__dataclass_fields__, (
+            f"{representative_key} is not a field of {DataClass.__name__}"
+        )
+
         if self._slice_strategy == "full_sequence":
             group = self._groups[index]
             npz_group = self._get_npz_group(group)
-            total_t = cast(h5py.Dataset, npz_group["T_world_root"]).shape[0]
+            total_t = cast(h5py.Dataset, npz_group[representative_key]).shape[0]
             start_t, end_t = 0, total_t
             multiplier = None
         else:
@@ -486,7 +506,7 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingDataType]):
 
             group = self._groups[group_index]
             npz_group = self._get_npz_group(group)
-            total_t = cast(h5py.Dataset, npz_group["T_world_root"]).shape[0]
+            total_t = cast(h5py.Dataset, npz_group[representative_key]).shape[0]
             assert total_t >= self.min_seq_len
 
             # Calculate slice indices for the current window
@@ -503,12 +523,12 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingDataType]):
 
                 end_t = start_t + req_seq_len
 
-        # Load current window data
-        seq_len = (
-            total_t if self._slice_strategy == "full_sequence" else end_t - start_t
-        )
+        # The seq_len could be different from self._subseq_len due to upcoming FPS augmentation
+        seq_len = end_t - start_t
         dtype = torch.float32
+
         kwargs = self._load_sequence_data(
+            DataClass,
             group,
             start_t,
             end_t,
@@ -517,9 +537,7 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingDataType]):
             dtype=dtype,
         )
 
-        # Add MAE-style masking
-        num_joints = CFG.smplh.num_joints
-        # assert num_joints == 22, f"Expected 22 joints, got {num_joints}"
+        num_joints = DataClass.num_joints()
         device = kwargs["joints_wrt_world"].device
 
         if (
@@ -614,26 +632,17 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingDataType]):
         # Then apply temporal patch mask
         visible_joints_mask = visible_joints_mask & temporal_mask.unsqueeze(-1)
 
-        # Get original joints_wrt_world
-        # Combine root position from T_world_root with other joints to get full 22 joints
-        joints_wrt_world = kwargs["joints_wrt_world"]  # shape: [time, 22, 3]
-        assert joints_wrt_world.shape == (
+        assert kwargs["joints_wrt_world"].shape == (
             seq_len,
             num_joints,
             3,
-        ), f"Expected shape: {(seq_len, num_joints, 3)}, got: {joints_wrt_world.shape}"
+        ), (
+            f"Expected shape: {(seq_len, num_joints, 3)}, got: {kwargs['joints_wrt_world'].shape}"
+        )
 
         # Update kwargs with new MAE-style masking tensors
         kwargs["visible_joints_mask"] = visible_joints_mask
 
-        # Zero out invisible joints while keeping original joints for loss computation
-        masked_joints = joints_wrt_world
-        kwargs["joints_wrt_world"] = masked_joints
-
-        # Create metadata object first
-        DataClass: EgoTrainingDataType = get_class_from_path(
-            EgoTrainingDataZoo[EgoTrainingDataName],
-        )
         metadata = DataClass.MetaData(
             smpl_family_model_basedir=self.config.smpl_family_model_basedir,
         )
@@ -693,56 +702,25 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingDataType]):
 
     def _load_sequence_data(
         self,
+        data_class: EgoTrainingDataType,
         group: str,
         start_t: int,
         end_t: int,
         total_t: int,
         seq_len: int,
         dtype: torch.dtype = torch.float32,
+        **kwargs: Any,
     ) -> dict[str, Any]:
-        """Load sequence data from HDF5 file or cache.
-
-        Args:
-            group (str): Group name to load data from.
-            start_t (int): Start time index for loading data.
-            end_t (int): End time index for loading data.
-            total_t (int): Total time steps available.
-
-        Returns:
-            dict[str, Any]: Dictionary containing loaded data.
-        """
         npz_group = self._get_npz_group(group)
-        kwargs: dict[str, Any] = {}
-
-        for k in npz_group.keys():
-            v = npz_group[k]
-            assert isinstance(k, str)
-            assert isinstance(v, (h5py.Dataset, np.ndarray))
-
-            if k == "betas":
-                assert v.shape == (1, 16)
-                array = v[:]
-            else:
-                assert v.shape[0] == total_t
-                array = v[start_t:end_t]
-
-            # Pad if necessary
-            if array.shape[0] != seq_len and k != "betas":
-                array = np.concatenate(
-                    [
-                        array,
-                        np.repeat(
-                            array[-1:,],
-                            seq_len - array.shape[0],
-                            axis=0,
-                        ),
-                    ],
-                    axis=0,
-                )
-
-            kwargs[k] = torch.from_numpy(array).to(dtype=dtype)
-
-        return kwargs
+        return data_class._load_sequence_data(
+            group=npz_group,
+            start_t=start_t,
+            end_t=end_t,
+            total_t=total_t,
+            seq_len=seq_len,
+            dtype=dtype,
+            **kwargs,
+        )
 
     def _get_npz_group(
         self,
