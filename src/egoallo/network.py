@@ -30,7 +30,7 @@ from torch import nn
 from torch import Tensor
 import typeguard
 
-from egoallo.type_stubs import DenoiseTrajTypeLiteral
+from egoallo.type_stubs import DenoiseTrajTypeLiteral, SmplFamilyModelTypeLiteral
 from egoallo.denoising.base_traj import BaseDenoiseTraj
 
 # Move type imports inside TYPE_CHECKING block to avoid circular imports
@@ -38,7 +38,7 @@ if TYPE_CHECKING:
     from egoallo.type_stubs import DenoiseTrajType, EgoTrainingDataType, JointCondMode
 
 from egoallo.utils.setup_logger import setup_logger
-from egoallo.constants import SmplFamilyMetaModelZoo, SmplFamilyMetaModelName
+from egoallo.constants import SmplFamilyMetaModelZoo
 
 from egoallo.denoising import (
     AbsoluteDenoiseTraj,
@@ -237,53 +237,50 @@ class EgoDenoiserConfig:
     seq_length: int = 128
 
     smpl_family_model_basedir: Union[str, Path] = "assets/smpl_based_model/"
+    smpl_family_meta_model_name: SmplFamilyModelTypeLiteral = "SmplModelAADecomp"
+
+    num_joints: int = 22
 
     def __post_init__(self):
         if isinstance(self.smpl_family_model_basedir, str):
             self.smpl_family_model_basedir = Path(self.smpl_family_model_basedir)
 
-        # Create joint embeddings if enabled
-        if self.use_joint_embeddings:
-            self.joint_embeddings = nn.Embedding(
-                CFG.smplh.num_joints,
-                self.joint_emb_dim,
-            )
-
     @cached_property
     def d_cond(self) -> int:
         """Dimensionality of conditioning vector."""
-        num_joints = CFG.smplh.num_joints  # Assuming num_joints is 22
         spatial_dim = 4  # x, y, z, visibility
 
         # Only include joint embedding dimensions if enabled
         joint_emb_contribution = (
-            (self.joint_emb_dim * num_joints) if self.use_joint_embeddings else 0
+            (self.joint_emb_dim * self.num_joints) if self.use_joint_embeddings else 0
         )
 
         if self.joint_cond_mode == "vel_acc":
             # velocities (22*4) + accelerations (22*4) + index_embeddings (22*16 if enabled)
-            d_cond = (spatial_dim * num_joints * 2) + joint_emb_contribution
+            d_cond = (spatial_dim * self.num_joints * 2) + joint_emb_contribution
         elif self.joint_cond_mode == "vel_acc_plus":
             # velocities (22*4) + accelerations (22*4) + index_embeddings (22*16 if enabled)
-            d_cond = (spatial_dim * num_joints * 2) + joint_emb_contribution
+            d_cond = (spatial_dim * self.num_joints * 2) + joint_emb_contribution
         elif self.joint_cond_mode == "absolute":
             # joints_with_vis (22*4) + index_embeddings (22*16 if enabled)
-            d_cond = (spatial_dim * num_joints) + joint_emb_contribution
+            d_cond = (spatial_dim * self.num_joints) + joint_emb_contribution
         elif self.joint_cond_mode == "absrel_jnts":
             # first_joint (4) + local_coords (21*4) + index_embeddings (22*16 if enabled)
             d_cond = (
-                spatial_dim + (spatial_dim * (num_joints - 1)) + joint_emb_contribution
+                spatial_dim
+                + (spatial_dim * (self.num_joints - 1))
+                + joint_emb_contribution
             )
         elif self.joint_cond_mode in ("absrel", "joints_only"):
             # abs_pos (22*4) + rel_pos (22*4) + index_embeddings (22*16 if enabled)
             d_cond = (
-                (spatial_dim * num_joints)
-                + (spatial_dim * num_joints)
+                (spatial_dim * self.num_joints)
+                + (spatial_dim * self.num_joints)
                 + joint_emb_contribution
             )
         elif self.joint_cond_mode == "absrel_global_deltas":
             # joints_with_vis (22*spatial_dim) + index_embeddings (22*16 if enabled) + r_mat (9) + t (3)
-            d_cond = (spatial_dim * num_joints) + joint_emb_contribution + 9 + 3
+            d_cond = (spatial_dim * self.num_joints) + joint_emb_contribution + 9 + 3
         else:
             assert_never(self.joint_cond_mode)
 
@@ -297,6 +294,7 @@ class EgoDenoiserConfig:
     def make_cond_with_masked_joints(
         self,
         joints: Float[Tensor, "batch time 22 3"],
+        joint_embeddings: nn.Embedding | None,
         visible_joints_mask: Bool[Tensor, "batch time 22"],
     ) -> Float[Tensor, "batch time d_cond"]:
         batch, time = visible_joints_mask.shape[:2]
@@ -307,8 +305,8 @@ class EgoDenoiserConfig:
         masked_joints = joints.clone()
 
         if self.use_joint_embeddings:
-            all_indices = torch.arange(CFG.smplh.num_joints, device=device)
-            index_embeddings = self.joint_embeddings.to(device)(all_indices).expand(
+            all_indices = torch.arange(self.num_joints, device=device)
+            index_embeddings = joint_embeddings.to(device)(all_indices).expand(
                 batch,
                 time,
                 -1,
@@ -581,9 +579,17 @@ class EgoDenoiser(nn.Module):
 
         self.config = config
 
-        self.body_model = SmplFamilyMetaModelZoo[SmplFamilyMetaModelName].load(
+        smpl_family_meta_model_name = self.config.smpl_family_meta_model_name
+        self.body_model = SmplFamilyMetaModelZoo[smpl_family_meta_model_name].load(
             config.smpl_family_model_basedir,
         )
+
+        # Create joint embeddings if enabled
+        if self.config.use_joint_embeddings:
+            self.joint_embeddings = nn.Embedding(
+                self.config.num_joints,
+                self.config.joint_emb_dim,
+            )
 
         Activation = {"gelu": nn.GELU, "relu": nn.ReLU}[config.activation]
 
@@ -718,6 +724,9 @@ class EgoDenoiser(nn.Module):
 
         cond = config.make_cond_with_masked_joints(
             joints=joints,
+            joint_embeddings=self.joint_embeddings
+            if self.config.use_joint_embeddings
+            else None,
             visible_joints_mask=visible_joints_mask,
         )
         # Randomly drop out conditioning information; this serves as a
