@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Optional
 from typing import TYPE_CHECKING
 from typing import Tuple
+from typing import Union
 from dataclasses import dataclass
 from functools import reduce
 
@@ -28,9 +29,9 @@ from egoallo.setup_logger import setup_logger
 from OpenGL import GL as gl
 
 
-import egoallo.middleware.third_party.HybrIK.hybrik.models.layers.smplh.fncsmplh as fncsmpl
 from .utils import create_skeleton_point_cloud, blend_with_background
-from egoallo.constants import SmplFamilyMetaModelZoo, SmplFamilyMetaModelName
+from egoallo.constants import SmplFamilyMetaModelZoo
+from egoallo.type_stubs import SmplFamilyModelTypeLiteral
 
 if TYPE_CHECKING:
     from egoallo.type_stubs import DenoiseTrajType
@@ -156,6 +157,8 @@ class SMPLViewer(BaseRenderer):
         self,
         config: Optional[RendererConfig] = None,
         scene_obj: Optional[Union[Path, Pointcloud.PointcloudContainer]] = None,
+        smpl_family_model_basedir: Path | None = None,
+        smpl_family_meta_model_name: SmplFamilyModelTypeLiteral = "SmplhModel",
     ):
         """
         Initialize the SMPL viewer.
@@ -171,6 +174,8 @@ class SMPLViewer(BaseRenderer):
         self.scene_obj = scene_obj or Path(
             "./assets/cloudrender/test_assets/MPI_Etage6.zip",
         )
+        self.smpl_family_model_basedir = smpl_family_model_basedir
+        self.smpl_family_meta_model_name = smpl_family_meta_model_name
 
         # Initialize instance variables
         self.camera: Optional[PerspectiveCameraModel] = None
@@ -299,10 +304,10 @@ class SMPLViewer(BaseRenderer):
             lambda x: x.unsqueeze(0),
         )  # prepend a new axis to incorporate changes in `apply_to_body` function.
         _batch_size = reduce(lambda x, y: x * y, traj.betas.shape[:-1])
-        posed: fncsmpl.SmplhShapedAndPosed = traj.apply_to_body(
-            SmplFamilyMetaModelZoo[SmplFamilyMetaModelName]
+        posed = traj.apply_to_body(
+            SmplFamilyMetaModelZoo[self.smpl_family_meta_model_name]
             .load(
-                smpl_family_model_basedir,
+                self.smpl_family_model_basedir,
             )
             .to(
                 device,
@@ -444,9 +449,9 @@ class SMPLViewer(BaseRenderer):
 
         # Render frames
         body_model = (
-            SmplFamilyMetaModelZoo[SmplFamilyMetaModelName]
+            SmplFamilyMetaModelZoo[self.smpl_family_meta_model_name]
             .load(
-                smpl_family_model_basedir,
+                self.smpl_family_model_basedir,
                 use_pca=False,
                 batch_size=1,
             )

@@ -2,8 +2,7 @@ from __future__ import annotations
 
 from tqdm import tqdm
 from functools import reduce
-from pathlib import Path
-from typing import Optional, Tuple
+from typing import Tuple
 from dataclasses import dataclass
 import numpy as np
 import torch
@@ -13,7 +12,8 @@ from egoallo.transforms import SE3, SO3
 from egoallo.setup_logger import setup_logger
 from egoallo.type_stubs import DenoiseTrajType
 from .utils import create_skeleton_point_cloud
-from egoallo.constants import SmplFamilyMetaModelZoo, SmplFamilyMetaModelName
+from .base_viewer import SMPLBaseViewer
+from egoallo.constants import SmplFamilyMetaModelZoo
 
 logger = setup_logger(output=None, name=__name__)
 
@@ -28,38 +28,20 @@ class RendererConfig:
     use_blending: bool = True
 
 
-class SMPLViewer:
-    """
-    SMPL model viewer with scene support using Open3D.
-
-    This class provides functionality to render SMPL body models in a 3D scene
-    with proper lighting and camera setup.
-    """
-
-    def __init__(self, config: Optional[RendererConfig] = None):
-        """
-        Initialize the SMPL viewer.
-
-        Args:
-            config: Renderer configuration for resolution, FPS, and FOV
-        """
-        self.config = config or RendererConfig()
+class SMPLViewer(SMPLBaseViewer):
+    def __init__(
+        self,
+        *args,
+        **kwargs,
+    ):
+        super().__init__(*args, **kwargs)
 
     def render_sequence(
         self,
         traj: "DenoiseTrajType",
-        smpl_family_model_basedir: Path,
         output_path: str = "output.mp4",
         online_render: bool = False,
     ):
-        """Render SMPL sequence to video using Open3D.
-
-        Args:
-            traj: Denoised trajectory data
-            smpl_family_model_basedir: Path to SMPL-H model
-            output_path: Path to save the output video
-            online_render: If True, use Open3D's interactive viewer for real-time rendering
-        """
         # Check trajectory format
         assert traj.R_world_root.dim() == 3, (
             "The batch size should be zero when visualizing."
@@ -147,9 +129,9 @@ class SMPLViewer:
         )
 
         posed = traj.apply_to_body(
-            SmplFamilyMetaModelZoo[SmplFamilyMetaModelName]
+            SmplFamilyMetaModelZoo[self.smpl_family_meta_model_name]
             .load(
-                smpl_family_model_basedir,
+                self.smpl_family_model_basedir,
             )
             .to(device),
         )

@@ -5,8 +5,8 @@ import polyscope as ps
 import polyscope.imgui as psim  # Import the imgui submodule
 from typing import Optional
 
-from egoallo.constants import SmplFamilyMetaModelZoo, SmplFamilyMetaModelName
-from egoallo.type_stubs import SmplFamilyModelType
+from egoallo.constants import SmplFamilyMetaModelZoo
+from egoallo.type_stubs import SmplFamilyModelType, SmplFamilyModelTypeLiteral
 from egoallo.setup_logger import setup_logger
 from egoallo import training_utils
 from jaxtyping import jaxtyped, Float
@@ -481,8 +481,9 @@ if __name__ == "__main__":
     # Replace with your actual model loading
     smpl_family_model_basedir = Path("assets/smpl_based_model")
     gender = "neutral"
+    smpl_family_meta_model_name: SmplFamilyModelTypeLiteral = "SmplhModelAADecomp"
     smpl_aadecomp_model = (
-        SmplFamilyMetaModelZoo[SmplFamilyMetaModelName]
+        SmplFamilyMetaModelZoo[smpl_family_meta_model_name]
         .load(smpl_family_model_basedir, gender=gender, num_joints=24)
         .to(device)
     )

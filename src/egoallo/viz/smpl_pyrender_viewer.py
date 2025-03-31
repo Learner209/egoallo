@@ -3,10 +3,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Optional
 from typing import TYPE_CHECKING
-from typing import Tuple
-from dataclasses import dataclass
 from functools import reduce
 from contextlib import nullcontext
 
@@ -20,7 +17,7 @@ from egoallo.middleware.third_party.HybrIK.hybrik.models.layers.smplh.fncsmplh i
     SO3,
 )
 from egoallo.setup_logger import setup_logger
-from egoallo.constants import SmplFamilyMetaModelZoo, SmplFamilyMetaModelName
+from egoallo.constants import SmplFamilyMetaModelZoo
 
 import os
 import cv2
@@ -31,6 +28,7 @@ from pyrender.trackball import Trackball
 import trimesh
 from egoallo.type_stubs import DenoiseTrajType
 
+from .base_viewer import SMPLBaseViewer
 from .utils import create_skeleton_point_cloud
 
 if TYPE_CHECKING:
@@ -40,17 +38,7 @@ logger = setup_logger(output=None, name=__name__)
 sys.path.append(str(Path(__file__).parent.parent.parent.parent))
 
 
-@dataclass
-class RendererConfig:
-    """Configuration for the renderer."""
-
-    resolution: Tuple[int, int] = (1280, 720)
-    fps: float = 30.0
-    fov: float = 75.0
-    use_blending: bool = True
-
-
-class SMPLViewer:
+class SMPLViewer(SMPLBaseViewer):
     """
     SMPL model viewer with scene support.
 
@@ -60,33 +48,17 @@ class SMPLViewer:
 
     def __init__(
         self,
-        config: Optional[RendererConfig] = None,
+        *args,
+        **kwargs,
     ):
-        """
-        Initialize the SMPL viewer.
-
-        Args:
-            config: Renderer configuration for resolution, FPS, and FOV
-            scene_path: Optional path to scene mesh file
-        """
-        self.config = config or RendererConfig()
+        super().__init__(*args, **kwargs)
 
     def render_sequence(
         self,
         traj: "DenoiseTrajType",
-        smpl_family_model_basedir: Path | None = None,
         output_path: str = "output.mp4",
         online_render: bool = False,
     ):
-        """Render SMPL sequence to video using pyrender (lightweight alternative to OpenGL).
-
-        Args:
-            traj: Denoised trajectory data
-            smpl_family_model_basedir: Path to SMPL-H model
-            output_path: Path to save the output video
-            online_render: If True, use pyrender's interactive viewer for real-time rendering
-        """
-
         # Choose rendering platform based on rendering mode
         if online_render:
             # For online rendering with a GUI, use the default platform
@@ -185,9 +157,9 @@ class SMPLViewer:
         )
 
         posed = traj.apply_to_body(
-            SmplFamilyMetaModelZoo[SmplFamilyMetaModelName]
+            SmplFamilyMetaModelZoo[self.smpl_family_meta_model_name]
             .load(
-                smpl_family_model_basedir,
+                self.smpl_family_model_basedir,
             )
             .to(device),
         )
