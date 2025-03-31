@@ -63,7 +63,6 @@ def get_experiment_dir(experiment_name: str, version: int = 0) -> Path:
 def run_training(
     train_cfg: EgoAlloTrainConfig,
     inference_cfg: InferenceConfig,
-    debug_mode: bool = False,
 ) -> None:
     # Set up experiment directory + HF accelerate.
     # We're getting to manage logging, checkpoint directories, etc manually,
@@ -74,6 +73,7 @@ def run_training(
         else None
     )
 
+    debug_mode = train_cfg.debug
     if debug_mode:
         import builtins
 
