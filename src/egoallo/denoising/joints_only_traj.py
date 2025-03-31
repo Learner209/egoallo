@@ -8,7 +8,7 @@ from egoallo.config import CONFIG_FILE
 from jaxtyping import Bool
 from jaxtyping import Float
 from torch import Tensor
-from egoallo.type_stubs import SmplFamilyModelType
+from egoallo.type_stubs import EgoTrainingDataType, SmplFamilyModelType
 from .base_traj import BaseDenoiseTraj
 import dataclasses
 from egoallo.config import make_cfg
@@ -92,6 +92,7 @@ class JointsOnlyTraj(BaseDenoiseTraj):
     def unpack(
         cls,
         x: Float[Tensor, "*batch timesteps d_state"],
+        metadata: "EgoTrainingDataType.MetaData",
         include_hands: bool = False,
         project_rotmats: bool = False,
     ) -> "JointsOnlyTraj":

@@ -1,6 +1,7 @@
 """Traj definitions."""
 
 from typing import Optional, Dict
+from egoallo.type_stubs import EgoTrainingDataType
 from egoallo.utils.ego_geom import project_rotmats_via_svd
 
 from egoallo.transforms import SE3, SO3
@@ -28,6 +29,8 @@ logger = setup_logger(output=None, name=__name__)
 class VelocityDenoiseTraj(BaseDenoiseTraj):
     """Denoising trajectory with velocity-based representation."""
 
+    from egoallo.data.dataclass import EgoTrainingData
+
     betas: Float[Tensor, "*batch timesteps 16"]
     """Body shape parameters. We don't really need the timesteps axis here,
     it's just for convenience."""
@@ -47,17 +50,22 @@ class VelocityDenoiseTraj(BaseDenoiseTraj):
     t_world_root: Float[Tensor, "*batch timesteps 3"]
     """Global translation vector of the root joint."""
 
-    R_world_root_tm1_t: Float[Tensor, "*batch timesteps 3 3"] | None = None
+    R_world_root_tm1_t: Float[Tensor, "*batch timesteps 3 3"] | None
     """Relative rotation between consecutive frames (t-1 to t)."""
 
-    t_world_root_tm1_t: Float[Tensor, "*batch timesteps 3"] | None = None
+    t_world_root_tm1_t: Float[Tensor, "*batch timesteps 3"] | None
     """Relative translation between consecutive frames (t-1 to t)."""
 
-    R_world_root_acc: Float[Tensor, "*batch timesteps 3 3"] | None = None
+    R_world_root_acc: Float[Tensor, "*batch timesteps 3 3"] | None
     """Acceleration of rotation between consecutive frames."""
 
-    t_world_root_acc: Float[Tensor, "*batch timesteps 3"] | None = None
+    t_world_root_acc: Float[Tensor, "*batch timesteps 3"] | None
     """Acceleration of translation between consecutive frames."""
+
+    metadata: EgoTrainingData.MetaData = dataclasses.field(
+        default_factory=EgoTrainingData.MetaData,
+    )
+    """Metadata for the trajectory."""
 
     def __post_init__(self) -> None:
         self._compute_temporal_offsets()
@@ -233,10 +241,11 @@ class VelocityDenoiseTraj(BaseDenoiseTraj):
         return torch.cat(tensors_to_pack, dim=-1)
 
     @classmethod
-    @jaxtyped(typechecker=typeguard.typechecked)
+    # @jaxtyped(typechecker=typeguard.typechecked)
     def unpack(
         cls,
         x: Float[Tensor, "*batch timesteps d_state"],
+        metadata: "EgoTrainingDataType.MetaData",
         include_hands: bool = False,
         project_rotmats: bool = False,
     ) -> "VelocityDenoiseTraj":
@@ -327,6 +336,7 @@ class VelocityDenoiseTraj(BaseDenoiseTraj):
             t_world_root=t_world_root,
             R_world_root_tm1_t=R_world_root_tm1_t,
             t_world_root_tm1_t=t_world_root_tm1_t,
+            metadata=metadata,
         )
 
     def compute_loss(

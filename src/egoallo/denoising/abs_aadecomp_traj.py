@@ -4,6 +4,7 @@ import dataclasses
 from typing import Dict
 from typing import Optional
 from typing import TYPE_CHECKING
+from typing import Self
 
 import torch
 from egoallo.config import CONFIG_FILE
@@ -15,6 +16,7 @@ from torch import Tensor
 import typeguard
 from jaxtyping import jaxtyped
 from egoallo.constants import SmplFamilyMetaModelZoo, SmplFamilyMetaModelName
+from egoallo.type_stubs import EgoTrainingDataType
 
 # Move type imports inside TYPE_CHECKING block to avoid circular imports
 if TYPE_CHECKING:
@@ -37,29 +39,37 @@ class AbsoluteDenoiseTrajAADecomp(BaseDenoiseTraj):
 
     """Denoising trajectory with absolute pose representation."""
 
-    betas: Float[Tensor, "*batch timesteps 10"]
+    betas: Float[Tensor, "*batch timesteps {self.num_betas}"]
     """Body shape parameters. We don't really need the timesteps axis here,
     it's just for convenience."""
 
-    cos_sin_phis: Float[Tensor, "*batch timesteps 23 2"]
+    cos_sin_phis: Float[Tensor, "*batch timesteps {self.num_joints}-1 2"]
     """Local orientations for each body joint. network predicts cos, sin phis"""
 
-    contacts: Float[Tensor, "*batch timesteps 24"]
+    contacts: Float[Tensor, "*batch timesteps {self.num_joints}"]
     """Contact boolean for each joint."""
 
     hand_rotmats: Float[Tensor, "*batch timesteps 30 3 3"] | None
     """Local orientations for each body joint."""
 
-    joints_wrt_world: Float[Tensor, "*batch timesteps 24 3"] | None
+    joints_wrt_world: Float[Tensor, "*batch timesteps {self.num_joints} 3"]
     """Joint positions in world frame."""
 
-    visible_joints_mask: Float[Tensor, "*batch timesteps 24"] | None
+    visible_joints_mask: Bool[Tensor, "*batch timesteps {self.num_joints}"]
     """Mask for visible joints."""
 
+    """Metadata for the trajectory."""
     metadata: EgoTrainingDataAADecomp.MetaData = dataclasses.field(
         default_factory=EgoTrainingDataAADecomp.MetaData,
     )
-    """Metadata for the trajectory."""
+
+    @property
+    def num_betas(self) -> int:
+        return 10
+
+    @property
+    def num_joints(self) -> int:
+        return 24
 
     @property
     def t_world_root(self) -> Float[Tensor, "*batch timesteps 3"]:
@@ -80,6 +90,20 @@ class AbsoluteDenoiseTrajAADecomp(BaseDenoiseTraj):
         full_pose = output.rot_mats
         return full_pose[..., 0, :, :]
 
+    @property
+    def loss_weights(self) -> dict[str, float]:
+        # Default loss weights for absolute mode
+        absolute_weights = {
+            "betas": 0.2,
+            "body_twists": 1.0,
+            "contacts": 0.1,
+            "hand_rotmats": 0.00,
+            "joints_wrt_world": 1.0,
+            "foot_skating": 0.3,
+            "velocity": 0.1,
+        }
+        return absolute_weights
+
     def compute_loss(
         self,
         other: "AbsoluteDenoiseTrajAADecomp",
@@ -88,6 +112,7 @@ class AbsoluteDenoiseTrajAADecomp(BaseDenoiseTraj):
     ) -> dict[str, Float[Tensor, ""]]:
         """Compute loss between this trajectory and another using absolute representations."""
         batch, time = mask.shape[:2]
+        device = mask.device
 
         loss_terms = {
             "betas": self._weight_and_mask_loss(
@@ -110,7 +135,70 @@ class AbsoluteDenoiseTrajAADecomp(BaseDenoiseTraj):
                 mask,
                 weight_t,
             ),
+            "contacts": self._weight_and_mask_loss(
+                (self.contacts - other.contacts).reshape(batch, time, -1) ** 2,
+                mask,
+                weight_t,
+            ),
         }
+
+        pred_joints = self.joints_wrt_world
+        gt_joints = other.joints_wrt_world
+
+        # Foot skating loss
+        foot_indices = [7, 8, 10, 11]  # Indices for foot joints
+        foot_positions = pred_joints[..., foot_indices, :]  # (batch, time, 4, 3)
+        foot_velocities = (
+            foot_positions[:, 1:] - foot_positions[:, :-1]
+        )  # (batch, time-1, 4, 3)
+
+        # Get foot contacts from x_0_pred
+        foot_contacts = self.contacts[..., foot_indices]  # (batch, time, 4)
+        foot_skating_mask = (
+            foot_contacts[:, 1:] * mask[:, 1:, None]
+        ).bool()  # (batch, time-1, 4)
+
+        # Compute foot skating loss for each foot joint
+        foot_skating_losses = []
+        for i in range(len(foot_indices)):
+            foot_loss = self._weight_and_mask_loss(
+                foot_velocities[..., i, :].pow(2),  # (batch, time-1, 3)
+                bt_mask=foot_skating_mask[..., i],  # (batch, time-1)
+                weight_t=weight_t,
+                bt_mask_sum=torch.maximum(
+                    torch.sum(foot_skating_mask[..., i]) * 3,  # Multiply by 3 for x,y,z
+                    torch.tensor(1, device=device),
+                ),
+            )
+            foot_skating_losses.append(foot_loss)
+
+        # Average foot skating losses
+        foot_skating_loss = torch.stack(foot_skating_losses).mean()
+
+        # Velocity loss
+        joint_velocities = (
+            pred_joints[:, 1:] - pred_joints[:, :-1]
+        )  # (batch, time-1, num_joints, 3)
+        gt_velocities = (
+            gt_joints[:, 1:] - gt_joints[:, :-1]
+        )  # (batch, time-1, num_joints, 3)
+
+        loss_terms.update(
+            {
+                # empirically, invisible joints loss should be more important than visible joints loss.
+                "foot_skating": foot_skating_loss,
+                "velocity": self._weight_and_mask_loss(
+                    ((joint_velocities - gt_velocities) ** 2).reshape(
+                        batch,
+                        time - 1,
+                        -1,
+                    ),
+                    mask[:, 1:],
+                    weight_t,
+                    torch.sum(mask[:, 1:]),
+                ),
+            },
+        )
 
         if self.hand_rotmats is not None and other.hand_rotmats is not None:
             loss_terms["hand_rotmats"] = self._weight_and_mask_loss(
@@ -131,11 +219,11 @@ class AbsoluteDenoiseTrajAADecomp(BaseDenoiseTraj):
         Returns:
             Total dimension of packed state vector.
         """
-        # 10 (betas) + 23*2 (body_twists) + 24 (contacts) + 24*3 (joints_wrt_world) + 3 (t_world_root)
-        packed_dim = 10 + 23 * 2 + 24 + 24 * 3
-        if include_hands:
-            packed_dim += 30 * 9  # hand_rotmats
-        return packed_dim
+        return sum(
+            AbsoluteDenoiseTrajAADecomp.get_modality_dict(
+                include_hands=include_hands,
+            ).values(),
+        )
 
     def apply_to_body(self, body_model: "SmplFamilyModelType") -> "SmplFamilyModelType":
         """Apply the trajectory data to a SMPL-H body model."""
@@ -156,15 +244,14 @@ class AbsoluteDenoiseTrajAADecomp(BaseDenoiseTraj):
     @jaxtyped(typechecker=typeguard.typechecked)
     def pack(self) -> Float[Tensor, "*batch timesteps d_state"]:
         """Pack trajectory into a single flattened vector."""
-        (*batch, time, num_joints, _, _) = self.joints_wrt_world.shape
-        assert num_joints == 24
+        (*batch, time, _, _) = self.joints_wrt_world.shape
 
         # Create list of tensors to pack
         tensors_to_pack = [
             self.betas.reshape((*batch, time, -1)),
             self.cos_sin_phis.reshape((*batch, time, -1)),
             self.contacts.reshape((*batch, time, -1)),
-            self.t_world_root.reshape((*batch, time, -1)),
+            self.joints_wrt_world.reshape((*batch, time, -1)),
         ]
 
         if self.hand_rotmats is not None:
@@ -187,10 +274,10 @@ class AbsoluteDenoiseTrajAADecomp(BaseDenoiseTraj):
         """
         # Base modalities for AA decomposition mode
         modality_dims = {
-            "betas": 10,  # Shape parameters (10 for SMPL vs 16 for SMPL-H)
+            "betas": 10,  # Shape parameters (self.num_betas for SMPL vs 16 for SMPL-H)
             "cos_sin_phis": 23 * 2,  # Cosine and sine of twist angles for 23 joints
-            "contacts": 24,  # Contact boolean for 24 joints
-            "joints_wrt_world": 24 * 3,  # 3D coordinates for 24 joints
+            "contacts": 24,  # Contact boolean for self.num_joints joints
+            "joints_wrt_world": 24 * 3,  # 3D coordinates for self.num_joints joints
         }
 
         # Add hand rotations if specified
@@ -200,10 +287,11 @@ class AbsoluteDenoiseTrajAADecomp(BaseDenoiseTraj):
         return modality_dims
 
     @classmethod
-    @jaxtyped(typechecker=typeguard.typechecked)
+    # @jaxtyped(typechecker=typeguard.typechecked)
     def unpack(
         cls,
         x: Float[Tensor, "*batch timesteps d_state"],
+        metadata: "EgoTrainingDataType.MetaData",
         include_hands: bool = False,
         project_rotmats: bool = False,
     ) -> "AbsoluteDenoiseTrajAADecomp":
@@ -216,13 +304,15 @@ class AbsoluteDenoiseTrajAADecomp(BaseDenoiseTraj):
                 betas,
                 cos_sin_phis,
                 contacts,
+                joints_wrt_world_flat,
                 hand_rotmats_flat,
             ) = torch.split(
                 x,
                 [
-                    16,
+                    10,
                     23 * 2,
                     24,
+                    24 * 3,
                     30 * 9,
                 ],
                 dim=-1,
@@ -233,20 +323,27 @@ class AbsoluteDenoiseTrajAADecomp(BaseDenoiseTraj):
                 betas,
                 cos_sin_phis,
                 contacts,
+                joints_wrt_world_flat,
             ) = torch.split(
                 x,
-                [16, 23 * 2, 24],
+                [10, 23 * 2, 24, 24 * 3],
                 dim=-1,
             )
             hand_rotmats = None
+        cos_sin_phis = cos_sin_phis.reshape((*batch, time, 23, 2))
+        joints_wrt_world = joints_wrt_world_flat.reshape((*batch, time, 24, 3))
 
         return cls(
             betas=betas,
             cos_sin_phis=cos_sin_phis,
             contacts=contacts,
             hand_rotmats=hand_rotmats,
-            joints_wrt_world=None,  # Set to None since we don't have joints data when unpacking
-            visible_joints_mask=None,  # Set to None since we don't have visibility data when unpacking
+            joints_wrt_world=joints_wrt_world,
+            visible_joints_mask=torch.ones_like(
+                joints_wrt_world[..., 0],
+                dtype=torch.bool,
+            ),  # Set to None since we don't have visibility data when unpacking
+            metadata=metadata,
         )
 
     def encode(
@@ -259,7 +356,10 @@ class AbsoluteDenoiseTrajAADecomp(BaseDenoiseTraj):
         encoded = (
             encoders["betas"](self.betas.reshape((batch, time, -1)))
             + encoders["cos_sin_phis"](self.cos_sin_phis.reshape((batch, time, -1)))
-            + encoders["contacts"](self.contacts)
+            + encoders["contacts"](self.contacts.reshape((batch, time, -1)))
+            + encoders["joints_wrt_world"](
+                self.joints_wrt_world.reshape((batch, time, -1)),
+            )
         )
         if self.hand_rotmats is not None:
             encoded = encoded + encoders["hand_rotmats"](
@@ -360,14 +460,14 @@ class AbsoluteDenoiseTrajAADecomp(BaseDenoiseTraj):
         # Foot metrics
         metrics["foot_skate"] = float(
             BodyEvaluator.compute_foot_skate(
-                pred_Ts_world_joint=pred_Ts_world_joint[..., 1:24, :],
+                pred_Ts_world_joint=pred_Ts_world_joint[..., 1 : self.num_joints, :],
                 device=device,
             ).mean(),
         )
 
         metrics["foot_contact"] = float(
             BodyEvaluator.compute_foot_contact(
-                pred_Ts_world_joint=pred_Ts_world_joint[..., 1:24, :],
+                pred_Ts_world_joint=pred_Ts_world_joint[..., 1 : self.num_joints, :],
                 device=device,
             ).mean(),
         )
@@ -377,13 +477,13 @@ class AbsoluteDenoiseTrajAADecomp(BaseDenoiseTraj):
                 label_root_pos=gt_pose_skeletons[..., 0, :],  # [batch, T, 3]
                 label_joint_pos=gt_pose_skeletons[
                     ...,
-                    1:24,
+                    1 : self.num_joints,
                     :3,
                 ],  # [batch, T, 23, 3]
                 pred_root_pos=pred_pose_skeletons[..., 0, :],  # [batch, T, 3]
                 pred_joint_pos=pred_pose_skeletons[
                     ...,
-                    1:24,
+                    1 : self.num_joints,
                     :3,
                 ],  # [batch, T, 23, 3]
                 per_frame_procrustes_align=False,
@@ -396,13 +496,13 @@ class AbsoluteDenoiseTrajAADecomp(BaseDenoiseTraj):
                 label_root_pos=gt_pose_skeletons[..., 0, :],  # [batch, T, 3]
                 label_joint_pos=gt_pose_skeletons[
                     ...,
-                    1:24,
+                    1 : self.num_joints,
                     :3,
                 ],  # [batch, T, 23, 3]
                 pred_root_pos=pred_pose_skeletons[..., 0, :],  # [batch, T, 3]
                 pred_joint_pos=pred_pose_skeletons[
                     ...,
-                    1:24,
+                    1 : self.num_joints,
                     :3,
                 ],  # [batch, T, 21, 3]
                 per_frame_procrustes_align=True,
@@ -414,12 +514,12 @@ class AbsoluteDenoiseTrajAADecomp(BaseDenoiseTraj):
             BodyEvaluator.compute_head_ori(
                 label_Ts_world_joint=gt_Ts_world_joint[
                     ...,
-                    1:24,
+                    1 : self.num_joints,
                     :,
                 ],  # [batch, T, 21, 7]
                 pred_Ts_world_joint=pred_Ts_world_joint[
                     ...,
-                    1:24,
+                    1 : self.num_joints,
                     :,
                 ],  # [batch, T, 21, 7]
                 device=device,
@@ -430,12 +530,12 @@ class AbsoluteDenoiseTrajAADecomp(BaseDenoiseTraj):
             BodyEvaluator.compute_head_trans(
                 label_Ts_world_joint=gt_Ts_world_joint[
                     ...,
-                    1:24,
+                    1 : self.num_joints,
                     :,
                 ],  # [batch, T, 21, 7]
                 pred_Ts_world_joint=pred_Ts_world_joint[
                     ...,
-                    1:24,
+                    1 : self.num_joints,
                     :,
                 ],  # [batch, T, 21, 7]
                 device=device,
@@ -446,7 +546,7 @@ class AbsoluteDenoiseTrajAADecomp(BaseDenoiseTraj):
             BodyEvaluator.compute_foot_skate(
                 pred_Ts_world_joint=pred_Ts_world_joint[
                     ...,
-                    1:24,
+                    1 : self.num_joints,
                     :,
                 ],  # [batch, T, 21, 7]
                 device=device,
@@ -457,7 +557,7 @@ class AbsoluteDenoiseTrajAADecomp(BaseDenoiseTraj):
             BodyEvaluator.compute_foot_contact(
                 pred_Ts_world_joint=pred_Ts_world_joint[
                     ...,
-                    1:24,
+                    1 : self.num_joints,
                     :,
                 ],  # [batch, T, 21, 7]
                 device=device,
@@ -468,3 +568,121 @@ class AbsoluteDenoiseTrajAADecomp(BaseDenoiseTraj):
         del body_model
 
         return metrics
+
+    @jaxtyped(typechecker=typeguard.typechecked)
+    def _rotate(self, radian: Tensor) -> Self:
+        assert self.metadata.stage == "preprocessed", (
+            "Only preprocessed data is supported for rotation. since preprocessing aligns data's xy to zeros. and rotation is applied only on yaw(rpy zyx convention.)"
+        )
+
+        so3_rot = SO3.from_z_radians(radian)
+        expanded_rot = SO3(wxyz=so3_rot.wxyz.unsqueeze(-2))
+        self.joints_wrt_world = expanded_rot.apply(
+            self.joints_wrt_world,
+        )  # [*batch, timesteps, 22, 3]
+
+        return self
+
+    @jaxtyped(typechecker=typeguard.typechecked)
+    def postprocess(
+        self,
+        height_from_floor: Float[Tensor, "*batch timesteps 1"],
+        initial_xy: Float[Tensor, "*batch 2"],
+        rotate_radian: Optional[Float[Tensor, "1"]] = None,
+    ) -> "AbsoluteDenoiseTrajAADecomp":
+        assert self.metadata.stage == "preprocessed"
+
+        device = self.joints_wrt_world.device
+        _dtype = self.joints_wrt_world.dtype
+
+        if rotate_radian is not None:
+            # rad = SO3(self.metadata.rotate_radian.to(dtype=dtype, device=device)).inverse().
+            self._rotate(
+                rotate_radian,
+            )
+
+        self.joints_wrt_world = torch.cat(
+            [
+                self.joints_wrt_world[..., :2],
+                self.joints_wrt_world[..., 2:3]
+                + height_from_floor.unsqueeze(-2),  # [*batch, timesteps, 22, 1]
+                self.joints_wrt_world[..., 3:],
+            ],
+            dim=-1,
+        )
+
+        # Add initial x,y position offset
+        # Expand initial_xy to match broadcast dimensions like in preprocess()
+        expanded_xy = initial_xy.view(
+            *initial_xy.shape[:-1],
+            1,
+            1,
+            2,
+        )  # Add dims for broadcasting
+
+        self.joints_wrt_world = torch.cat(
+            [
+                self.joints_wrt_world[..., :2] + expanded_xy.to(device),
+                self.joints_wrt_world[..., 2:],
+            ],
+            dim=-1,
+        )
+
+        return self
+
+    @jaxtyped(typechecker=typeguard.typechecked)
+    def preprocess(
+        self,
+        visible_joints_mask: Float[Tensor, "*batch timesteps {self.num_joints}"],
+        height_from_floor: Float[Tensor, "*batch timesteps 1"],
+        initial_xy: Float[Tensor, "*batch 2"],
+        rotate_radian: Optional[Float[Tensor, "1"]] = None,
+    ) -> "EgoTrainingDataType":
+        """
+
+        Modifies the current EgoTrainingData instance by:
+        1. Aligning x,y coordinates to the first frame
+        2. Subtracting floor height from z coordinates
+        Modifies positions in-place to save memory.
+        Returns self for method chaining.
+        3. Set where joints is invalid to all zeros, indicated by visible_joints_mask.
+        """
+        assert self.metadata.stage == "raw"
+
+        expanded_xy = initial_xy.view(
+            *initial_xy.shape[:-1],
+            1,
+            1,
+            2,
+        )  # Add dims for broadcasting
+
+        self.joints_wrt_world = torch.cat(
+            [
+                self.joints_wrt_world[..., :2] - expanded_xy,
+                self.joints_wrt_world[..., 2:],
+            ],
+            dim=-1,
+        )
+
+        self.joints_wrt_world = torch.cat(
+            [
+                self.joints_wrt_world[..., :2],
+                self.joints_wrt_world[..., 2:3]
+                - height_from_floor.unsqueeze(-2),  # [*batch, timesteps, 22, 1]
+                self.joints_wrt_world[..., 3:],
+            ],
+            dim=-1,
+        )
+
+        if rotate_radian is not None:
+            self._rotate(rotate_radian)
+            self.metadata.rotate_radian = rotate_radian
+
+        # Set where joints are invalid to all -1.
+        self.joints_wrt_world = torch.where(
+            visible_joints_mask.unsqueeze(-1),
+            self.joints_wrt_world,
+            torch.ones_like(self.joints_wrt_world) * -1,
+        )
+
+        return self

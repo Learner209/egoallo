@@ -18,6 +18,12 @@ from .base_traj import BaseDenoiseTraj
 import dataclasses
 from egoallo.config import make_cfg
 from egoallo.utils.setup_logger import setup_logger
+from egoallo.constants import (
+    SmplFamilyMetaModelZoo,
+)
+from egoallo.type_stubs import SmplFamilyModelTypeLiteral
+
+from egoallo.type_stubs import EgoTrainingDataType
 
 local_config_file = CONFIG_FILE
 CFG = make_cfg(config_name="defaults", config_file=local_config_file, cli_args=[])
@@ -88,6 +94,8 @@ class AbsoluteDenoiseTraj(BaseDenoiseTraj):
     ) -> dict[str, Float[Tensor, ""]]:
         """Compute loss between this trajectory and another using absolute representations."""
         batch, time = mask.shape[:2]
+        num_joints = self.joints_wrt_world.shape[-2]
+        device = mask.device
 
         loss_terms = {
             "betas": self._weight_and_mask_loss(
@@ -119,6 +127,126 @@ class AbsoluteDenoiseTraj(BaseDenoiseTraj):
                 weight_t,
             )
 
+        body_model_name: "SmplFamilyModelTypeLiteral" = "SmplhModel"
+        body_model = (
+            SmplFamilyMetaModelZoo[body_model_name]
+            .load(
+                self.metadata.smpl_family_model_dir,
+                gender=self.metadata.gender,
+                num_joints=num_joints,
+            )
+            .to(device)
+        )
+        x_0_pred_posed = self.apply_to_body(
+            body_model,
+        )  # (b, t, 22, 3)
+        pred_joints = torch.cat(
+            [
+                x_0_pred_posed.T_world_root[..., 4:7].unsqueeze(dim=-2),
+                x_0_pred_posed.Ts_world_joint[..., : num_joints - 1, 4:7],
+            ],
+            dim=-2,
+        )  # (b, t, 22, 3)
+        assert pred_joints.shape == (batch, time, num_joints, 3)
+
+        # Get ground truth joints from training batch
+
+        gt_joints = other.joints_wrt_world  # (b, t, 22, 3)
+        assert gt_joints.shape == (batch, time, num_joints, 3)
+
+        # Calculate joint position loss with masking
+        joint_loss = (pred_joints - gt_joints) ** 2  # (b, t, 22, 3)
+
+        # Apply joint visibility mask and average
+        # visible_joints_mask: shape (b, t, 22), joint_loss: shape (b, t, 22, 3)
+        # Compute masked joint loss while handling shape alignment
+        # joint_loss: (b, t, 22, 3), visible_joints_mask: (b, t, 22)
+        if self.visible_joints_mask is not None:
+            invisible_joint_loss = (
+                joint_loss
+                * (
+                    (~self.visible_joints_mask)[..., None]
+                )  # Use only invisible joints by inverting the visible joints mask
+            ).sum(dim=(-2, -1)) / (  # Sum over joints (22) and xyz (3)
+                ((~self.visible_joints_mask).sum(dim=-1) * 3)
+                + 1e-8  # Multiply by 3 for xyz channels
+            )  # Result: (b, t)
+            vis_jnt_loss = (joint_loss * ((self.visible_joints_mask)[..., None])).sum(
+                dim=(-2, -1),
+            ) / ((self.visible_joints_mask).sum(dim=-1) * 3 + 1e-8)
+        else:
+            logger.warning(
+                "No visible joints mask found, using all joints for loss calculation, there should be no scenarios when visible_joints_mask is None",
+            )
+            invisible_joint_loss = torch.zeros((batch, time), device=device)
+            vis_jnt_loss = joint_loss
+
+        # Foot skating loss
+        foot_indices = [7, 8, 10, 11]  # Indices for foot joints
+        foot_positions = pred_joints[..., foot_indices, :]  # (batch, time, 4, 3)
+        foot_velocities = (
+            foot_positions[:, 1:] - foot_positions[:, :-1]
+        )  # (batch, time-1, 4, 3)
+
+        # Get foot contacts from x_0_pred
+        foot_contacts = self.contacts[..., foot_indices]  # (batch, time, 4)
+        foot_skating_mask = (
+            foot_contacts[:, 1:] * mask[:, 1:, None]
+        ).bool()  # (batch, time-1, 4)
+
+        # Compute foot skating loss for each foot joint
+        foot_skating_losses = []
+        for i in range(len(foot_indices)):
+            foot_loss = self._weight_and_mask_loss(
+                foot_velocities[..., i, :].pow(2),  # (batch, time-1, 3)
+                bt_mask=foot_skating_mask[..., i],  # (batch, time-1)
+                weight_t=weight_t,
+                bt_mask_sum=torch.maximum(
+                    torch.sum(foot_skating_mask[..., i]) * 3,  # Multiply by 3 for x,y,z
+                    torch.tensor(1, device=device),
+                ),
+            )
+            foot_skating_losses.append(foot_loss)
+
+        # Average foot skating losses
+        foot_skating_loss = torch.stack(foot_skating_losses).mean()
+
+        # Velocity loss
+        joint_velocities = (
+            pred_joints[:, 1:] - pred_joints[:, :-1]
+        )  # (batch, time-1, num_joints, 3)
+        gt_velocities = (
+            gt_joints[:, 1:] - gt_joints[:, :-1]
+        )  # (batch, time-1, num_joints, 3)
+
+        loss_terms.update(
+            {
+                # empirically, invisible joints loss should be more important than visible joints loss.
+                "joints": self._weight_and_mask_loss(
+                    invisible_joint_loss.unsqueeze(-1),
+                    mask,
+                    weight_t,
+                    torch.sum(mask),
+                )
+                + self._weight_and_mask_loss(
+                    vis_jnt_loss.unsqueeze(-1),
+                    mask,
+                    weight_t,
+                    torch.sum(mask),
+                ),
+                "foot_skating": foot_skating_loss,
+                "velocity": self._weight_and_mask_loss(
+                    ((joint_velocities - gt_velocities) ** 2).reshape(
+                        batch,
+                        time - 1,
+                        -1,
+                    ),
+                    mask[:, 1:],
+                    weight_t,
+                    torch.sum(mask[:, 1:]),
+                ),
+            },
+        )
         return loss_terms
 
     @staticmethod
@@ -189,10 +317,11 @@ class AbsoluteDenoiseTraj(BaseDenoiseTraj):
         return torch.cat(tensors_to_pack, dim=-1)
 
     @classmethod
-    @jaxtyped(typechecker=typeguard.typechecked)
+    # @jaxtyped(typechecker=typeguard.typechecked)
     def unpack(
         cls,
         x: Float[Tensor, "*batch timesteps d_state"],
+        metadata: "EgoTrainingDataType.MetaData",
         include_hands: bool = False,
         project_rotmats: bool = False,
     ) -> "AbsoluteDenoiseTraj":
@@ -256,6 +385,7 @@ class AbsoluteDenoiseTraj(BaseDenoiseTraj):
             t_world_root=t_world_root,
             joints_wrt_world=None,  # Set to None since we don't have joints data when unpacking
             visible_joints_mask=None,  # Set to None since we don't have visibility data when unpacking
+            metadata=metadata,
         )
 
     def encode(
