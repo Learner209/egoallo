@@ -72,8 +72,8 @@ class SmplhModel(TensorDataclass):
             posedirs=model.posedirs.transpose(0,1).reshape(num_verts, 3, num_jnts * 9),
             v_template=model.v_template,
             shapedirs=model.shapedirs,
-            hands_components_l=None,
-            hands_components_r=None,
+            hands_components_l=model.left_hand_components if hasattr(model, "left_hand_components") else None,
+            hands_components_r=model.right_hand_components if hasattr(model, "right_hand_components") else None,
             model=model,
         )
 
@@ -117,14 +117,17 @@ class SmplhModel(TensorDataclass):
         Returns:
             Tuple of (left_hand_pose, right_hand_pose) in axis-angle format
         """
+        device = left_hand_pca.device
+        dtype = left_hand_pca.dtype
+
         left_hand_pose = None
         right_hand_pose = None
 
         if left_hand_pca is not None:
-            left_hand_pose = self.pca_to_aa(left_hand_pca, self.hands_components_l)
+            left_hand_pose = self.pca_to_aa(left_hand_pca, self.hands_components_l.to(device, dtype))
 
         if right_hand_pca is not None:
-            right_hand_pose = self.pca_to_aa(right_hand_pca, self.hands_components_r)
+            right_hand_pose = self.pca_to_aa(right_hand_pca, self.hands_components_r.to(device, dtype))
 
         return left_hand_pose, right_hand_pose
 
@@ -201,7 +204,7 @@ class SmplhShaped(TensorDataclass):
     t_parent_joint: Float[Tensor, "*#batch joints 3"]
     """Position of each shaped body joint relative to its parent. Does not
     include root."""
-    betas: Float[Tensor, "*#batch 16"]
+    betas: Float[Tensor, "*#batch num_betas"]
     """betas"""
 
     @jaxtyped(typechecker=typeguard.typechecked)
@@ -254,13 +257,13 @@ class SmplhShapedAndPosed(TensorDataclass):
     shaped_model: SmplhShaped
     """Underlying shaped body model."""
 
-    T_world_root: Float[Tensor, "*#batch 7"]
+    T_world_root: Float[Tensor, "*batch 7"]
     """Root coordinate frame."""
 
-    local_quats: Float[Tensor, "*#batch joints 4"]
+    local_quats: Float[Tensor, "*batch joints 4"]
     """Local joint orientations."""
 
-    Ts_world_joint: Float[Tensor, "*#batch joints 7"]
+    Ts_world_joint: Float[Tensor, "*batch joints 7"]
     """Absolute transform for each joint. Does not include the root."""
 
     def with_new_T_world_root(
@@ -295,6 +298,38 @@ class SmplhShapedAndPosed(TensorDataclass):
         output.joints += SE3(self.T_world_root).translation().unsqueeze(-2)
 
         return SmplhMesh(self, output.vertices, self.shaped_model.body_model.faces)
+
+    def compute_joint_contacts(
+        self, vertex_contacts: Float[Tensor, "*#batch verts"],
+    ) -> Float[Tensor, "*#batch joints"]:
+        """Convert per-vertex contact labels to per-joint contact labels using skinning weights.
+
+        Args:
+            vertex_contacts: Binary contact labels for each vertex (0 or 1)
+
+        Returns:
+            Joint contact labels (continuous values between 0 and 1)
+        """
+        device, dtype = vertex_contacts.device, vertex_contacts.dtype
+        # Get skinning weights from the body model
+        weights = self.shaped_model.body_model.weights.to(device, dtype)  # (verts, joints+1)
+
+        # Weighted sum of contact labels
+        weighted_contacts = einsum(
+            vertex_contacts,
+            weights,
+            "... verts, verts joints -> ... joints",
+        )
+
+        # Normalize by sum of weights
+        weight_sums = weights.sum(dim=0)  # (joints,)
+        joint_contacts = weighted_contacts / weight_sums
+
+        # Threshold to get binary labels (optional, adjust threshold as needed)
+        # joint_contacts = (joint_contacts > 0.3).float()
+
+        return joint_contacts
+
 
 
 @jaxtyped(typechecker=typeguard.typechecked)

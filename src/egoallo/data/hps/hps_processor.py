@@ -57,6 +57,7 @@ class HPSProcessor:
                 self.smplh_dir,
                 use_pca=False,
                 gender=gender,
+                num_betas=10,
             ).to(
                 self.device,
             )
@@ -234,7 +235,8 @@ class HPSProcessor:
             joints,
             self.joint_indices,
         )
-        contacts: Float[Array, "*batch timesteps 22"] = contacts[..., :22]
+        contacts: Float[Array, "*batch timesteps 52"] = contacts[..., :52]
+        assert contacts.shape[-1] == 52
 
         # Adjust heights
         trans[:, 2] -= floor_height

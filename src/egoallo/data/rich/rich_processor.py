@@ -62,8 +62,10 @@ class RICHDataProcessor:
         for gender in ["male", "female", "neutral"]:
             self.body_models[gender] = SmplhModel.load(
                 self.smplh_model_dir,
-                use_pca=False,
+                use_pca=True,
+                num_pca_comps=12,
                 gender=gender,
+                num_betas=10,
             ).to(
                 self.device,
             )
@@ -77,6 +79,7 @@ class RICHDataProcessor:
                 flat_hand_mean=False,
                 use_pca=True,
                 num_pca_comps=12,
+                num_betas=10,
             ).to(self.device)
 
         # Initialize motion processor
@@ -432,18 +435,23 @@ class RICHDataProcessor:
             all_trans.append(body_params["transl"])
 
             # Process joints and contacts
-            T_world_root: SE3 = SE3.from_rotation_and_translation(
+            T_world_root: Float[Tensor, "*batch 7"] = SE3.from_rotation_and_translation(
                 rotation=SO3.exp(body_params["global_orient"]),
                 translation=body_params["transl"],
-            ).parameters()
-            # import ipdb; ipdb.set_trace()
+            ).parameters()  # batch, 7
 
             shaped = body_model.with_shape(body_params["betas"])
             posed = shaped.with_pose_decomposed(
                 T_world_root=T_world_root,
-                body_quats=SO3.exp(body_params["body_pose"].reshape(-1, 3)).wxyz,
-                left_hand_quats=SO3.exp(left_hand_pose.reshape(-1, 3)).wxyz,
-                right_hand_quats=SO3.exp(right_hand_pose.reshape(-1, 3)).wxyz,
+                body_quats=SO3.exp(body_params["body_pose"].reshape(-1, 3)).wxyz[
+                    None,
+                    ...,
+                ],
+                left_hand_quats=SO3.exp(left_hand_pose.reshape(-1, 3)).wxyz[None, ...],
+                right_hand_quats=SO3.exp(right_hand_pose.reshape(-1, 3)).wxyz[
+                    None,
+                    ...,
+                ],
             )
 
             # Extract joint positions (already in world coordinates)
