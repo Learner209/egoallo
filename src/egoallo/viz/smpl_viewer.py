@@ -452,8 +452,6 @@ class SMPLViewer(BaseRenderer):
             SmplFamilyMetaModelZoo[self.smpl_family_meta_model_name]
             .load(
                 self.smpl_family_model_basedir,
-                use_pca=False,
-                batch_size=1,
             )
             .to(device)
         )

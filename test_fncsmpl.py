@@ -31,8 +31,6 @@ def test_smplh_vs_smplx():
     # Load custom model
     custom_model = SmplhModel.load(
         model_path,
-        use_pca=False,
-        batch_size=50,
         num_betas=num_betas,
     ).to(device=device)
     # custom_model = SmplhModel.load(model_path)
@@ -40,9 +38,7 @@ def test_smplh_vs_smplx():
     # Load SMPLX model
     smplx_model = SMPLH(
         model_path=model_path,
-        use_pca=False,
         num_betas=num_betas,
-        num_pca_comps=45,  # Not used since use_pca=False
         ext="pkl",
     ).to(device=device, dtype=dtype)
 

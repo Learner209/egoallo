@@ -14,6 +14,7 @@ import random
 from typing import Union, Dict
 
 from egoallo.type_stubs import SmplFamilyModelType
+from egoallo.type_stubs import EgoTrainingDataType
 
 if TYPE_CHECKING:
     from egoallo.type_stubs import DenoiseTrajType
@@ -291,7 +292,7 @@ class TestRunner:
 
     def _process_batch(
         self,
-        batch: EgoTrainingData,
+        batch: EgoTrainingDataType,
         batch_idx: int,
         processor: SequenceProcessor,
     ) -> Tuple[DenoiseTrajType, DenoiseTrajType]:
@@ -300,11 +301,11 @@ class TestRunner:
         gt_trajs = None  # shape: (batch_size, num_timesteps, ...)
         denoised_trajs = None  # shape: (num_samples==batch_size, num_timesteps, ...)
 
-        for seq_idx in range(batch.T_world_cpf.shape[0]):
+        for seq_idx in range(batch.joints_wrt_world.shape[0]):
             torch.cuda.empty_cache()
             # Process sequence to get denoised trajectory
             gt_traj, denoised_traj = processor.process_sequence(
-                batch,
+                batch[seq_idx : seq_idx + 1],
                 self.denoiser,
                 self.runtime_config,
                 self.inference_config,
@@ -427,9 +428,6 @@ class TestRunner:
                         ]
                         .load(
                             self.runtime_config.smpl_family_model_basedir,
-                            use_pca=False,
-                            batch_size=est_traj.betas.shape[0]
-                            * est_traj.betas.shape[1],
                         )
                         .to(torch.device("cpu")),
                         # "body_model": self.body_model.to(torch.device("cpu")),
@@ -449,7 +447,9 @@ class TestRunner:
             # parallel compute metrics for debugging.
             # trajectory_metrics = []
             # for gt_traj, est_traj in zip(gt_trajs, denoised_trajs):
-            #     metrics = gt_traj._compute_metrics(est_traj, body_model=self.body_model, device=torch.device("cpu"))
+            #     metrics = est_traj._compute_metrics(
+            #         gt_traj, body_model=self.body_model, device=torch.device("cpu"),
+            #     )
             #     trajectory_metrics.append(metrics)
 
             # Aggregate metrics across all trajectories

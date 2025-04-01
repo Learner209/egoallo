@@ -375,6 +375,8 @@ class AbsoluteDenoiseTrajAADecomp(BaseDenoiseTraj):
     ) -> Dict[str, float]:
         """Compute metrics between this trajectory and another.
         Computes all relevant metrics since this class has complete pose data.
+        Args:
+            self, other: leading dimension is (num_samples, num_timesteps)
         """
 
         other = other.to(device)

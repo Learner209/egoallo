@@ -93,8 +93,6 @@ def create_mock_trajectory(
 
     body_model = SmplhModel.load(
         smplh_model_path,
-        use_pca=False,
-        batch_size=seq_len,
     )
     T_world_root = SE3.from_rotation_and_translation(
         SO3.from_matrix(R_world_root),
@@ -102,11 +100,20 @@ def create_mock_trajectory(
     ).parameters()
 
     shaped = body_model.with_shape(betas)
+    left_hand_quats = SO3.identity(
+        device=R_world_root.device,
+        dtype=R_world_root.dtype,
+    ).wxyz.repeat(*R_world_root.shape[:-1], 15, 1)
+    right_hand_quats = SO3.identity(
+        device=R_world_root.device,
+        dtype=R_world_root.dtype,
+    ).wxyz.repeat(*R_world_root.shape[:-1], 15, 1)
+
     posed = shaped.with_pose_decomposed(
         T_world_root=T_world_root,
         body_quats=SO3.from_matrix(body_rotmats).wxyz,
-        left_hand_quats=None,
-        right_hand_quats=None,
+        left_hand_quats=left_hand_quats,
+        right_hand_quats=right_hand_quats,
     )
     joints_wrt_world = torch.cat(
         [posed.T_world_root[..., None, 4:7], posed.Ts_world_joint[..., 4:7]],

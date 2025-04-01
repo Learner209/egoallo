@@ -134,7 +134,6 @@ class AbsoluteDenoiseTraj(BaseDenoiseTraj):
                 self.metadata.smpl_family_model_basedir,
                 gender=self.metadata.gender,
                 num_joints=num_joints,
-                batch_size=batch * time,
             )
             .to(device)
         )
@@ -270,6 +269,8 @@ class AbsoluteDenoiseTraj(BaseDenoiseTraj):
     def apply_to_body(self, body_model: "SmplFamilyModelType") -> "SmplFamilyModelType":
         """Apply the trajectory data to a SMPL-H body model."""
         # assert self.hand_rotmats is not None
+        *batch, time, num_joints, _ = self.joints_wrt_world.shape
+        device, dtype = self.joints_wrt_world.device, self.joints_wrt_world.dtype
 
         shaped = body_model.with_shape(
             self.betas,
@@ -279,22 +280,23 @@ class AbsoluteDenoiseTraj(BaseDenoiseTraj):
             self.t_world_root,
         ).parameters()
 
+        left_hand_quats = (
+            SO3.identity(device=device, dtype=dtype).wxyz.repeat(*batch, time, 15, 1)
+            if self.hand_rotmats is None
+            else None
+        )
+        right_hand_quats = (
+            SO3.identity(device=device, dtype=dtype).wxyz.repeat(*batch, time, 15, 1)
+            if self.hand_rotmats is None
+            else None
+        )
         posed = shaped.with_pose_decomposed(
             T_world_root=T_world_root,
             body_quats=SO3.from_matrix(self.body_rotmats).wxyz,
-            left_hand_quats=SO3.from_matrix(self.hand_rotmats[..., :15, :, :]).wxyz
-            if self.hand_rotmats is not None
-            else None,
-            right_hand_quats=SO3.from_matrix(self.hand_rotmats[..., 15:30, :, :]).wxyz
-            if self.hand_rotmats is not None
-            else None,
+            left_hand_quats=left_hand_quats,
+            right_hand_quats=right_hand_quats,
         )
-        # posed = shaped.with_pose(
-        #     T_world_root=T_world_root,
-        #     local_quats=SO3.from_matrix(
-        #         torch.cat([self.body_rotmats, self.hand_rotmats], dim=-3)
-        #     ).wxyz,
-        # )
+
         return posed
 
     @jaxtyped(typechecker=typeguard.typechecked)

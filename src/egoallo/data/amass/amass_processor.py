@@ -87,7 +87,6 @@ class AMASSProcessor:
         for gender in ["male", "female", "neutral"]:
             self.body_models[gender] = SmplhModel.load(
                 self.smpl_family_model_basedir,
-                use_pca=False,
                 gender=gender,
             )
 
@@ -214,7 +213,7 @@ class AMASSProcessor:
             right_hand_quats=right_hand_quats,
         )
         # mesh: SmplMesh = posed.lbs()
-        # test_smplh_model: smplx.SMPLH = smplx.create(model_path=str(self.smpl_family_model_basedir), model_type='smplh', ext='pkl', use_pca=False)
+        # test_smplh_model: smplx.SMPLH = smplx.create(model_path=str(self.smpl_family_model_basedir), model_type='smplh', ext='pkl')
         # test_smplh_model.to(self.device)
         # output = test_smplh_model.forward(
         #     betas=betas.repeat(len(T_world_root), 1),
@@ -229,7 +228,6 @@ class AMASSProcessor:
         #     model_path=str(self.smpl_family_model_basedir),
         #     model_type="smpl",
         #     ext="pkl",
-        #     use_pca=False,
         # )
         # test_smpl_model.to(self.device)
         # output = test_smpl_model.forward(

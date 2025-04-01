@@ -55,7 +55,6 @@ class HPSProcessor:
         for gender in ["male", "female", "neutral"]:
             self.body_models[gender] = SmplhModel.load(
                 self.smplh_dir,
-                use_pca=False,
                 gender=gender,
                 num_betas=10,
             ).to(
