@@ -310,6 +310,15 @@ class TensorDataclass:
         def _getitem_impl[GetItemT](val: GetItemT, idx: tuple) -> GetItemT:
             if isinstance(val, torch.Tensor):
                 try:
+                    # Handle size-1 dimensions specially
+                    # FIXME: handling size-1 dim specially may have implications when bs is 1.
+                    if len(idx) > 0 and val.ndim > 0:
+                        new_idx = list(idx)
+                        for i, (s, dim_size) in enumerate(zip(idx, val.shape)):
+                            if dim_size == 1 and isinstance(s, slice):
+                                # For size-1 dimensions, only allow slice that would select the single element
+                                new_idx[i] = slice(0, 1)
+                        idx = tuple(new_idx)
                     return val[idx]
                 except IndexError as e:
                     raise IndexError(
