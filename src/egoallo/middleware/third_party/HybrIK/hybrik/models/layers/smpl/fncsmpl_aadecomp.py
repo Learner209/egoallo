@@ -22,6 +22,7 @@ from typing import Self
 from egoallo.transforms import SE3, SO3
 from torch import Tensor
 from egoallo.tensor_dataclass import TensorDataclass
+from egoallo.tensor_dataclass_batch_plugins import TensorDataclassBatchPlugin
 
 from egoallo.middleware.third_party.HybrIK.hybrik.models.layers.smpl.SMPL import SMPL_layer as SMPL
 import typeguard
@@ -58,7 +59,7 @@ class SmplModelAADecomp(TensorDataclass):
 class SmplShapedAADecomp(TensorDataclass):
     body_model: SmplModelAADecomp
     """The underlying body model."""
-    betas: Float[Tensor, "*#batch 10"]
+    betas: Float[Tensor, "*batch 10"]
     """betas"""
 
     @jaxtyped(typechecker=typeguard.typechecked)
@@ -78,17 +79,27 @@ class SmplShapedAADecomp(TensorDataclass):
         batch_axes = T_world_root.shape[:-1]
         global_orient = SE3(T_world_root).rotation().as_matrix().reshape(batch_axes + (1, 3, 3))
         transl = SE3(T_world_root).translation().reshape(batch_axes + (3,))
+
+        flattened_global_orient = TensorDataclassBatchPlugin.flatten_batch_dims(global_orient, batch_axes)
+        flattened_transl = TensorDataclassBatchPlugin.flatten_batch_dims(transl, batch_axes)
+        flattened_aa = TensorDataclassBatchPlugin.flatten_batch_dims(SO3(flattened_body_quats).log().reshape(batch_axes + (23 * 3,)), batch_axes)
+        flattened_betas = TensorDataclassBatchPlugin.flatten_batch_dims(self.betas, batch_axes)
+
         output = self.body_model.model.forward(
-            betas=self.betas,
-            global_orient=global_orient,
-            transl=transl,
-            pose_axis_angle=SO3(body_quats).log().reshape(batch_axes + (23 * 3,)),
+            betas=flattened_betas,
+            global_orient=flattened_global_orient,
+            transl=flattened_transl,
+            pose_axis_angle=flattened_aa,
         )
+
         ts_world_joint = output.joints[..., 1:, :]
+
+        unflattened_ts_world_joint = TensorDataclassBatchPlugin.unflatten_batch_dims(ts_world_joint, batch_axes)
+
         return _SmplShapedAndPosedAADecomp(
             self,
             T_world_root=T_world_root,
-            ts_world_joint=ts_world_joint,
+            ts_world_joint=unflattened_ts_world_joint,
         )
 
     @jaxtyped(typechecker=typeguard.typechecked)
@@ -129,28 +140,41 @@ class SmplShapedAndPosedAADecomp(TensorDataclass):
 
     @property
     def rot_mats(self) -> Float[Tensor, "*#batch 24 3 3"] | Float[Tensor, "*#batch 29 3 3"]:
+        """
+        should support arbitrary batch dimensions, however, hybrik only supports one leading dim.
+        """
+        batch_dims = self.transl.shape[:-1]
+        flattened_obj = TensorDataclassBatchPlugin.flatten_obj(self, batch_dims)
         output = self.shaped_model.body_model.model.hybrik(
-            betas=self.shaped_model.betas,
-            global_orient=SO3.exp(self.global_orient).as_matrix().reshape(self.global_orient.shape[:-1] + (3, 3)) if self.global_orient is not None else None,
-            pose_skeleton=self.pose_skeleton,
-            transl=self.transl,
-            phis=self.phis,
+            betas=flattened_obj.shaped_model.betas,
+            global_orient=SO3.exp(flattened_obj.global_orient).as_matrix().reshape(flattened_obj.global_orient.shape[:-1] + (3, 3)) if flattened_obj.global_orient is not None else None,
+            pose_skeleton=flattened_obj.pose_skeleton,
+            transl=flattened_obj.transl,
+            phis=flattened_obj.phis,
         )
-        return output.rot_mats
+        rot_mats = TensorDataclassBatchPlugin.unflatten_batch_dims(output.rot_mats, batch_dims)
+        return rot_mats
 
     def lbs(self) -> "SmplMeshAADecomp":
+        """
+        should support arbitrary batch dimensions, however, hybrik only supports one leading dim.
+        """
+        batch_dims = self.transl.shape[:-1]
+        flattened_obj = TensorDataclassBatchPlugin.flatten_obj(self, batch_dims)
         output = self.shaped_model.body_model.model.hybrik(
-            betas=self.shaped_model.betas,
-            global_orient=SO3.exp(self.global_orient).as_matrix().reshape(self.global_orient.shape[:-1] + (3, 3)) if self.global_orient is not None else None,
-            pose_skeleton=self.pose_skeleton,
-            transl=self.transl,
-            phis=self.phis,
+            betas=flattened_obj.shaped_model.betas,
+            global_orient=SO3.exp(flattened_obj.global_orient).as_matrix().reshape(flattened_obj.global_orient.shape[:-1] + (3, 3)) if flattened_obj.global_orient is not None else None,
+            pose_skeleton=flattened_obj.pose_skeleton,
+            transl=flattened_obj.transl,
+            phis=flattened_obj.phis,
         )
+        vertices = TensorDataclassBatchPlugin.unflatten_batch_dims(output.vertices, batch_dims)
+        rot_mats = TensorDataclassBatchPlugin.unflatten_batch_dims(output.rot_mats, batch_dims)
         return SmplMeshAADecomp(
             self,
-            vertices=output.vertices,
+            vertices=vertices,
             faces=self.shaped_model.body_model.model.faces_tensor,
-            rot_mats=output.rot_mats,
+            rot_mats=rot_mats,
         )
 
 

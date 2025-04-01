@@ -23,6 +23,7 @@ from egoallo.transforms import SE3, SO3
 from torch import Tensor
 from egoallo.tensor_dataclass import TensorDataclass
 from egoallo.middleware.third_party.HybrIK.hybrik.models.layers.smplx.body_models import SMPLXLayer as SMPLX
+from egoallo.tensor_dataclass_batch_plugins import TensorDataclassBatchPlugin
 import typeguard
 from jaxtyping import jaxtyped
 
@@ -40,6 +41,7 @@ class SmplxModelAADecomp(TensorDataclass):
         gender = kwargs.get("gender", "neutral")
         smplx_model_path = model_path / "smplx" / "smplx_v_1_1" / f"SMPLX_{gender.upper()}.npz"
         assert smplx_model_path.exists()
+        kwargs['use_pca'] = kwargs.get('use_pca', False)
 
         if kid_template_path:
             model = SMPLX(smplx_model_path, age='kid', kid_template_path=kid_template_path, **kwargs)
@@ -144,14 +146,17 @@ class SmplxShapedAndPosedAADecomp(TensorDataclass):
     """Translation."""
 
     def lbs(self) -> "SmplxMeshAADecomp":
+        batch_dims = self.transl.shape[:-1]
+        flattened_obj = TensorDataclassBatchPlugin.flatten_obj(self, batch_dims)
         output = self.shaped_model.body_model.model.hybrik(
-            betas=self.shaped_model.betas[..., :11],
-            pose_skeleton=self.pose_skeleton,
-            transl=self.transl,
-            phis=self.phis,
-            expression=self.expression,
+            betas=flattened_obj.shaped_model.betas[..., :11],
+            pose_skeleton=flattened_obj.pose_skeleton,
+            transl=flattened_obj.transl,
+            phis=flattened_obj.phis,
+            expression=flattened_obj.expression,
         )
-        return SmplxMeshAADecomp(self, output.vertices, self.shaped_model.body_model.model.faces_tensor)
+        vertices = TensorDataclassBatchPlugin.unflatten_batch_dims(output.vertices, batch_dims)
+        return SmplxMeshAADecomp(self, vertices, self.shaped_model.body_model.model.faces_tensor)
 
 
 @jaxtyped(typechecker=typeguard.typechecked)

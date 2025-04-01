@@ -296,7 +296,7 @@ def hybrik(
 
     # Get the joints
     # NxJx3 array
-    if leaf_thetas is not None:
+    if leaf_thetas is None:
         rest_J = vertices2joints(J_regressor, v_shaped)
     else:
         rest_J_inner = vertices2joints(J_regressor, v_shaped)
@@ -441,15 +441,23 @@ def batch_inverse_kinematics_transform_naive(
         20: 25,
         21: 40,
     }
+
     # leaf nodes rot_mats
     if leaf_thetas is not None:
-        assert NotImplementedError
+        leaf_cnt = 0
+        leaf_rot_mats = leaf_thetas.view([batch_size, -1, 3, 3])
+
 
     for i in range(1, parents.shape[0]):
         if children[i] == -1:
-            # leaf nodes
+
             if leaf_thetas is not None:
-                raise NotImplementedError
+                # leaf nodes
+                rot_mat = leaf_rot_mats[:, leaf_cnt, :, :]
+                leaf_cnt += 1
+            else:
+                rot_mat = torch.eye(3, device=pose_skeleton.device).unsqueeze(0).unsqueeze(0).expand(batch_size, 1, 3, 3)
+
 
         elif children[i] < -1:
             # elif children[i] < -1:

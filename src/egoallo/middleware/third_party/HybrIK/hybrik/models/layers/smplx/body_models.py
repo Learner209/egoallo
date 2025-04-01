@@ -1511,7 +1511,7 @@ class SMPLXLayer(SMPLX):
         expression: Optional[Float[torch.Tensor, "batch 10"]] = None,
         pose_skeleton: Optional[Float[torch.Tensor, "batch 71 3"]] = None,
         phis: Optional[Float[torch.Tensor, "batch 54 2"]] = None,
-        leaf_thetas: Optional[torch.Tensor] = None,
+        leaf_thetas: Optional[Float[torch.Tensor, "batch 16 3 3"]] = None,
         transl: Optional[Float[torch.Tensor, "batch 3"]] = None,
         return_verts: bool = True,
         root_align: bool = True,
@@ -1529,9 +1529,7 @@ class SMPLXLayer(SMPLX):
             )
 
         if leaf_thetas is not None:
-            raise NotImplementedError
-            leaf_thetas = leaf_thetas.reshape(-1, 4)
-            leaf_thetas = quat_to_rotmat(leaf_thetas)
+            leaf_thetas = leaf_thetas.reshape(-1, 3, 3)
 
         shape_components = torch.cat([betas, expression], dim=-1)
         shapedirs = torch.cat([self.shapedirs, self.expr_dirs], dim=-1)

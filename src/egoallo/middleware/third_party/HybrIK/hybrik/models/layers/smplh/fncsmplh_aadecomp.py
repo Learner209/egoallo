@@ -20,6 +20,7 @@ from pathlib import Path
 from jaxtyping import Float, Int
 from typing import Self
 from egoallo.transforms import SE3, SO3
+from egoallo.tensor_dataclass_batch_plugins import TensorDataclassBatchPlugin
 from torch import Tensor
 from egoallo.tensor_dataclass import TensorDataclass
 
@@ -77,18 +78,28 @@ class SmplhShapedAADecomp(TensorDataclass):
         assert self.betas.shape[:-1] == batch_axes, f"betas shape {self.betas.shape} does not match batch axes {batch_axes}"
         global_orient = SE3(T_world_root).rotation().as_matrix().reshape(batch_axes + (1, 3, 3))
         transl = SE3(T_world_root).translation().reshape(batch_axes + (3,))
+
+        flattened_global_orient = TensorDataclassBatchPlugin.flatten_batch_dims(global_orient, batch_axes)
+        flattened_transl = TensorDataclassBatchPlugin.flatten_batch_dims(transl, batch_axes)
+        flattened_body_rot_mats = TensorDataclassBatchPlugin.flatten_batch_dims(SO3(body_quats).as_matrix().reshape(batch_axes + (21, 3, 3)), batch_axes)
+        flattened_left_hand_rot_mats = TensorDataclassBatchPlugin.flatten_batch_dims(SO3(left_hand_quats).as_matrix().reshape(batch_axes + (15, 3, 3)), batch_axes) if left_hand_quats is not None else None
+        flattened_right_hand_rot_mats = TensorDataclassBatchPlugin.flatten_batch_dims(SO3(right_hand_quats).as_matrix().reshape(batch_axes + (15, 3, 3)), batch_axes) if right_hand_quats is not None else None
+        flattened_betas = TensorDataclassBatchPlugin.flatten_batch_dims(self.betas, batch_axes)
+
         output = self.body_model.model.forward(
-            betas=self.betas,
-            global_orient=global_orient,
-            transl=transl,
-            body_pose=SO3(body_quats).as_matrix().reshape(batch_axes + (21, 3, 3)),
-            left_hand_pose=SO3(left_hand_quats).as_matrix().reshape(batch_axes + (15, 3, 3)),
-            right_hand_pose=SO3(right_hand_quats).as_matrix().reshape(batch_axes + (15, 3, 3)),
+            betas=flattened_betas,
+            global_orient=flattened_global_orient,
+            transl=flattened_transl,
+            body_pose=flattened_body_rot_mats,
+            left_hand_pose=flattened_left_hand_rot_mats,
+            right_hand_pose=flattened_right_hand_rot_mats,
         )
         ts_world_joint = output.joints[..., 1:, :]
 
         # Temporary fix for transl not aligning with output.joints[0]
         T_world_root[..., 4:7] = output.joints[..., 0, :]
+
+        unflattened_ts_world_joint = TensorDataclassBatchPlugin.unflatten_batch_dims(ts_world_joint, batch_axes)
 
         return _SmplhShapedAndPosedAADecomp(
             self,
@@ -96,7 +107,7 @@ class SmplhShapedAADecomp(TensorDataclass):
             body_quats=body_quats,
             left_hand_quats=left_hand_quats,
             right_hand_quats=right_hand_quats,
-            ts_world_joint=ts_world_joint,
+            ts_world_joint=unflattened_ts_world_joint,
         )
 
     @jaxtyped(typechecker=typeguard.typechecked)
@@ -131,13 +142,18 @@ class SmplhShapedAndPosedAADecomp(TensorDataclass):
     """Translation."""
 
     def lbs(self) -> "SmplhMeshAADecomp":
+
+        batch_dims = self.transl.shape[:-1]
+        flattened_obj = TensorDataclassBatchPlugin.flatten_obj(self, batch_dims)
         output = self.shaped_model.body_model.model.hybrik(
-            betas=self.shaped_model.betas,
-            pose_skeleton=self.pose_skeleton,
-            transl=self.transl,
-            phis=self.phis,
+            betas=flattened_obj.shaped_model.betas,
+            pose_skeleton=flattened_obj.pose_skeleton,
+            transl=flattened_obj.transl,
+            phis=flattened_obj.phis,
         )
-        return SmplhMeshAADecomp(self, output.vertices, self.shaped_model.body_model.model.faces_tensor)
+        vertices = TensorDataclassBatchPlugin.unflatten_batch_dims(output.vertices, batch_dims)
+
+        return SmplhMeshAADecomp(self, vertices, self.shaped_model.body_model.model.faces_tensor)
 
 
 @jaxtyped(typechecker=typeguard.typechecked)

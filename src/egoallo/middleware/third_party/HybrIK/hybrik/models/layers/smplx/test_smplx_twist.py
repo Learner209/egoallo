@@ -25,7 +25,6 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__)))
 # Import SMPLX model
 from egoallo.constants import SmplFamilyMetaModelZoo
 from egoallo.type_stubs import SmplFamilyModelType
-from src.egoallo.middleware.third_party.HybrIK.hybrik.models.layers.smplx.body_models import SMPLXLayer
 
 def parse_args():
     """Parse input arguments."""
@@ -93,7 +92,6 @@ def init_smplx_model(model_path: Path):
         smplx_meta_name: SmplFamilyModelTypeLiteral = "SmplxModelAADecomp"
         smplx = SmplFamilyMetaModelZoo[smplx_meta_name].load(
                     model_path,
-                    use_pca=False,
         )
         return smplx
     except Exception as e:
@@ -142,6 +140,8 @@ def process_frame(smplx: SmplFamilyModelType, data, frame_idx, depth_factor):
     pred_xyz_jts = torch.matmul(pred_xyz_jts, torch.tensor([[1, 0, 0], [0, 0, -1], [0, 1, 0]], dtype=torch.float32))
 
     cos_sin_phis = torch.cat([torch.cos(twist), torch.sin(twist)], dim=-1)
+    leaf_thetas_batch = torch.eye(3, dtype=torch.float32, device=pred_xyz_full.device).unsqueeze(0).repeat(16, 1, 1).unsqueeze(0)
+
     with torch.no_grad():
         output = smplx.model.hybrik(
             betas=pred_betas,
@@ -151,6 +151,7 @@ def process_frame(smplx: SmplFamilyModelType, data, frame_idx, depth_factor):
             transl=None,
             return_verts=True,
             root_align=True,
+            leaf_thetas=leaf_thetas_batch,
         )
 
     # Extract results

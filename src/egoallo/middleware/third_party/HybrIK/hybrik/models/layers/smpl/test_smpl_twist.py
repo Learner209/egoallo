@@ -252,7 +252,7 @@ def test_smpl_hybrik(num_joints):
     if not pickle_path:
         pytest.skip("TEST_PICKLE_PATH environment variable not set")
 
-    smpl_model_path = os.path.join(project_root, './model_files/basicModel_neutral_lbs_10_207_0_v1.0.0.pkl')
+    smpl_model_path = "assets/smpl_based_model"
 
     # Initialize SMPL model
     print(f"Testing SMPL hybrik with {num_joints} joints")

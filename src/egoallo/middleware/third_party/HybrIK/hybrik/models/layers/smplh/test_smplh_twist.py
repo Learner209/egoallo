@@ -99,7 +99,6 @@ def init_smplx_model(model_path):
     smpl_family_meta_model_name: SmplFamilyModelTypeLiteral = "SmplxModelAADecomp"
     smplx = SmplFamilyMetaModelZoo[smpl_family_meta_model_name].load(
                 model_path,
-                use_pca=False,
     )
     return smplx
 

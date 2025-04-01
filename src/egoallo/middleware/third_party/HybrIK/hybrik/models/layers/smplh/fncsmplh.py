@@ -1,16 +1,8 @@
-"""Wrapper for the SMPL-H body model.
+"""NOTE: only support 1 batch axes, not arbitrary batch axes.
+Update: 4/1
+Problems:
+1. if the left_hand_pose and right_hand_pose are not passed in during forward call, then smplx.SMPLH would use flat_hand_mean, which depends on the batch_size param when instantiating. This is an inconsistency across SmplFamilyModelType APIs! SmplFamilyModelType APIs should support inferring batch size while running forward call.
 
-We break down the SMPL-H into four stages, each with a corresponding data structure:
-- Loading the model itself:
-    `model = SmplhModel.load(path to npz)`
-- Applying a body shape to the model:
-    `shaped = model.with_shape(betas)`
-- Posing the body shape:
-    `posed = shaped.with_pose(root pose, local joint poses)`
-- Recovering the mesh with LBS:
-    `mesh = posed.lbs()`
-
-NOTE: only support 1 batch axes, not arbitrary batch axes.
 """
 
 import torch
@@ -59,6 +51,7 @@ class SmplhModel(TensorDataclass):
     def load(cls, model_path: Path, **kwargs) -> "SmplhModel":
         gender = kwargs.get("gender", "neutral")
         model_path = model_path / "smplh" / f"SMPLH_{gender.upper()}.pkl"
+        kwargs['use_pca'] = kwargs.get('use_pca', False)
         model = smplx.SMPLH(str(model_path), ext='pkl', **kwargs)
         parent_indices = tuple((model.parents[1:] - 1).tolist())  # Exclude root
         faces = torch.from_numpy(model.faces.astype(np.int32))
