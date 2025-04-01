@@ -79,12 +79,18 @@ class SmplhShapedAADecomp(TensorDataclass):
         global_orient = SE3(T_world_root).rotation().as_matrix().reshape(batch_axes + (1, 3, 3))
         transl = SE3(T_world_root).translation().reshape(batch_axes + (3,))
 
-        flattened_global_orient = TensorDataclassBatchPlugin.flatten_batch_dims(global_orient, batch_axes)
-        flattened_transl = TensorDataclassBatchPlugin.flatten_batch_dims(transl, batch_axes)
-        flattened_body_rot_mats = TensorDataclassBatchPlugin.flatten_batch_dims(SO3(body_quats).as_matrix().reshape(batch_axes + (21, 3, 3)), batch_axes)
-        flattened_left_hand_rot_mats = TensorDataclassBatchPlugin.flatten_batch_dims(SO3(left_hand_quats).as_matrix().reshape(batch_axes + (15, 3, 3)), batch_axes) if left_hand_quats is not None else None
-        flattened_right_hand_rot_mats = TensorDataclassBatchPlugin.flatten_batch_dims(SO3(right_hand_quats).as_matrix().reshape(batch_axes + (15, 3, 3)), batch_axes) if right_hand_quats is not None else None
-        flattened_betas = TensorDataclassBatchPlugin.flatten_batch_dims(self.betas, batch_axes)
+        flattened_global_orient, _ = TensorDataclassBatchPlugin.flatten_batch_dims(global_orient, batch_axes)
+        flattened_transl, _ = TensorDataclassBatchPlugin.flatten_batch_dims(transl, batch_axes)
+        flattened_body_rot_mats, _ = TensorDataclassBatchPlugin.flatten_batch_dims(SO3(body_quats).as_matrix().reshape(batch_axes + (21, 3, 3)), batch_axes)
+        if left_hand_quats is not None:
+            flattened_left_hand_rot_mats, _ = TensorDataclassBatchPlugin.flatten_batch_dims(SO3(left_hand_quats).as_matrix().reshape(batch_axes + (15, 3, 3)), batch_axes)
+        else:
+            flattened_left_hand_rot_mats = None
+        if right_hand_quats is not None:
+            flattened_right_hand_rot_mats, _ = TensorDataclassBatchPlugin.flatten_batch_dims(SO3(right_hand_quats).as_matrix().reshape(batch_axes + (15, 3, 3)), batch_axes)
+        else:
+            flattened_right_hand_rot_mats = None
+        flattened_betas, _ = TensorDataclassBatchPlugin.flatten_batch_dims(self.betas, batch_axes)
 
         output = self.body_model.model.forward(
             betas=flattened_betas,

@@ -80,10 +80,10 @@ class SmplShapedAADecomp(TensorDataclass):
         global_orient = SE3(T_world_root).rotation().as_matrix().reshape(batch_axes + (1, 3, 3))
         transl = SE3(T_world_root).translation().reshape(batch_axes + (3,))
 
-        flattened_global_orient = TensorDataclassBatchPlugin.flatten_batch_dims(global_orient, batch_axes)
-        flattened_transl = TensorDataclassBatchPlugin.flatten_batch_dims(transl, batch_axes)
-        flattened_aa = TensorDataclassBatchPlugin.flatten_batch_dims(SO3(flattened_body_quats).log().reshape(batch_axes + (23 * 3,)), batch_axes)
-        flattened_betas = TensorDataclassBatchPlugin.flatten_batch_dims(self.betas, batch_axes)
+        flattened_global_orient, _ = TensorDataclassBatchPlugin.flatten_batch_dims(global_orient, batch_axes)
+        flattened_transl, _ = TensorDataclassBatchPlugin.flatten_batch_dims(transl, batch_axes)
+        flattened_aa, _ = TensorDataclassBatchPlugin.flatten_batch_dims(SO3(body_quats).log().reshape(batch_axes + (23 * 3,)), batch_axes)
+        flattened_betas, _ = TensorDataclassBatchPlugin.flatten_batch_dims(self.betas, batch_axes)
 
         output = self.body_model.model.forward(
             betas=flattened_betas,

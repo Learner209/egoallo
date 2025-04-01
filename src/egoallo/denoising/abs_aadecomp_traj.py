@@ -17,6 +17,7 @@ import typeguard
 from jaxtyping import jaxtyped
 from egoallo.constants import SmplFamilyMetaModelZoo
 from egoallo.type_stubs import EgoTrainingDataType
+from egoallo.tensor_dataclass_batch_plugins import TensorDataclassBatchPlugin
 
 # Move type imports inside TYPE_CHECKING block to avoid circular imports
 if TYPE_CHECKING:
@@ -77,17 +78,34 @@ class AbsoluteDenoiseTrajAADecomp(BaseDenoiseTraj):
 
     @property
     def R_world_root(self) -> Float[Tensor, "*batch timesteps 3 3"]:
-        smpl = SmplFamilyMetaModelZoo[self.metadata.smpl_family_meta_model_name].load(
-            self.metadata.smpl_family_model_basedir,
+        device, _ = self.joints_wrt_world.device, self.joints_wrt_world.dtype
+        smpl = (
+            SmplFamilyMetaModelZoo[self.metadata.smpl_family_meta_model_name]
+            .load(
+                self.metadata.smpl_family_model_basedir,
+            )
+            .to(device)
         )
         t_world_root = self.joints_wrt_world[..., 0, :]
+
+        batch_dims = self.joints_wrt_world.shape[:-2]
+        flattened_obj = TensorDataclassBatchPlugin.flatten_obj(self, batch_dims)
+        flattened_t_world_root, _ = TensorDataclassBatchPlugin.flatten_batch_dims(
+            t_world_root,
+            batch_dims,
+        )
+
         output = smpl.model.hybrik(
-            betas=self.betas,
-            phis=self.cos_sin_phis,
-            pose_skeleton=self.joints_wrt_world,
-            transl=t_world_root,
+            betas=flattened_obj.betas,
+            phis=flattened_obj.cos_sin_phis,
+            pose_skeleton=flattened_obj.joints_wrt_world,
+            transl=flattened_t_world_root,
         )
         full_pose = output.rot_mats
+        full_pose = TensorDataclassBatchPlugin.unflatten_batch_dims(
+            full_pose,
+            batch_dims,
+        )
         return full_pose[..., 0, :, :]
 
     @property

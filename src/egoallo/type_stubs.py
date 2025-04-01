@@ -70,8 +70,12 @@ GuidanceMode = Literal[
 # Tensor types
 JointTransforms = Float[Tensor, "time 21 7"]
 RootTransforms = Float[Tensor, "time 7"]
-BatchedJointTransforms = Float[Tensor, "batch time 21 7"]
+BatchedJointTransforms = (
+    Float[Tensor, "batch time 21 7"] | Float[Tensor, "batch time 24 7"]
+)
 BatchedRootTransforms = Float[Tensor, "batch time 7"]
+BatchedJointPos = Float[Tensor, "batch time 21 3"] | Float[Tensor, "batch time 24 3"]
+BatchedRootPos = Float[Tensor, "batch time 3"]
 Points3D = Float[Tensor, "*batch N 3"]
 
 # Dictionary types

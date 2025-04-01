@@ -12,6 +12,8 @@ from egoallo.constants import HEAD_JOINT_INDEX
 from egoallo.evaluation.metrics import EgoAlloEvaluationMetrics
 from egoallo.transforms import SO3
 from egoallo.type_stubs import BatchedJointTransforms
+from egoallo.type_stubs import BatchedRootPos
+from egoallo.type_stubs import BatchedJointPos
 from egoallo.type_stubs import FloatArray
 from egoallo.type_stubs import PathLike
 from egoallo.type_stubs import ProcrustesMode
@@ -106,8 +108,8 @@ class BodyEvaluator(BaseEvaluator):
     @jaxtyped(typechecker=typeguard.typechecked)
     def compute_head_ori(
         cls,
-        label_Ts_world_joint: Float[Tensor, "batch time 21 7"],
-        pred_Ts_world_joint: Float[Tensor, "batch time 21 7"],
+        label_Ts_world_joint: BatchedJointTransforms,
+        pred_Ts_world_joint: BatchedJointTransforms,
         device: torch.device,
     ) -> FloatArray:
         """Compute head orientation error."""
@@ -133,8 +135,8 @@ class BodyEvaluator(BaseEvaluator):
     @classmethod
     def compute_head_trans(
         cls,
-        label_Ts_world_joint: Float[Tensor, "batch time 21 7"],
-        pred_Ts_world_joint: Float[Tensor, "batch time 21 7"],
+        label_Ts_world_joint: BatchedJointTransforms,
+        pred_Ts_world_joint: BatchedJointTransforms,
         device: torch.device,
     ) -> FloatArray:
         """Compute head translation error in millimeters."""
@@ -151,10 +153,10 @@ class BodyEvaluator(BaseEvaluator):
     @jaxtyped(typechecker=typeguard.typechecked)
     def compute_mpjpe(
         cls,
-        label_root_pos: Float[Tensor, "batch time 3"],
-        label_joint_pos: Float[Tensor, "batch time num_joints 3"],
-        pred_root_pos: Float[Tensor, "batch time 3"],
-        pred_joint_pos: Float[Tensor, "batch time num_joints 3"],
+        label_root_pos: BatchedRootPos,
+        label_joint_pos: BatchedJointPos,
+        pred_root_pos: BatchedRootPos,
+        pred_joint_pos: BatchedJointPos,
         per_frame_procrustes_align: bool,
         device: torch.device,
     ) -> FloatArray:
