@@ -15,7 +15,7 @@ import os
 
 from egoallo import training_utils
 from egoallo.constants import EgoTrainingDataZoo
-from egoallo.type_stubs import EgoTrainingDataTypeLiteral
+from egoallo.type_stubs import EgoTrainingDataTypeLiteral, SmplFamilyModelTypeLiteral
 
 if TYPE_CHECKING:
     from egoallo.type_stubs import EgoTrainingDataType
@@ -31,6 +31,7 @@ os.environ["NUMEXPR_NUM_THREADS"] = "1"
 
 def main(
     smpl_family_model_basedir: Path = Path("assets/smpl_based_model"),
+    smpl_family_meta_model_name: SmplFamilyModelTypeLiteral = "SmplhModel",
     data_npz_dirs: list[Path] = [Path("")],
     output_file: Path = Path(""),
     output_list_file: Path = Path(""),
@@ -94,8 +95,9 @@ def main(
                 # breakpoint()
                 if visualize:
                     DataClass.visualize_ego_training_data(
-                        traj,
-                        smpl_family_model_basedir,
+                        data=traj,
+                        smpl_family_model_basedir=smpl_family_model_basedir,
+                        smpl_family_meta_model_name=smpl_family_meta_model_name,
                         online_render=True,
                         output_path="./test.mp4",
                     )

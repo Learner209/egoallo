@@ -38,9 +38,10 @@ def main():
         os.environ["PYOPENGL_PLATFORM"] = "egl"
 
         EgoTrainingData.visualize_ego_training_data(
-            traj,
-            smpl_family_model_basedir,
-            output_path,
+            data=traj,
+            smpl_family_model_basedir=smpl_family_model_basedir,
+            smpl_family_meta_model_name="SmplhModel",
+            output_path=output_path,
         )
         print(f"Rendering complete. Output saved to {output_path}")
 

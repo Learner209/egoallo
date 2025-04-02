@@ -44,6 +44,9 @@ def visualize_saved_trajectory(
     pred_path = output_dir / "pred_trajectory.mp4"
     combined_path = output_dir / "combined_trajectory.mp4"
 
+    smpl_family_meta_model_name = config.smpl_family_meta_model_name
+    smpl_family_model_basedir = config.smpl_family_model_basedir
+
     assert len(trajectory_path) == 2, "trajectory_path must be a tuple of length 2"
 
     if dataset_type in ("AdaptiveAmassHdf5Dataset", "VanillaEgoAmassHdf5Dataset"):
@@ -52,16 +55,18 @@ def visualize_saved_trajectory(
         pred_traj: DenoiseTrajType = torch.load(trajectory_path[1], map_location=device)
 
         EgoTrainingData.visualize_ego_training_data(
-            gt_traj,
-            smpl_family_model_basedir,
-            str(gt_path),
+            data=gt_traj,
+            smpl_family_model_basedir=smpl_family_model_basedir,
+            smpl_family_meta_model_name=smpl_family_meta_model_name,
+            output_path=str(gt_path),
             online_render=config.online_render,
         )
 
         EgoTrainingData.visualize_ego_training_data(
-            pred_traj,
-            smpl_family_model_basedir,
-            str(pred_path),
+            data=pred_traj,
+            smpl_family_model_basedir=smpl_family_model_basedir,
+            smpl_family_meta_model_name=smpl_family_meta_model_name,
+            output_path=str(pred_path),
             online_render=config.online_render,
         )
     elif dataset_type in ("AriaDataset", "AriaInferenceDataset", "EgoExoDataset"):
@@ -97,9 +102,10 @@ def visualize_saved_trajectory(
         )
 
         EgoTrainingData.visualize_ego_training_data(
-            pred_traj,
-            smpl_family_model_basedir,
-            str(pred_path),
+            data=pred_traj,
+            smpl_family_model_basedir=smpl_family_model_basedir,
+            smpl_family_meta_model_name=smpl_family_meta_model_name,
+            output_path=str(pred_path),
             scene_obj=pc_container,
             online_render=config.online_render,
         )

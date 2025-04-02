@@ -519,7 +519,7 @@ class TestRunner:
                     )
 
                 denoise_traj_type: str = (
-                    self.runtime_config.denoising._repr_denoise_traj_type()
+                    self.runtime_config.denoising.__class__.__name__
                 )
 
                 vis_ids = (
