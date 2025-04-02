@@ -501,6 +501,8 @@ def run_sampling_with_masked_data(
 
         pred_x_0[:, start_t:end_t] = post_pred_x_0
 
+    pred_x_0.metadata = post_processed_batch.metadata
+
     duration = time.time() - start_time
     logger.info(
         f"RUNTIME: {duration:.6f}, SEQ_LEN: {seq_len:2d}, FPS: {seq_len / duration:.2f}",
