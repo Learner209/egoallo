@@ -130,19 +130,44 @@ class SmplhModel(TensorDataclass):
     @jaxtyped(typechecker=typeguard.typechecked)
     def with_shape(self, betas: Float[Tensor, "*batch num_betas"]) -> "SmplhShaped":
         batch_axes = betas.shape[:-1]
-        output = self.model(
-            betas=betas.reshape(-1, betas.shape[-1]),
+
+        default_global_orient = torch.zeros(batch_axes + (3,), dtype=betas.dtype)
+        default_body_pose = torch.zeros(batch_axes + (self.model.NUM_BODY_JOINTS * 3,), dtype=betas.dtype)
+        default_transl = torch.zeros(batch_axes + (3,), dtype=betas.dtype)
+        default_left_hand_pose = torch.zeros(batch_axes + (15 * 3,), dtype=betas.dtype)
+        default_right_hand_pose = torch.zeros(batch_axes + (15 * 3,), dtype=betas.dtype)
+
+        from egoallo.tensor_dataclass_batch_plugins import TensorDataclassBatchPlugin
+        flattened_global_orient, _ = TensorDataclassBatchPlugin.flatten_batch_dims(default_global_orient, batch_axes)
+        flattened_body_pose, _ = TensorDataclassBatchPlugin.flatten_batch_dims(default_body_pose, batch_axes)
+        flattened_transl, _ = TensorDataclassBatchPlugin.flatten_batch_dims(default_transl, batch_axes)
+        flattened_left_hand_pose, _ = TensorDataclassBatchPlugin.flatten_batch_dims(default_left_hand_pose, batch_axes)
+        flattened_right_hand_pose, _ = TensorDataclassBatchPlugin.flatten_batch_dims(default_right_hand_pose, batch_axes)
+
+        flattened_betas, _ = TensorDataclassBatchPlugin.flatten_batch_dims(betas, batch_axes)
+
+        device = self.model.pose_mean.device
+        output = self.model.forward(
+            betas=flattened_betas,
+            global_orient=flattened_global_orient.to(device),
+            body_pose=flattened_body_pose.to(device),
+            transl=flattened_transl.to(device),
+            left_hand_pose=flattened_left_hand_pose.to(device),
+            right_hand_pose=flattened_right_hand_pose.to(device),
             return_verts=True,
         )
 
-        root_offset = output.joints[..., 0, :]
-        verts_zero = output.vertices - root_offset.unsqueeze(1)
-        joints_zero = output.joints[
+        output_joints = TensorDataclassBatchPlugin.unflatten_batch_dims(output.joints, batch_axes)
+        output_vertices = TensorDataclassBatchPlugin.unflatten_batch_dims(output.vertices, batch_axes)
+
+        root_offset = output_joints[..., 0, :]
+        verts_zero = output_vertices - root_offset.unsqueeze(-2)
+        joints_zero = output_joints[
             ...,
             1 : self.get_num_joints() + 1,
             :,
-        ] - root_offset.unsqueeze(1)
-        root_and_joints_zero = output.joints - root_offset.unsqueeze(1)
+        ] - root_offset.unsqueeze(-2)
+        root_and_joints_zero = output_joints - root_offset.unsqueeze(-2)
 
         t_parent_joint = (
             joints_zero
