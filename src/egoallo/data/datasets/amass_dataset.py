@@ -417,6 +417,10 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingDataType]):
             # Cache for better performance
             self._cache: dict[str, dict[str, np.ndarray[Any, Any]]] = {}
 
+        # FIXME: this is a temporary fix to load the data into mem once and for all.
+        for group in self._groups:
+            self._get_npz_group(group)
+
     def _initialize_groups(self, hdf5_file: h5py.File) -> list[str]:
         """Initialize groups based on the HDF5 file content.
 
