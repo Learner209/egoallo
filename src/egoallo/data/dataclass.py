@@ -27,9 +27,6 @@ import typeguard
 from jaxtyping import jaxtyped
 from typing import Optional, TYPE_CHECKING, Literal
 
-if TYPE_CHECKING:
-    from egoallo.type_stubs import DenoiseTrajType
-# from ..viz.smpl_viewer import SMPLViewer
 from ..viz.smpl_pyrender_viewer import SMPLViewer
 
 from egoallo.setup_logger import setup_logger
@@ -469,6 +466,8 @@ class EgoTrainingData(TensorDataclass):
             dim=-1,
         )
 
+        self.metadata.stage = "preprocessed"
+
         if _rotate_radian is not None:
             self._rotate(_rotate_radian)
             self.metadata.rotate_radian = _rotate_radian
@@ -486,8 +485,6 @@ class EgoTrainingData(TensorDataclass):
                 self.joints_wrt_world,
                 torch.ones_like(self.joints_wrt_world) * -1,
             )
-
-        self.metadata.stage = "preprocessed"
 
         return self
 
@@ -584,7 +581,11 @@ class EgoTrainingData(TensorDataclass):
 
         return self
 
-    def postprocess_denoise_traj(self, traj: "DenoiseTrajType") -> "DenoiseTrajType":
+    def postprocess_denoise_traj(
+        self,
+        traj: "DenoiseTrajType",
+        unmask: bool = False,
+    ) -> "DenoiseTrajType":
         """
         Postprocess the DenoiseTrajType.
         1. If the traj has been already rotated, rotate back.
@@ -624,22 +625,16 @@ class EgoTrainingData(TensorDataclass):
             ],
             dim=-1,
         )
-        return traj
 
-    def _set_traj(self, traj: "DenoiseTrajType") -> "DenoiseTrajType":
-        """
-        Set the trajectory for postprocessing.
-        Set the joints_wrt_world and visible_joints_mask.
-        Set the metadata.
-        """
-        assert traj.joints_wrt_world is None and traj.visible_joints_mask is None, (
-            "joints_wrt_world and visible_joints_mask should be None for postprocessing."
-        )
+        # assert traj.joints_wrt_world is None and traj.visible_joints_mask is None, (
+        #     "joints_wrt_world and visible_joints_mask should be None for postprocessing."
+        # )
+
         traj.joints_wrt_world = self.joints_wrt_world.clone()
         if self.visible_joints_mask is not None:
             # assert self.metadata.scope == "train", "visible_joints_mask should only be set for train data."
             traj.visible_joints_mask = self.visible_joints_mask.clone()
-        else:
+        elif unmask:
             assert self.metadata.scope == "test", (
                 "visible_joints_mask shouldn't be set for test data."
             )
@@ -650,6 +645,7 @@ class EgoTrainingData(TensorDataclass):
 
         # 3. assign metadata
         traj.metadata = self.metadata
+
         return traj
 
     def _rotate(self, radian: Tensor) -> Self:

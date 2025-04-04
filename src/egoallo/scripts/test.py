@@ -19,9 +19,6 @@ from egoallo.type_stubs import EgoTrainingDataType
 if TYPE_CHECKING:
     from egoallo.type_stubs import DenoiseTrajType
 
-from egoallo.middleware.third_party.HybrIK.hybrik.models.layers.smplh.fncsmplh import (
-    SmplhModel as fncsmpl,
-)
 from egoallo.config import CONFIG_FILE, make_cfg
 from egoallo.config.inference.defaults import InferenceConfig
 from egoallo.data import make_batch_collator, build_dataset
@@ -85,7 +82,7 @@ def save_single_traj(
 
 
 def compute_single_metrics_helper(
-    kwargs: Dict[str, Union[DenoiseTrajType, fncsmpl.SmplhModel, torch.device]],
+    kwargs: Dict[str, Union[DenoiseTrajType, SmplFamilyModelType, torch.device]],
 ) -> Dict[str, float]:
     return compute_single_metrics(**kwargs)
 
@@ -99,7 +96,7 @@ def save_single_traj_helper(
 class SequenceProcessor:
     """Handles processing of individual sequences."""
 
-    def __init__(self, body_model: fncsmpl.SmplhModel, device: torch.device):
+    def __init__(self, body_model: SmplFamilyModelType, device: torch.device):
         self.body_model = body_model
         self.device = device
 
@@ -153,9 +150,7 @@ class SequenceProcessor:
 
         post_batch = batch.postprocess()
         # no need to postprocess denoised_traj since its' already been postprocessed.
-        denoised_traj = post_batch._set_traj(denoised_traj)
-        gt_traj = post_batch.postprocess_denoise_traj(gt_traj)
-        gt_traj = post_batch._set_traj(gt_traj)
+        gt_traj = post_batch.postprocess_denoise_traj(gt_traj, unmask=True)
 
         return gt_traj, denoised_traj
 

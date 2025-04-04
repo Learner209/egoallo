@@ -19,6 +19,7 @@ from egoallo.type_stubs import EgoTrainingDataTypeLiteral, SmplFamilyModelTypeLi
 
 if TYPE_CHECKING:
     from egoallo.type_stubs import EgoTrainingDataType
+    from egoallo.type_stubs import DenoiseTrajTypeLiteral
 from egoallo import network
 from egoallo.utilities import get_class_from_path
 
@@ -31,12 +32,13 @@ os.environ["NUMEXPR_NUM_THREADS"] = "1"
 
 def main(
     smpl_family_model_basedir: Path = Path("assets/smpl_based_model"),
-    smpl_family_meta_model_name: SmplFamilyModelTypeLiteral = "SmplhModel",
+    smpl_family_meta_model_name: "SmplFamilyModelTypeLiteral" = "SmplhModel",
     data_npz_dirs: list[Path] = [Path("")],
     output_file: Path = Path(""),
     output_list_file: Path = Path(""),
     include_hands: bool = True,
-    ego_training_data_name: EgoTrainingDataTypeLiteral = "EgoTrainingDataAADecomp",
+    ego_training_data_name: "EgoTrainingDataTypeLiteral" = "EgoTrainingDataAADecomp",
+    denoising_mode: "DenoiseTrajTypeLiteral" = "AbsoluteDenoiseTraj",
     visualize: bool = False,
 ) -> None:
     assert torch.cuda.is_available()
@@ -79,7 +81,7 @@ def main(
                 test_data = test_data.preprocess()
 
                 denoising = network.DenoisingConfig(
-                    denoising_mode="AbsoluteDenoiseTrajAADecomp",
+                    denoising_mode=denoising_mode,
                 )
 
                 traj = denoising.from_ego_data(
@@ -90,7 +92,6 @@ def main(
 
                 test_data = test_data.postprocess()
                 traj = test_data.postprocess_denoise_traj(traj)
-                traj = test_data._set_traj(traj)
 
                 # breakpoint()
                 if visualize:

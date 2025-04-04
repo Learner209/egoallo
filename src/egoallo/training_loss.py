@@ -265,9 +265,7 @@ class TrainingLossComputer:
 
         train_batch = train_batch.postprocess()
         x_0_pred = train_batch.postprocess_denoise_traj(x_0_pred)
-        x_0_pred = train_batch._set_traj(x_0_pred)
         x_0 = train_batch.postprocess_denoise_traj(x_0)
-        x_0 = train_batch._set_traj(x_0)
 
         loss_terms: dict[str, Tensor | float] = x_0_pred.compute_loss(
             other=x_0,

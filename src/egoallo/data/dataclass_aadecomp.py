@@ -24,9 +24,6 @@ from .. import transforms as tf
 from ..tensor_dataclass import TensorDataclass
 from typing import Optional, TYPE_CHECKING, Literal
 
-if TYPE_CHECKING:
-    from egoallo.type_stubs import DenoiseTrajType
-# from ..viz.smpl_viewer import SMPLViewer
 from ..viz.smpl_pyrender_viewer import SMPLViewer
 
 from egoallo.setup_logger import setup_logger
@@ -573,6 +570,8 @@ class EgoTrainingDataAADecomp(TensorDataclass):
             dim=-1,
         )
 
+        self.metadata.stage = "preprocessed"
+
         if _rotate_radian is not None:
             self._rotate(_rotate_radian)
             self.metadata.rotate_radian = _rotate_radian
@@ -590,8 +589,6 @@ class EgoTrainingDataAADecomp(TensorDataclass):
                 self.joints_wrt_world,
                 torch.ones_like(self.joints_wrt_world) * -1,
             )
-
-        self.metadata.stage = "preprocessed"
 
         return self
 
@@ -687,7 +684,11 @@ class EgoTrainingDataAADecomp(TensorDataclass):
 
         return traj
 
-    def postprocess_denoise_traj(self, traj: "DenoiseTrajType") -> "DenoiseTrajType":
+    def postprocess_denoise_traj(
+        self,
+        traj: "DenoiseTrajType",
+        unmask: bool = False,
+    ) -> "DenoiseTrajType":
         # this func should only be called after self.postprocess() has been called.
 
         assert self.metadata.stage == "postprocessed"
@@ -695,7 +696,8 @@ class EgoTrainingDataAADecomp(TensorDataclass):
         # Restore original values of invalid joints if they exist.
         device = traj.joints_wrt_world.device
         if (
-            self.metadata.original_invalid_joints is not None
+            unmask
+            and self.metadata.original_invalid_joints is not None
             and self.visible_joints_mask is not None
         ):
             traj.joints_wrt_world = torch.where(
@@ -712,12 +714,6 @@ class EgoTrainingDataAADecomp(TensorDataclass):
 
         traj.metadata = self.metadata
 
-        return traj
-
-    def _set_traj(self, traj: "DenoiseTrajType") -> "DenoiseTrajType":
-        """
-        No-op
-        """
         return traj
 
     def _rotate(self, radian: Tensor) -> Self:
