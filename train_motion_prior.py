@@ -238,8 +238,8 @@ def run_training(
             # Check for loss spike
             current_loss = loss.item()
 
-            # Define what constitutes a "significant" spike (e.g., 2x increase)
-            spike_threshold = 8.0
+            # Define what constitutes a "significant" spike
+            spike_threshold = 4.0
 
             if previous_loss is not None:
                 if (
@@ -468,6 +468,9 @@ def run_training(
 if __name__ == "__main__":
     import hydra
     from omegaconf import DictConfig
+    import faulthandler
+
+    faulthandler.enable()
 
     training_utils.ipdb_safety_net()
 
