@@ -33,11 +33,9 @@ logger = setup_logger(output=None, name=__name__)
 
 
 def quadratic_ts(timesteps: int) -> np.ndarray:
-    """DDIM sampling schedule."""
-    end_step = 0
-    start_step = timesteps
-    x = np.arange(end_step, int(np.sqrt(start_step))) ** 2
-    x[-1] = start_step
+    steps = 50
+    start = 0
+    x = ((np.linspace(start, np.sqrt(timesteps * 0.8), steps)) ** 2).astype(int) + 1
     return x[::-1]
 
 
@@ -261,7 +259,7 @@ def run_sampling_with_masked_data(
                 torch.sqrt(
                     (1.0 - alpha_bar_t[:-1]) / (1 - alpha_bar_t[1:]) * (1 - alpha_t),
                 )
-                * 0.8,
+                * 0.0,
             ],
         )
         x_t_packed = (
