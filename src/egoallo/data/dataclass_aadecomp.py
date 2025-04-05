@@ -536,6 +536,7 @@ class EgoTrainingDataAADecomp(TensorDataclass):
             )  # [*batch, 2]
 
         # Store initial offset
+        initial_xy = initial_xy.unsqueeze(-2)
         self.metadata.initial_xy = initial_xy
         assert (
             isinstance(self.metadata.initial_xy, torch.Tensor)
@@ -543,18 +544,9 @@ class EgoTrainingDataAADecomp(TensorDataclass):
             and not torch.isnan(self.metadata.initial_xy).any()
         )
 
-        # Modify positions in-place by subtracting x,y offset
-        # Expand initial_xy to match broadcast dimensions
-        expanded_xy = initial_xy.view(
-            *initial_xy.shape[:-1],
-            1,
-            1,
-            2,
-        )  # Add dims for broadcasting
-
         self.joints_wrt_world = torch.cat(
             [
-                self.joints_wrt_world[..., :2] - expanded_xy,
+                self.joints_wrt_world[..., :2] - self.metadata.initial_xy.unsqueeze(-2),
                 self.joints_wrt_world[..., 2:],
             ],
             dim=-1,
@@ -628,18 +620,10 @@ class EgoTrainingDataAADecomp(TensorDataclass):
             dim=-1,
         )
 
-        # Add initial x,y position offset
-        # Expand initial_xy to match broadcast dimensions like in preprocess()
-        expanded_xy = self.metadata.initial_xy.view(
-            *self.metadata.initial_xy.shape[:-1],
-            1,
-            1,
-            2,
-        )  # Add dims for broadcasting
-
         self.joints_wrt_world = torch.cat(
             [
-                self.joints_wrt_world[..., :2] + expanded_xy.to(device),
+                self.joints_wrt_world[..., :2]
+                + self.metadata.initial_xy.unsqueeze(-2).to(device),
                 self.joints_wrt_world[..., 2:],
             ],
             dim=-1,

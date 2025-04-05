@@ -355,6 +355,8 @@ class EgoTrainingData(TensorDataclass):
         Modifies positions in-place to save memory.
         Returns self for method chaining.
         3. Set where joints is invalid to all zeros, indicated by visible_joints_mask.
+        Problems:
+        Currently only supports no batch dim or batch dim of 1.
         """
         assert self.metadata.stage == "raw"
         # Get initial preprocessed x,y position offset from visible joints in first frame
@@ -362,36 +364,33 @@ class EgoTrainingData(TensorDataclass):
         if self.visible_joints_mask is not None:
             # Find first frame with at least one visible joint
             *B, T, J, _ = self.joints_wrt_world.shape  # Get temporal dimension
-            for t in range(T):
-                frame_joints = self.joints_wrt_world[..., t, :, :]  # [*batch, 22, 3]
-                frame_mask = self.visible_joints_mask[..., t, :]  # [*batch, 22]
+            t = 0
+            frame_joints = self.joints_wrt_world[..., t, :, :]  # [*batch, 22, 3]
+            frame_mask = self.visible_joints_mask[..., t, :]  # [*batch, 22]
 
-                # Expand frame_mask to match batch dimensions
-                frame_mask = frame_mask.view(*B, -1)  # [*batch, 22]
+            # Expand frame_mask to match batch dimensions
+            frame_mask = frame_mask.view(*B, -1)  # [*batch, 22]
 
-                # Get visible joints while preserving batch dimensions
-                visible_joints_mask = frame_mask.unsqueeze(-1).expand(
-                    *B,
-                    -1,
-                    3,
-                )  # [*batch, 22, 3]
-                visible_joints = torch.where(
-                    visible_joints_mask,
-                    frame_joints,
-                    torch.zeros_like(frame_joints),
-                )
+            # Get visible joints while preserving batch dimensions
+            visible_joints_mask = frame_mask.unsqueeze(-1).expand(
+                *B,
+                -1,
+                3,
+            )  # [*batch, 22, 3]
+            visible_joints = torch.where(
+                visible_joints_mask,
+                frame_joints,
+                torch.zeros_like(frame_joints),
+            )
 
-                # Check if any joints are visible in each batch element
-                has_visible = frame_mask.any(dim=-1)  # [*batch]
+            # Check if any joints are visible in each batch element
+            has_visible = frame_mask.any(dim=-1)  # [*batch]
 
-                if has_visible.all():  # all batch elements have visible joints
-                    # Calculate mean only over visible joints, preserving batch dims
-                    sums = visible_joints.sum(dim=-2)  # [*batch, 3]
-                    counts = frame_mask.sum(dim=-1, keepdim=True)  # [*batch, 1]
-                    initial_xy = (sums[..., :2] / counts).clone()  # [*batch, 2]
-                    break
-            else:
-                raise RuntimeError("No frames found with visible joints")
+            assert has_visible.all()
+            # Calculate mean only over visible joints, preserving batch dims
+            sums = visible_joints.sum(dim=-2)  # [*batch, 3]
+            counts = frame_mask.sum(dim=-1, keepdim=True)  # [*batch, 1]
+            initial_xy = (sums[..., :2] / counts).clone()  # [*batch, 2]
         else:
             # raise RuntimeWarning("No visibility mask found, using mean of all joints in first frame")
             # If no visibility mask, use mean of all joints in first frame
@@ -400,21 +399,13 @@ class EgoTrainingData(TensorDataclass):
             )  # [*batch, 2]
 
         # Store initial offset
+        initial_xy = initial_xy.unsqueeze(-2)
         self.metadata.initial_xy = initial_xy
         assert (
             isinstance(self.metadata.initial_xy, torch.Tensor)
             and self.metadata.initial_xy.shape[-1] == 2
             and not torch.isnan(self.metadata.initial_xy).any()
         )
-
-        # Modify positions in-place by subtracting x,y offset
-        # Expand initial_xy to match broadcast dimensions
-        expanded_xy = initial_xy.view(
-            *initial_xy.shape[:-1],
-            1,
-            1,
-            2,
-        )  # Add dims for broadcasting
 
         self.T_world_root = torch.cat(
             [
@@ -426,7 +417,7 @@ class EgoTrainingData(TensorDataclass):
         )
         self.joints_wrt_world = torch.cat(
             [
-                self.joints_wrt_world[..., :2] - expanded_xy,
+                self.joints_wrt_world[..., :2] - initial_xy.unsqueeze(-2),
                 self.joints_wrt_world[..., 2:],
             ],
             dim=-1,
@@ -541,20 +532,10 @@ class EgoTrainingData(TensorDataclass):
             dim=-1,
         )
 
-        # Add initial x,y position offset
-        # Expand initial_xy to match broadcast dimensions like in preprocess()
-        expanded_xy = self.metadata.initial_xy.view(
-            *self.metadata.initial_xy.shape[:-1],
-            1,
-            1,
-            2,
-        )  # Add dims for broadcasting
-
         self.T_world_root = torch.cat(
             [
                 self.T_world_root[..., :4],
-                self.T_world_root[..., 4:6]
-                + self.metadata.initial_xy.unsqueeze(-2).to(device),
+                self.T_world_root[..., 4:6] + self.metadata.initial_xy.to(device),
                 self.T_world_root[..., 6:],
             ],
             dim=-1,
@@ -562,7 +543,8 @@ class EgoTrainingData(TensorDataclass):
 
         self.joints_wrt_world = torch.cat(
             [
-                self.joints_wrt_world[..., :2] + expanded_xy.to(device),
+                self.joints_wrt_world[..., :2]
+                + self.metadata.initial_xy.unsqueeze(-2).to(device),
                 self.joints_wrt_world[..., 2:],
             ],
             dim=-1,
@@ -570,8 +552,7 @@ class EgoTrainingData(TensorDataclass):
         self.T_world_cpf = torch.cat(
             [
                 self.T_world_cpf[..., :4],
-                self.T_world_cpf[..., 4:6]
-                + self.metadata.initial_xy.unsqueeze(-2).to(device),
+                self.T_world_cpf[..., 4:6] + self.metadata.initial_xy.to(device),
                 self.T_world_cpf[..., 6:],
             ],
             dim=-1,
@@ -618,10 +599,9 @@ class EgoTrainingData(TensorDataclass):
 
         traj.t_world_root = torch.cat(
             [
-                traj.t_world_root[..., :, :2]
-                + self.metadata.initial_xy.unsqueeze(-2).to(device),
-                traj.t_world_root[..., :, 2:3] + self.height_from_floor.to(device),
-                traj.t_world_root[..., :, 3:],
+                traj.t_world_root[..., :2] + self.metadata.initial_xy.to(device),
+                traj.t_world_root[..., 2:3] + self.height_from_floor.to(device),
+                traj.t_world_root[..., 3:],
             ],
             dim=-1,
         )
