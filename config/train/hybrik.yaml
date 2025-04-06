@@ -13,7 +13,7 @@ dataset_files_path:
 spatial_mask_ratio: 0.75
 temporal_mask_ratio: 0.3
 
-joint_cond_mode: absrel
+joint_cond_mode: absolute
 
 ego_training_data_name: EgoTrainingDataAADecomp
 

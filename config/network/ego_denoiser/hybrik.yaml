@@ -21,7 +21,7 @@ noise_conditioning: token
 xattn_mode: kv_from_cond_q_from_x
 
 # Joint position conditioning settings
-joint_cond_mode: absrel
+joint_cond_mode: absolute
 joint_emb_dim: 8
 
 # SMPL-H model path
