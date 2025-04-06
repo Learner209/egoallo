@@ -36,6 +36,8 @@ def quadratic_ts(timesteps: int) -> np.ndarray:
     steps = 50
     start = 0
     x = ((np.linspace(start, np.sqrt(timesteps * 0.8), steps)) ** 2).astype(int) + 1
+    # deduplicate x
+    x = np.unique(x)
     return x[::-1]
 
 
@@ -211,14 +213,6 @@ def run_sampling_with_masked_data(
                     mask=win_data.mask,
                 )
 
-                post_pred_x_0 = runtime_config.denoising.unpack_traj(
-                    post_pred_x_0,
-                    include_hands=runtime_config.model.include_hands,
-                    project_rotmats=False,
-                    metadata=win_data.metadata,
-                )
-
-                post_pred_x_0 = post_pred_x_0.pack()
                 x_0_packed_pred[:, start_t:end_t, :] += (
                     post_pred_x_0 * overlap_weights_slice
                 )
@@ -282,9 +276,40 @@ def run_sampling_with_masked_data(
 
     pred_x_0 = x_t_list[-1]
 
-    # Assigning placeholders to pred_x_0 in advance to prevent `__setitem__` impl of `TensorDataClass` ignoring None attribute.
-    pred_x_0.joints_wrt_world = torch.zeros((num_samples, seq_len, num_jts, 3))
-    pred_x_0.visible_joints_mask = torch.ones_like(pred_x_0.joints_wrt_world[..., 0])
+    visualize = False
+    if visualize:
+        from egoallo.data.dataclass import EgoTrainingData
+        from pathlib import Path
+
+        for sample in range(num_samples):
+            for ind, (start_t, end_t, win_data, overlap_weights_slice) in enumerate(
+                window_data,
+            ):
+                pred_x_0_window = copy.deepcopy(pred_x_0[:, start_t:end_t])
+                pred_x_0_window.joints_wrt_world = win_data.joints_wrt_world
+                pred_x_0_window.visible_joints_mask = win_data.visible_joints_mask
+                pred_x_0_window.metadata.stage = "postprocessed"
+                output_path = (
+                    Path(
+                        "experiments/Apr_03_vanilla_jts/v0/checkpoints_50000/test_single_window_128",
+                    )
+                    / win_data.metadata.take_name[sample][0]
+                    / f"pred_x_0_window_{ind}.mp4"
+                )
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                EgoTrainingData.visualize_ego_training_data(
+                    data=pred_x_0_window[sample],
+                    smpl_family_model_basedir=runtime_config.smpl_family_model_basedir,
+                    smpl_family_meta_model_name=runtime_config.smpl_family_meta_model_name,
+                    output_path=output_path,
+                )
+
+    if pred_x_0.joints_wrt_world is None or pred_x_0.visible_joints_mask is None:
+        # Assigning placeholders to pred_x_0 in advance to prevent `__setitem__` impl of `TensorDataClass` ignoring None attribute.
+        pred_x_0.joints_wrt_world = torch.zeros((num_samples, seq_len, num_jts, 3))
+        pred_x_0.visible_joints_mask = torch.ones_like(
+            pred_x_0.joints_wrt_world[..., 0],
+        )
 
     post_pred_x_0 = copy.deepcopy(pred_x_0)
 
@@ -296,7 +321,6 @@ def run_sampling_with_masked_data(
 
         post_pred_x_0[:, start_t:end_t] = post_pred_x_0_window
 
-    # breakpoint()
     post_pred_x_0.metadata = post_processed_batch.metadata
 
     duration = time.time() - start_time
