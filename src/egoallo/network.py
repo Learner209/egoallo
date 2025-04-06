@@ -39,6 +39,7 @@ if TYPE_CHECKING:
 
 from egoallo.utils.setup_logger import setup_logger
 from egoallo.constants import SmplFamilyMetaModelZoo
+from egoallo.utils.ego_geom import project_rotmats_via_svd
 
 from egoallo.denoising import (
     AbsoluteDenoiseTraj,
@@ -630,13 +631,14 @@ class EgoDenoiser(nn.Module):
         self.latent_from_cond = nn.Sequential(
             nn.Linear(config.d_cond, config.d_latent),
             nn.LayerNorm(config.d_latent),
-            nn.ReLU(),
+            Activation(),
             nn.TransformerEncoder(
                 nn.TransformerEncoderLayer(
                     d_model=config.d_latent,
                     nhead=8,
                     dim_feedforward=config.d_latent * 4,
-                    dropout=0.1,
+                    dropout=0.0,
+                    batch_first=True,
                 ),
                 num_layers=2,
             ),
@@ -704,7 +706,7 @@ class EgoDenoiser(nn.Module):
         t: Int[Tensor, "batch"],
         project_output_rotmats: bool,
         joints: Float[Tensor, "batch time num_joints 3"],
-        visible_joints_mask: Bool[Tensor, "batch time 22"],
+        visible_joints_mask: Bool[Tensor, "batch time num_joints"],
         mask: Bool[Tensor, "batch time"] | None,
         cond_dropout_keep_mask: Bool[Tensor, "batch"] | None = None,
     ) -> Float[Tensor, "batch time state_dim"]:
