@@ -167,7 +167,7 @@ class TrainingLossComputer:
 
         log_outputs: dict[str, Tensor | float] = {}
 
-        batch, time, _, _ = train_batch.body_quats.shape
+        batch, time, _, _ = train_batch.joints_wrt_world.shape
 
         # Create trajectory using denoising config factory method
         x_0: DenoiseTrajType = train_config.denoising.from_ego_data(

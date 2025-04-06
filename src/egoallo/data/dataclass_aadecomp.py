@@ -498,36 +498,33 @@ class EgoTrainingDataAADecomp(TensorDataclass):
         if self.visible_joints_mask is not None:
             # Find first frame with at least one visible joint
             *B, T, J, _ = self.joints_wrt_world.shape  # Get temporal dimension
-            for t in range(T):
-                frame_joints = self.joints_wrt_world[..., t, :, :]  # [*batch, 22, 3]
-                frame_mask = self.visible_joints_mask[..., t, :]  # [*batch, 22]
+            t = 0
+            frame_joints = self.joints_wrt_world[..., t, :, :]  # [*batch, 22, 3]
+            frame_mask = self.visible_joints_mask[..., t, :]  # [*batch, 22]
 
-                # Expand frame_mask to match batch dimensions
-                frame_mask = frame_mask.view(*B, -1)  # [*batch, 22]
+            # Expand frame_mask to match batch dimensions
+            frame_mask = frame_mask.view(*B, -1)  # [*batch, 22]
 
-                # Get visible joints while preserving batch dimensions
-                visible_joints_mask = frame_mask.unsqueeze(-1).expand(
-                    *B,
-                    -1,
-                    3,
-                )  # [*batch, 22, 3]
-                visible_joints = torch.where(
-                    visible_joints_mask,
-                    frame_joints,
-                    torch.zeros_like(frame_joints),
-                )
+            # Get visible joints while preserving batch dimensions
+            visible_joints_mask = frame_mask.unsqueeze(-1).expand(
+                *B,
+                -1,
+                3,
+            )  # [*batch, 22, 3]
+            visible_joints = torch.where(
+                visible_joints_mask,
+                frame_joints,
+                torch.zeros_like(frame_joints),
+            )
 
-                # Check if any joints are visible in each batch element
-                has_visible = frame_mask.any(dim=-1)  # [*batch]
+            # Check if any joints are visible in each batch element
+            has_visible = frame_mask.any(dim=-1)  # [*batch]
 
-                if has_visible.all():  # all batch elements have visible joints
-                    # Calculate mean only over visible joints, preserving batch dims
-                    sums = visible_joints.sum(dim=-2)  # [*batch, 3]
-                    counts = frame_mask.sum(dim=-1, keepdim=True)  # [*batch, 1]
-                    initial_xy = (sums[..., :2] / counts).clone()  # [*batch, 2]
-                    break
-            else:
-                raise RuntimeError("No frames found with visible joints")
+            assert has_visible.all()
+            # Calculate mean only over visible joints, preserving batch dims
+            sums = visible_joints.sum(dim=-2)  # [*batch, 3]
+            counts = frame_mask.sum(dim=-1, keepdim=True)  # [*batch, 1]
+            initial_xy = (sums[..., :2] / counts).clone()  # [*batch, 2]
         else:
             # raise RuntimeWarning("No visibility mask found, using mean of all joints in first frame")
             # If no visibility mask, use mean of all joints in first frame

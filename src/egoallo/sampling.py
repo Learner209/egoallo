@@ -243,7 +243,6 @@ def run_sampling_with_masked_data(
                 hamer_detections=hamer_detections,
                 aria_detections=aria_detections,
             )
-        x_0_packed_pred = x_0_pred.pack()
 
         if torch.any(torch.isnan(x_0_packed_pred)):
             print("found nan", i)
@@ -274,35 +273,7 @@ def run_sampling_with_masked_data(
             ),
         )
 
-    pred_x_0 = x_t_list[-1]
-
-    visualize = False
-    if visualize:
-        from egoallo.data.dataclass import EgoTrainingData
-        from pathlib import Path
-
-        for sample in range(num_samples):
-            for ind, (start_t, end_t, win_data, overlap_weights_slice) in enumerate(
-                window_data,
-            ):
-                pred_x_0_window = copy.deepcopy(pred_x_0[:, start_t:end_t])
-                pred_x_0_window.joints_wrt_world = win_data.joints_wrt_world
-                pred_x_0_window.visible_joints_mask = win_data.visible_joints_mask
-                pred_x_0_window.metadata.stage = "postprocessed"
-                output_path = (
-                    Path(
-                        "experiments/Apr_03_vanilla_jts/v0/checkpoints_50000/test_single_window_128",
-                    )
-                    / win_data.metadata.take_name[sample][0]
-                    / f"pred_x_0_window_{ind}.mp4"
-                )
-                output_path.parent.mkdir(parents=True, exist_ok=True)
-                EgoTrainingData.visualize_ego_training_data(
-                    data=pred_x_0_window[sample],
-                    smpl_family_model_basedir=runtime_config.smpl_family_model_basedir,
-                    smpl_family_meta_model_name=runtime_config.smpl_family_meta_model_name,
-                    output_path=output_path,
-                )
+    pred_x_0 = x_0_pred
 
     if pred_x_0.joints_wrt_world is None or pred_x_0.visible_joints_mask is None:
         # Assigning placeholders to pred_x_0 in advance to prevent `__setitem__` impl of `TensorDataClass` ignoring None attribute.

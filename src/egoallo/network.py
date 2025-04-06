@@ -301,8 +301,7 @@ class EgoDenoiserConfig:
         device = joints.device
         dtype = joints.dtype
 
-        # !joints must be masked to prevent further motion information from being used
-        masked_joints = joints.clone()
+        masked_joints = joints
 
         if self.use_joint_embeddings:
             all_indices = torch.arange(self.num_joints, device=device)

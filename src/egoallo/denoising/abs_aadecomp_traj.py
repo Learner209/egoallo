@@ -607,18 +607,18 @@ class AbsoluteDenoiseTrajAADecomp(BaseDenoiseTraj):
     def postprocess(
         self,
         height_from_floor: Float[Tensor, "*batch timesteps 1"],
-        initial_xy: Float[Tensor, "*batch 2"],
+        initial_xy: Float[Tensor, "*batch 1 2"],
         rotate_radian: Optional[Float[Tensor, "1"]] = None,
     ) -> "AbsoluteDenoiseTrajAADecomp":
         assert self.metadata.stage == "preprocessed"
 
         device = self.joints_wrt_world.device
-        _dtype = self.joints_wrt_world.dtype
+        dtype = self.joints_wrt_world.dtype
 
         if rotate_radian is not None:
             # rad = SO3(self.metadata.rotate_radian.to(dtype=dtype, device=device)).inverse().
             self._rotate(
-                rotate_radian,
+                rotate_radian.to(dtype=dtype, device=device) * -1,
             )
 
         self.joints_wrt_world = torch.cat(
@@ -631,18 +631,9 @@ class AbsoluteDenoiseTrajAADecomp(BaseDenoiseTraj):
             dim=-1,
         )
 
-        # Add initial x,y position offset
-        # Expand initial_xy to match broadcast dimensions like in preprocess()
-        expanded_xy = initial_xy.view(
-            *initial_xy.shape[:-1],
-            1,
-            1,
-            2,
-        )  # Add dims for broadcasting
-
         self.joints_wrt_world = torch.cat(
             [
-                self.joints_wrt_world[..., :2] + expanded_xy.to(device),
+                self.joints_wrt_world[..., :2] + initial_xy.unsqueeze(-2).to(device),
                 self.joints_wrt_world[..., 2:],
             ],
             dim=-1,
