@@ -116,9 +116,8 @@ class AbsoluteDenoiseTrajAADecomp(BaseDenoiseTraj):
             "body_twists": 1.0,
             "contacts": 0.1,
             "hand_rotmats": 0.00,
-            "joints_wrt_world": 1.0,
+            "joints_wrt_world": 4.0,
             "foot_skating": 0.3,
-            "velocity": 0.1,
         }
         return absolute_weights
 
@@ -161,7 +160,7 @@ class AbsoluteDenoiseTrajAADecomp(BaseDenoiseTraj):
         }
 
         pred_joints = self.joints_wrt_world
-        gt_joints = other.joints_wrt_world
+        # gt_joints = other.joints_wrt_world
 
         # Foot skating loss
         foot_indices = [7, 8, 10, 11]  # Indices for foot joints
@@ -193,28 +192,10 @@ class AbsoluteDenoiseTrajAADecomp(BaseDenoiseTraj):
         # Average foot skating losses
         foot_skating_loss = torch.stack(foot_skating_losses).mean()
 
-        # Velocity loss
-        joint_velocities = (
-            pred_joints[:, 1:] - pred_joints[:, :-1]
-        )  # (batch, time-1, num_joints, 3)
-        gt_velocities = (
-            gt_joints[:, 1:] - gt_joints[:, :-1]
-        )  # (batch, time-1, num_joints, 3)
-
         loss_terms.update(
             {
                 # empirically, invisible joints loss should be more important than visible joints loss.
                 "foot_skating": foot_skating_loss,
-                "velocity": self._weight_and_mask_loss(
-                    ((joint_velocities - gt_velocities) ** 2).reshape(
-                        batch,
-                        time - 1,
-                        -1,
-                    ),
-                    mask[:, 1:],
-                    weight_t,
-                    torch.sum(mask[:, 1:]),
-                ),
             },
         )
 

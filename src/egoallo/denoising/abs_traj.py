@@ -211,14 +211,6 @@ class AbsoluteDenoiseTraj(BaseDenoiseTraj):
         # Average foot skating losses
         foot_skating_loss = torch.stack(foot_skating_losses).mean()
 
-        # Velocity loss
-        joint_velocities = (
-            pred_joints[:, 1:] - pred_joints[:, :-1]
-        )  # (batch, time-1, num_joints, 3)
-        gt_velocities = (
-            gt_joints[:, 1:] - gt_joints[:, :-1]
-        )  # (batch, time-1, num_joints, 3)
-
         loss_terms.update(
             {
                 # empirically, invisible joints loss should be more important than visible joints loss.
@@ -235,16 +227,6 @@ class AbsoluteDenoiseTraj(BaseDenoiseTraj):
                     torch.sum(mask),
                 ),
                 "foot_skating": foot_skating_loss,
-                "velocity": self._weight_and_mask_loss(
-                    ((joint_velocities - gt_velocities) ** 2).reshape(
-                        batch,
-                        time - 1,
-                        -1,
-                    ),
-                    mask[:, 1:],
-                    weight_t,
-                    torch.sum(mask[:, 1:]),
-                ),
             },
         )
         return loss_terms
