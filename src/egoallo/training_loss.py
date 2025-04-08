@@ -273,56 +273,6 @@ class TrainingLossComputer:
             weight_t=weight_t,
         )
 
-        # Include hand objective.
-        # We didn't use this in the paper.
-        # TODO: hand-rotmats loss is incorporated in the network.py DenoiseTraj class, keep it here for reference.
-        # if unwrapped_model.config.include_hands:
-        #     assert x_0_pred.hand_rotmats is not None
-        #     assert x_0.hand_rotmats is not None
-        #     assert x_0.hand_rotmats.shape == (batch, time, 30, 3, 3)
-
-        #     # Detect whether or not hands move in a sequence.
-        #     # We should only supervise sequences where the hands are actully tracked / move;
-        #     # we mask out hands in AMASS sequences where they are not tracked.
-        #     gt_hand_flatmat = x_0.hand_rotmats.reshape((batch, time, -1))
-        #     hand_motion = (
-        #         torch.sum(  # (b,) from (b, t)
-        #             torch.sum(  # (b, t) from (b, t, d)
-        #                 torch.abs(gt_hand_flatmat - gt_hand_flatmat[:, 0:1, :]), dim=-1
-        #             )
-        #             # Zero out changes in masked frames.
-        #             * train_batch.mask,
-        #             dim=-1,
-        #         )
-        #         > 1e-5
-        #     )
-        #     assert hand_motion.shape == (batch,)
-
-        #     hand_bt_mask = torch.logical_and(hand_motion[:, None], train_batch.mask)
-        #     loss_terms["hand_rotmats"] = torch.sum(
-        #         weight_and_mask_loss(
-        #             (x_0_pred.hand_rotmats - x_0.hand_rotmats).reshape(
-        #                 batch, time, 30 * 3 * 3
-        #             )
-        #             ** 2,
-        #             bt_mask=hand_bt_mask,
-        #             # We want to weight the loss by the number of frames where
-        #             # the hands actually move, but gradients here can be too
-        #             # noisy and put NaNs into mixed-precision training when we
-        #             # inevitably sample too few frames. So we clip the
-        #             # denominator.
-        #             bt_mask_sum=torch.maximum(
-        #                 torch.sum(hand_bt_mask), torch.tensor(256, device=device)
-        #             ),
-        #         )
-        #     )
-        #     # self.log(
-        #     #     "train/hand_motion_proportion",
-        #     #     torch.sum(hand_motion) / batch,
-        #     # )
-        # else:
-        #     loss_terms["hand_rotmats"] = 0.0
-
         assert all(
             k in train_config.denoising.loss_weights.keys() for k in loss_terms.keys()
         ), (
@@ -330,12 +280,15 @@ class TrainingLossComputer:
         )
         # Log loss terms.
         for name, term in loss_terms.items():
-            loss_term = term * train_config.denoising.loss_weights[name]
-            loss_terms[name] = loss_term
-            log_outputs[f"loss_term/{name}"] = loss_term
+            log_outputs[f"loss_term/{name}"] = term
 
         # Return loss.
-        loss = sum([loss_terms[k] for k in loss_terms])
+        loss = sum(
+            [
+                loss_terms[k] * train_config.denoising.loss_weights[k]
+                for k in loss_terms
+            ],
+        )
         assert isinstance(loss, Tensor)
         assert loss.shape == ()
         log_outputs["train_loss"] = loss
