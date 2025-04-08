@@ -24,6 +24,8 @@ from egoallo.constants import (
 from egoallo.type_stubs import SmplFamilyModelTypeLiteral
 
 from egoallo.type_stubs import EgoTrainingDataType
+from egoallo.tensor_dataclass_batch_plugins import TensorDataclassBatchPlugin
+from egoallo.utils.transformation import rotMat_to_orth6d
 
 local_config_file = CONFIG_FILE
 CFG = make_cfg(config_name="defaults", config_file=local_config_file, cli_args=[])
@@ -69,6 +71,28 @@ class AbsoluteDenoiseTraj(BaseDenoiseTraj):
         default_factory=EgoTrainingData.MetaData,
     )
     """Metadata for the trajectory."""
+
+    @property
+    def body_rot6d(self) -> Float[Tensor, "*batch timesteps 6"]:
+        batch_dims = self.body_rotmats.shape[:-3]
+        flattened_body_rotmats, _ = TensorDataclassBatchPlugin.flatten_batch_dims(
+            self.body_rotmats,
+            batch_dims,
+        )
+        flattened_orth6d = rotMat_to_orth6d(flattened_body_rotmats)
+        return TensorDataclassBatchPlugin.unflatten_batch_dims(
+            flattened_orth6d,
+            batch_dims,
+        )
+
+    def body_rotmats_wrt_root(
+        self,
+        body_model: "SmplFamilyModelType",
+    ) -> Float[Tensor, "*batch timesteps 21 3 3"]:
+        shaped = self.apply_to_body(body_model)
+        Ts_world_joints = shaped.Ts_world_joint
+        body_rotmats_wrt_root = SE3(Ts_world_joints).rotation().as_matrix()
+        return body_rotmats_wrt_root
 
     @property
     def loss_weights(self) -> dict[str, float]:
@@ -157,29 +181,23 @@ class AbsoluteDenoiseTraj(BaseDenoiseTraj):
         # Calculate joint position loss with masking
         joint_loss = (pred_joints - gt_joints) ** 2  # (b, t, 22, 3)
 
-        # Apply joint visibility mask and average
-        # visible_joints_mask: shape (b, t, 22), joint_loss: shape (b, t, 22, 3)
-        # Compute masked joint loss while handling shape alignment
-        # joint_loss: (b, t, 22, 3), visible_joints_mask: (b, t, 22)
         if self.visible_joints_mask is not None:
-            invisible_joint_loss = (
-                joint_loss
-                * (
-                    (~self.visible_joints_mask)[..., None]
-                )  # Use only invisible joints by inverting the visible joints mask
-            ).sum(dim=(-2, -1)) / (  # Sum over joints (22) and xyz (3)
-                ((~self.visible_joints_mask).sum(dim=-1) * 3)
-                + 1e-8  # Multiply by 3 for xyz channels
-            )  # Result: (b, t)
-            vis_jnt_loss = (joint_loss * ((self.visible_joints_mask)[..., None])).sum(
-                dim=(-2, -1),
-            ) / ((self.visible_joints_mask).sum(dim=-1) * 3 + 1e-8)
+            occ_jts_loss = (
+                joint_loss * (~self.visible_joints_mask[..., None])
+            ).reshape(batch, time, -1)
+            occ_jts_loss = self._weight_and_mask_loss(occ_jts_loss, mask, weight_t)
+            vis_jts_loss = (joint_loss * (self.visible_joints_mask[..., None])).reshape(
+                batch,
+                time,
+                -1,
+            )
+            vis_jts_loss = self._weight_and_mask_loss(vis_jts_loss, mask, weight_t)
         else:
             logger.warning(
                 "No visible joints mask found, using all joints for loss calculation, there should be no scenarios when visible_joints_mask is None",
             )
-            invisible_joint_loss = torch.zeros((batch, time), device=device)
-            vis_jnt_loss = joint_loss
+            occ_jts_loss = torch.zeros((batch, time), device=device)
+            vis_jts_loss = self._weight_and_mask_loss(joint_loss, mask, weight_t)
 
         # Foot skating loss
         foot_indices = [7, 8, 10, 11]  # Indices for foot joints
@@ -214,18 +232,8 @@ class AbsoluteDenoiseTraj(BaseDenoiseTraj):
         loss_terms.update(
             {
                 # empirically, invisible joints loss should be more important than visible joints loss.
-                "joints": self._weight_and_mask_loss(
-                    invisible_joint_loss.unsqueeze(-1),
-                    mask,
-                    weight_t,
-                    torch.sum(mask),
-                )
-                + self._weight_and_mask_loss(
-                    vis_jnt_loss.unsqueeze(-1),
-                    mask,
-                    weight_t,
-                    torch.sum(mask),
-                ),
+                "occ": occ_jts_loss,
+                "vis": vis_jts_loss,
                 "foot_skating": foot_skating_loss,
             },
         )
