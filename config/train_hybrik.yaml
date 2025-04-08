@@ -1,6 +1,6 @@
 defaults:
   - train: hybrik
-  - inference: amass_hybrik
+  - inference: amass_hybrik_during_train
   - network/ego_denoiser: hybrik
   - network/denoising: absolute_aadecomp_traj
   - train/loss: default

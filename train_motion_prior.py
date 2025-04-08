@@ -292,6 +292,25 @@ def run_training(
                         model.parameters(),
                         train_cfg.max_grad_norm,
                     )
+                # Add gradient norms if not in debug mode
+                if step % 10 == 0:
+                    total_grad_norm = 0.0
+                    param_norm = 0.0
+                    for p in model.parameters():
+                        if p.grad is not None:
+                            param_norm += p.norm(2).item() ** 2
+                            grad_norm = p.grad.norm(2).item() ** 2
+                            total_grad_norm += grad_norm
+                    wandb.log(
+                        {
+                            "gradients/total_grad_norm": np.sqrt(total_grad_norm),
+                            "gradients/param_norm": np.sqrt(param_norm),
+                            "gradients/grad_to_param_ratio": np.sqrt(total_grad_norm)
+                            / (np.sqrt(param_norm) + 1e-8),
+                        },
+                        step=step,
+                    )
+
                 optim.step()
                 scheduler.step()
                 optim.zero_grad(set_to_none=True)
@@ -299,7 +318,7 @@ def run_training(
             if not accelerator.is_main_process:
                 continue
 
-            if step % 200 == 0:
+            if step % 5 == 0:
                 log_msg = (
                     f"step: {step} ({loop_metrics.iterations_per_sec:.2f} it/sec)"
                     f" epoch: {epoch} (time: {epoch_time:.1f}s)"
@@ -355,38 +374,6 @@ def run_training(
                         term_name = key.split("/")[-1]
                         wandb.log({f"losses/{term_name}": value}, step=step)
 
-                # Add gradient norms if not in debug mode
-                if not debug_mode and step % 400 == 0:
-                    total_grad_norm = 0.0
-                    param_norm = 0.0
-                    for p in model.parameters():
-                        if p.grad is not None:
-                            param_norm += p.norm(2).item() ** 2
-                            grad_norm = p.grad.norm(2).item() ** 2
-                            total_grad_norm += grad_norm
-
-                    wandb.log(
-                        {
-                            "gradients/total_grad_norm": np.sqrt(total_grad_norm),
-                            "gradients/param_norm": np.sqrt(param_norm),
-                            "gradients/grad_to_param_ratio": np.sqrt(total_grad_norm)
-                            / (np.sqrt(param_norm) + 1e-8),
-                        },
-                        step=step,
-                    )
-
-                # Log model parameter statistics periodically
-                if step % 2000 == 0:
-                    for name, param in model.named_parameters():
-                        if param.requires_grad:
-                            wandb.log(
-                                {
-                                    f"parameters/{name}/mean": param.mean().item(),
-                                    f"parameters/{name}/std": param.std().item(),
-                                    f"parameters/{name}/norm": param.norm().item(),
-                                },
-                                step=step,
-                            )
             # Checkpointing
             steps_to_save = 1e4
             if step % steps_to_save == 0:
@@ -394,11 +381,6 @@ def run_training(
                 checkpoint_path = experiment_dir / f"checkpoints_{step}"
                 accelerator.save_state(str(checkpoint_path))
                 logger.info(f"Saved checkpoint to {checkpoint_path}")
-
-                # Keep checkpoints from only every 100k steps
-                # if prev_checkpoint_path is not None:
-                #     shutil.rmtree(prev_checkpoint_path)
-                # prev_checkpoint_path = None if step == 0 else checkpoint_path
 
             # Evaluation
             steps_to_eval = 1e4
