@@ -51,18 +51,15 @@ class BaseDenoiseTraj(TensorDataclass, ABC, Generic[T]):
         assert bt_mask.shape == (batch, time)
         assert weight_t.shape == (batch,)
 
-        if bt_mask_sum is None:
-            bt_mask_sum = torch.sum(bt_mask)
-
         return (
             torch.sum(
                 torch.sum(
-                    torch.mean(loss_per_step, dim=-1) * bt_mask,
+                    torch.sum(loss_per_step, dim=-1) * bt_mask,
                     dim=-1,
                 )
                 * weight_t,
             )
-            / bt_mask_sum
+            / batch
         )
 
     @abstractmethod
