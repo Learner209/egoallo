@@ -6,11 +6,14 @@ include_hands: false
 
 loss_weights:
   betas: 0.2
-  body_rotmats: 1.0
+  # body_rotmats: 1.0
+  R_world_joints: 1.0
   contacts: 0.1
   hand_rotmats: 0.0
-  R_world_root: 4.0
-  t_world_root: 4.0
-  joints: 0.0
+  # R_world_root: 1.0
+  root_rot6d: 1.0
+  t_world_root: 1.0
+  occ: 3.0
+  vis: 1.0
   foot_skating: 2.0
   velocity: 0.5
