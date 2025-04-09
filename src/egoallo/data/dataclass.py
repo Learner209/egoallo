@@ -14,6 +14,7 @@ from egoallo.transforms import SO3, SE3
 from torch import Tensor
 from typing import Generator
 from egoallo.type_stubs import SmplFamilyModelTypeLiteral
+from egoallo.tensor_dataclass_batch_plugins import TensorDataclassBatchPlugin
 
 
 if TYPE_CHECKING:
@@ -30,6 +31,7 @@ from typing import Optional, TYPE_CHECKING, Literal
 from ..viz.smpl_pyrender_viewer import SMPLViewer
 
 from egoallo.setup_logger import setup_logger
+from egoallo.utils.transformation import rotMat_to_orth6d
 
 logger = setup_logger(output=None, name=__name__)
 
@@ -671,54 +673,95 @@ class EgoTrainingData(TensorDataclass):
             Appropriate trajectory object based on denoising mode
         """
         from egoallo.denoising import (
-            JointsOnlyTraj,
             AbsoluteDenoiseTraj,
-            VelocityDenoiseTraj,
         )
 
-        # Extract rotation and translation from T_world_root
+        from egoallo.constants import SmplFamilyMetaModelZoo
+
+        num_joints = self.joints_wrt_world.shape[-2]
+        device, dtype = self.T_world_root.device, self.T_world_root.dtype
+
+        body_model_name: "SmplFamilyModelTypeLiteral" = "SmplhModel"
+        body_model = (
+            SmplFamilyMetaModelZoo[body_model_name]
+            .load(
+                self.metadata.smpl_family_model_basedir,
+                gender=self.metadata.gender,
+                num_joints=num_joints,
+            )
+            .to(device)
+        )
+
         *batch, time, _ = self.T_world_root.shape
+        device, dtype = self.T_world_root.device, self.T_world_root.dtype
+
         R_world_root = SO3(self.T_world_root[..., :4]).as_matrix()
         t_world_root = self.T_world_root[..., 4:7]
 
-        # Convert body quaternions to rotation matrices
         body_rotmats = SO3(self.body_quats).as_matrix()
 
-        # Handle hand data if present and requested
         hand_rotmats = None
         if self.hand_quats is not None and include_hands:
             hand_rotmats = SO3(self.hand_quats).as_matrix()
 
-        # Create appropriate trajectory based on denoising mode
-        if denoising_mode == "joints_only":
-            return JointsOnlyTraj(
-                joints=self.joints_wrt_world,
-            )
-        elif "vel" in denoising_mode:
-            # For velocity mode, create VelocityDenoiseTraj
-            traj = VelocityDenoiseTraj(
-                betas=self.betas.expand((*batch, time, 16)),
-                body_rotmats=body_rotmats,
-                contacts=self.contacts,
-                hand_rotmats=hand_rotmats,
-                R_world_root=R_world_root,
-                t_world_root=t_world_root,
-            )
-            # VelocityDenoiseTraj will compute temporal offsets in __post_init__
-            return traj
-        else:
-            # For absolute mode, create AbsoluteDenoiseTraj
-            return AbsoluteDenoiseTraj(
-                betas=self.betas.expand((*batch, time, 16)),
-                body_rotmats=body_rotmats,
-                contacts=self.contacts,
-                hand_rotmats=hand_rotmats,
-                R_world_root=R_world_root,
-                t_world_root=t_world_root,
-                joints_wrt_world=None,
-                visible_joints_mask=None,
-                metadata=dataclasses.replace(self.metadata),
-            )
+        assert denoising_mode == "AbsoluteDenoiseTraj"
+
+        T_world_root = SE3.from_rotation_and_translation(
+            SO3.from_matrix(R_world_root),
+            t_world_root,
+        ).parameters()
+
+        shaped = body_model.with_shape(
+            self.betas,
+        )
+
+        left_hand_quats = (
+            SO3.identity(device=device, dtype=dtype).wxyz.repeat(*batch, time, 15, 1)
+            if hand_rotmats is None
+            else None
+        )
+        right_hand_quats = (
+            SO3.identity(device=device, dtype=dtype).wxyz.repeat(*batch, time, 15, 1)
+            if hand_rotmats is None
+            else None
+        )
+        posed = shaped.with_pose_decomposed(
+            T_world_root=T_world_root,
+            body_quats=SO3.from_matrix(body_rotmats).wxyz,
+            left_hand_quats=left_hand_quats,
+            right_hand_quats=right_hand_quats,
+        )
+
+        R_world_joints = (
+            SE3(posed.Ts_world_joint[..., : num_joints - 1, :]).rotation().as_matrix()
+        )
+        batch_dims = R_world_joints.shape[:-2]
+        flattened_R_world_joints, _ = TensorDataclassBatchPlugin.flatten_batch_dims(
+            R_world_joints,
+            batch_dims,
+        )
+        R_world_joints = rotMat_to_orth6d(flattened_R_world_joints).reshape(
+            batch_dims + (6,),
+        )
+
+        batch_dims = R_world_root.shape[:-2]
+        flattened_R_world_root, _ = TensorDataclassBatchPlugin.flatten_batch_dims(
+            R_world_root,
+            batch_dims,
+        )
+        root_rot6d = rotMat_to_orth6d(flattened_R_world_root).reshape(batch_dims + (6,))
+
+        return AbsoluteDenoiseTraj(
+            betas=self.betas.expand((*batch, time, 16)),
+            R_world_joints=R_world_joints,
+            contacts=self.contacts,
+            hand_rotmats=hand_rotmats,
+            t_world_root=t_world_root,
+            root_rot6d=root_rot6d,
+            joints_wrt_world=None,
+            visible_joints_mask=None,
+            metadata=dataclasses.replace(self.metadata),
+        )
 
     def __getitem__(self, index) -> Self:
         """Implements native Python slicing for TensorDataclass.

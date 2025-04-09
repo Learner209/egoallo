@@ -412,6 +412,90 @@ def forward_kinematics(
     return Ts_world_joint
 
 
+@jaxtyped(typechecker=typeguard.typechecked)
+def inverse_kinematics(
+    T_world_root: Float[Tensor, "*#batch 7"],
+    Ts_world_joints: Float[Tensor, "*#batch joints 7"],
+    parent_indices: tuple[int, ...],
+) -> tuple[Float[Tensor, "*#batch joints 4"], Float[Tensor, "*#batch joints 3"]]:
+    """
+    Run inverse kinematics to compute local joint rotations (Rs_parent_joint)
+    and local joint translations (t_parent_joint) relative to their parents.
+
+    This function reverses the process of forward_kinematics.
+
+    Args:
+        T_world_root: Absolute transformation (wxyz_xyz) to world frame from root frame.
+        Ts_world_joint: Absolute transformations (wxyz_xyz) to world frame from each joint frame.
+                       Shape must match the number of joints defined in parent_indices.
+        parent_indices: Parent index for each joint. Index of -1 signifies that
+                       a joint is defined relative to the root.
+
+    Returns:
+        A tuple containing:
+        - Rs_parent_joint: Local orientation (wxyz quat) of each joint relative to its parent.
+        - t_parent_joint: Position (xyz) of each joint relative to its parent,
+                          expressed in the parent's coordinate frame.
+    """
+    num_joints = len(parent_indices)
+    assert Ts_world_joints.shape[-2] == num_joints, \
+        f"Ts_world_joint shape {Ts_world_joints.shape} inconsistent with num_joints {num_joints}"
+    batch_shape = T_world_root.shape[:-1]
+    assert Ts_world_joints.shape[:-2] == batch_shape, \
+        f"Batch shapes mismatch: T_world_root {T_world_root.shape} vs Ts_world_joint {Ts_world_joints.shape}"
+
+    device = T_world_root.device
+    dtype = T_world_root.dtype
+
+    Rs_parent_joint_list = []
+    t_parent_joint_list = []
+
+    for i in range(num_joints):
+        parent_idx = parent_indices[i]
+
+        T_world_child = Ts_world_joints[..., i, :]
+
+        if parent_idx == -1:
+            T_world_parent = T_world_root
+        else:
+            assert 0 <= parent_idx < num_joints, f"Invalid parent index {parent_idx} for joint {i}"
+            T_world_parent = Ts_world_joints[..., parent_idx, :]
+
+        T_parent_child = SE3(T_world_parent).inverse() @ SE3(T_world_child)
+
+        R_parent_joint_i = T_parent_child.rotation().wxyz
+        t_parent_joint_i = T_parent_child.translation()
+
+        Rs_parent_joint_list.append(R_parent_joint_i)
+        t_parent_joint_list.append(t_parent_joint_i)
+
+    Rs_parent_joint_with_root = torch.stack(Rs_parent_joint_list, dim=-2)
+    t_parent_joint_with_root = torch.stack(t_parent_joint_list, dim=-2)
+
+    assert Rs_parent_joint_with_root.shape == batch_shape + (num_joints, 4)
+    assert t_parent_joint_with_root.shape == batch_shape + (num_joints, 3)
+
+    return Rs_parent_joint_with_root[..., 1:, :], t_parent_joint_with_root[..., 1:, :]
+
+
+@jaxtyped(typechecker=typeguard.typechecked)
+def inverse_kinematics_rotation_only(
+    R_world_root: Float[Tensor, "*#batch 3 3"],
+    Rs_world_joints: Float[Tensor, "*#batch joints 3 3"],
+    parent_indices: tuple[int, ...], # parent indices should exclude root, and its length is num_joints - 1, parent indicator for root is -1.
+) -> Float[Tensor, "*#batch joints 3 3"]:
+    num_joints = len(parent_indices)
+    assert Rs_world_joints.shape[-3] == num_joints, \
+        f"Rs_world_joints shape {Rs_world_joints.shape} inconsistent with num_joints {num_joints}"
+    batch_shape = R_world_root.shape[:-2]
+    assert Rs_world_joints.shape[:-3] == batch_shape, \
+        f"Batch shapes mismatch: R_world_root {R_world_root.shape} vs Rs_world_joints {Rs_world_joints.shape}"
+
+    Rs_world_joint_with_root = torch.cat([R_world_root[..., None, :, :], Rs_world_joints], dim=-3)
+
+    Rs_parent_joint = (SO3.from_matrix(Rs_world_joint_with_root[..., np.asarray(parent_indices)+1,  :, :]).inverse() @ SO3.from_matrix(Rs_world_joint_with_root[..., 1:, :, :])).as_matrix()
+    return Rs_parent_joint
+
 def broadcasting_cat(tensors: list[Tensor], dim: int) -> Tensor:
     """Like torch.cat, but broadcasts."""
     assert len(tensors) > 0
