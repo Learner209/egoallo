@@ -951,14 +951,22 @@ class TransformerBlock(nn.Module):
 
         # Self-attention.
         # We put layer normalization after the residual connection.
-        x = self.layernorm1(x + self._sattn(x, attn_mask))
+        # Post-LN
+        # x = self.layernorm1(x + self._sattn(x, attn_mask))
+
+        # Pre-LN
+        x = x + self._sattn(self.layernorm1(x), attn_mask)
 
         # Include conditioning.
         if config.include_xattn:
             assert cond is not None
-            x = self.xattn_layernorm(x + self._xattn(x, attn_mask, cond=cond))
+            # Post-LN
+            # x = self.xattn_layernorm(x + self._xattn(x, attn_mask, cond=cond))
 
-        mlp_out = x
+            # Pre-LN
+            x = x + self._xattn(self.xattn_layernorm(x), attn_mask, cond=cond)
+
+        mlp_out = self.layernorm2(x)
         mlp_out = self.mlp0(mlp_out)
         mlp_out = self.activation(mlp_out)
 
@@ -978,7 +986,8 @@ class TransformerBlock(nn.Module):
         mlp_out = self.dropout(mlp_out)
         mlp_out = self.mlp1(mlp_out)
 
-        x = self.layernorm2(x + mlp_out)
+        x = x + mlp_out
+
         assert x.shape == (batch, time, d_latent)
         return x
 
