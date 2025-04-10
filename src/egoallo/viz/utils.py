@@ -1,10 +1,15 @@
 import numpy as np
+from egoallo.transforms import SE3, SO3
 
 from jaxtyping import Float, Bool
+from typing import List
 import typeguard
 from typing import Optional
 from egoallo.mapping import EGOEXO4D_BODYPOSE_KINTREE_PARENTS, SMPLH_KINTREE
 from jaxtyping import jaxtyped
+import open3d as o3d
+import time
+import torch
 
 
 def blend_with_background(image: np.ndarray, background_color: tuple) -> np.ndarray:
@@ -496,3 +501,206 @@ def test_plot_synchronous_3d_animations_mutli_modal():
     )
 
     print("Plot generation complete. Check the displayed Plotly figure.")
+
+
+@jaxtyped(typechecker=typeguard.typechecked)
+def visualize_smpl_skeleton_with_rotation(
+    Rs_world_joints: Float[torch.Tensor, "*batch time joints 3 3"],
+    ts_world_joints: Float[torch.Tensor, "*batch time joints 3"],
+    parent_indices: List[int],
+    batch_idx: int = 0,
+    joint_sphere_radius: float = 0.01,
+    axis_size: float = 0.05,
+    skeleton_line_color: List[float] = [0.1, 0.8, 0.1],
+    joint_sphere_color: List[float] = [0.8, 0.1, 0.1],
+    window_title: str = "SMPL Skeleton Animation",
+):
+    """
+    Visualizes a continuous animation of SMPL-like skeleton movements for a specific batch using Open3D.
+
+    Args:
+        Rs_world_joints (torch.Tensor): Joint rotations in world space. Shape: (bs, ts, num_jts, 3, 3).
+        ts_world_joints (torch.Tensor): Joint translations in world space. Shape: (bs, ts, num_jts, 3).
+        parent_indices (list or torch.Tensor): Parent indices for each joint.
+    """
+    num_sphere_verts = 0
+    rel_Rs_world_joints = Rs_world_joints.clone()
+    rel_Rs_world_joints[..., 1:, :, :, :] = (
+        SO3.from_matrix(Rs_world_joints[..., :-1, :, :, :]).inverse()
+        @ SO3.from_matrix(Rs_world_joints[..., 1:, :, :, :])
+    ).as_matrix()
+    rel_Rs_world_joints = rel_Rs_world_joints.cpu().numpy(force=True)
+    Rs_world_joints = Rs_world_joints.cpu().numpy(force=True)
+    rel_ts_world_joints = ts_world_joints.clone()
+    rel_ts_world_joints[..., 1:, :, :] = (
+        ts_world_joints[..., 1:, :, :] - ts_world_joints[..., :-1, :, :]
+    )
+    rel_ts_world_joints = rel_ts_world_joints.cpu().numpy(force=True)
+    ts_world_joints = ts_world_joints.cpu().numpy(force=True)
+
+    def create_skeleton_geometries(
+        R_frame,
+        t_frame,
+        parent_indices,
+        joint_sphere_radius,
+        axis_size,
+        skeleton_line_color,
+        joint_sphere_color,
+    ):
+        geometries = []
+        num_jts = t_frame.shape[0]
+
+        # Joint Spheres
+        joint_spheres = o3d.geometry.TriangleMesh()
+        for i in range(num_jts):
+            sphere = o3d.geometry.TriangleMesh.create_sphere(radius=joint_sphere_radius)
+            sphere.translate(t_frame[i])
+            nonlocal num_sphere_verts
+            num_sphere_verts = np.asarray(sphere.vertices).shape[0]
+            joint_spheres += sphere
+        joint_spheres.paint_uniform_color(joint_sphere_color)
+        geometries.append(joint_spheres)
+
+        # Skeleton Lines
+        lines = [
+            [parent, i]
+            for i, parent in enumerate(parent_indices)
+            if parent != -1 and 0 <= parent < num_jts
+        ]
+        line_set = o3d.geometry.LineSet(
+            points=o3d.utility.Vector3dVector(t_frame),
+            lines=o3d.utility.Vector2iVector(lines),
+        )
+        line_set.paint_uniform_color(skeleton_line_color)
+        geometries.append(line_set)
+
+        # Coordinate Frames
+        for i in range(num_jts):
+            T = np.eye(4)
+            T[:3, :3] = R_frame[i]
+            T[:3, 3] = t_frame[i]
+            coord_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(
+                size=axis_size,
+            )
+            coord_frame.transform(T)
+            geometries.append(coord_frame)
+
+        return geometries
+
+    def update_skeleton_geometries(
+        geometries,
+        R_frame,
+        t_frame,
+        rel_R_frame,
+        rel_t_frame,
+        parent_indices,
+        joint_sphere_radius,
+        axis_size,
+    ):
+        num_jts = t_frame.shape[0]
+
+        # Update Joint Spheres
+        joint_spheres = geometries[0]
+        vertices = np.asarray(joint_spheres.vertices)
+        for i in range(num_jts):
+            vertices[i * num_sphere_verts : (i + 1) * num_sphere_verts] = (
+                vertices[i * num_sphere_verts : (i + 1) * num_sphere_verts]
+                - vertices[i * num_sphere_verts]
+                + t_frame[i]
+            )
+        joint_spheres.vertices = o3d.utility.Vector3dVector(vertices)
+
+        # Update Skeleton Lines
+        line_set = geometries[1]
+        line_set.points = o3d.utility.Vector3dVector(t_frame)
+
+        for i in range(num_jts):
+            geometries[i + 2].translate(rel_t_frame[i], relative=True)
+            geometries[i + 2].rotate(R=rel_R_frame[i], center=t_frame[i])
+
+    # Initialize Open3D visualizer
+    vis = o3d.visualization.Visualizer()
+    vis.create_window(window_name=f"{window_title} (Batch: {batch_idx})")
+
+    # Prepare initial geometries
+    geometries = create_skeleton_geometries(
+        Rs_world_joints[batch_idx, 0],
+        ts_world_joints[batch_idx, 0],
+        parent_indices,
+        joint_sphere_radius,
+        axis_size,
+        skeleton_line_color,
+        joint_sphere_color,
+    )
+
+    # Add geometries to the visualizer
+    for geom in geometries:
+        vis.add_geometry(geom)
+
+    vis.poll_events()
+    vis.update_renderer()
+
+    # Main animation loop
+    for time_idx in range(1, ts_world_joints.shape[1]):
+        update_skeleton_geometries(
+            geometries,
+            Rs_world_joints[batch_idx, time_idx],
+            ts_world_joints[batch_idx, time_idx],
+            rel_Rs_world_joints[batch_idx, time_idx],
+            rel_ts_world_joints[batch_idx, time_idx],
+            parent_indices,
+            joint_sphere_radius,
+            axis_size,
+        )
+
+        vis.update_geometry(geometries[0])  # Update joint spheres
+        vis.update_geometry(geometries[1])  # Update skeleton lines
+        for i in range(2, len(geometries)):  # Update coordinate frames
+            vis.update_geometry(geometries[i])
+
+        vis.poll_events()
+        vis.update_renderer()
+
+        # Optional: add a small delay to control animation speed
+        time.sleep(0.1)
+
+    vis.destroy_window()
+
+
+def test_visualize_smpl_skeleton_with_rotation():
+    import torch
+    from egoallo import network
+    from pathlib import Path
+    from egoallo.constants import SmplFamilyMetaModelZoo
+    from egoallo.mapping import SMPLH_KINTREE
+
+    _ = torch.load("/tmp/test_batch.pt")
+    body_model = SmplFamilyMetaModelZoo["SmplhModel"].load(
+        Path("./assets/smpl_based_model"),
+        gender="neutral",
+    )
+    denoising = network.DenoisingConfig(denoising_mode="AbsoluteDenoiseTraj")
+    x_0 = denoising.from_ego_data(
+        _,
+        include_hands=False,
+        smpl_family_model_basedir=Path("./assets/smpl_based_model"),
+    )
+    posed = x_0.apply_to_body(body_model)
+    Rs = (
+        SE3(torch.cat([posed.T_world_root[..., None, :], posed.Ts_world_joint], dim=-2))
+        .rotation()
+        .as_matrix()
+        .cpu()[..., :22, :, :]
+    )
+    ts = (
+        SE3(torch.cat([posed.T_world_root[..., None, :], posed.Ts_world_joint], dim=-2))
+        .translation()
+        .cpu()[..., :22, :]
+    )
+    parent_indices = SMPLH_KINTREE
+    for i in range(32):
+        visualize_smpl_skeleton_with_rotation(Rs, ts, parent_indices, batch_idx=i)
+
+
+if __name__ == "__main__":
+    test_visualize_smpl_skeleton_with_rotation()
