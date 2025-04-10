@@ -167,8 +167,7 @@ class AbsoluteDenoiseTraj(BaseDenoiseTraj):
                 ** 2,
                 mask,
                 weight_t,
-            )
-            * num_joints,
+            ),
             "t_world_root": self._weight_and_mask_loss(
                 (self.t_world_root - other.t_world_root) ** 2,
                 mask,

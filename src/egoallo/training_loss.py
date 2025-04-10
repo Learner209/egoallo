@@ -281,6 +281,9 @@ class TrainingLossComputer:
         # Log loss terms.
         for name, term in loss_terms.items():
             log_outputs[f"loss_term/{name}"] = term
+            log_outputs[f"loss_term/weighted_{name}"] = (
+                term * train_config.denoising.loss_weights[name]
+            )
 
         # Return loss.
         loss = sum(
