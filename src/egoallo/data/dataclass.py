@@ -670,11 +670,9 @@ class EgoTrainingData(TensorDataclass):
         Returns:
             Appropriate trajectory object based on denoising mode
         """
-        from egoallo.denoising import (
-            JointsOnlyTraj,
-            AbsoluteDenoiseTraj,
-            VelocityDenoiseTraj,
-        )
+        from egoallo.denoising.joints_only_traj import JointsOnlyTraj
+        from egoallo.denoising.abs_traj import AbsoluteDenoiseTraj
+        from egoallo.denoising.vel_traj import VelocityDenoiseTraj
 
         # Extract rotation and translation from T_world_root
         *batch, time, _ = self.T_world_root.shape

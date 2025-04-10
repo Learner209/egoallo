@@ -30,11 +30,9 @@ from egoallo.inference_utils import (
     load_denoiser,
     load_runtime_config,
 )
-from egoallo.denoising import (
-    AbsoluteDenoiseTraj,
-    JointsOnlyTraj,
-    VelocityDenoiseTraj,
-)
+from egoallo.denoising.abs_traj import AbsoluteDenoiseTraj
+from egoallo.denoising.joints_only_traj import JointsOnlyTraj
+from egoallo.denoising.vel_traj import VelocityDenoiseTraj
 from egoallo.network import EgoDenoiser
 from egoallo.sampling import (
     run_sampling_with_masked_data,
@@ -214,7 +212,6 @@ class TestRunner:
             shuffle=False,
             # num_workers=runtime_config.num_workers,
             num_workers=0,
-            # persistent_workers=runtime_config.num_workers > 0,
             pin_memory=True,
             collate_fn=make_batch_collator(runtime_config),
             drop_last=False,
@@ -604,6 +601,7 @@ if __name__ == "__main__":
     @hydra.main(version_base="1.3", config_path="../../../config")
     def test(cfg: DictConfig) -> None:
         inference_config: InferenceConfig = instantiate(cfg.inference)
-        main(inference_config)
+        # main(inference_config)
+        main(inference_config, debug=True)
 
     test()

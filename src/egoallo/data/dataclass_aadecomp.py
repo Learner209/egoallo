@@ -143,7 +143,7 @@ class EgoTrainingDataAADecomp(TensorDataclass):
             Appropriate trajectory object based on denoising mode
         """
         assert denoising_mode == "AbsoluteDenoiseTrajAADecomp"
-        from egoallo.denoising import AbsoluteDenoiseTrajAADecomp
+        from egoallo.denoising.abs_aadecomp_traj import AbsoluteDenoiseTrajAADecomp
 
         *batch, time, _, _ = self.body_twists.shape
 

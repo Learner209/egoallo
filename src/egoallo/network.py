@@ -41,12 +41,10 @@ from egoallo.utils.setup_logger import setup_logger
 from egoallo.constants import SmplFamilyMetaModelZoo
 from egoallo.utils.ego_geom import project_rotmats_via_svd
 
-from egoallo.denoising import (
-    AbsoluteDenoiseTraj,
-    JointsOnlyTraj,
-    VelocityDenoiseTraj,
-    AbsoluteDenoiseTrajAADecomp,
-)
+from egoallo.denoising.abs_traj import AbsoluteDenoiseTraj
+from egoallo.denoising.joints_only_traj import JointsOnlyTraj
+from egoallo.denoising.vel_traj import VelocityDenoiseTraj
+from egoallo.denoising.abs_aadecomp_traj import AbsoluteDenoiseTrajAADecomp
 
 
 local_config_file = CONFIG_FILE

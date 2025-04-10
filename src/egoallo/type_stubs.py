@@ -9,10 +9,10 @@ import numpy as np
 import torch
 
 if TYPE_CHECKING:
-    from egoallo.denoising import AbsoluteDenoiseTraj
-    from egoallo.denoising import JointsOnlyTraj
-    from egoallo.denoising import VelocityDenoiseTraj
-    from egoallo.denoising import AbsoluteDenoiseTrajAADecomp
+    from egoallo.denoising.abs_traj import AbsoluteDenoiseTraj
+    from egoallo.denoising.joints_only_traj import JointsOnlyTraj
+    from egoallo.denoising.vel_traj import VelocityDenoiseTraj
+    from egoallo.denoising.abs_aadecomp_traj import AbsoluteDenoiseTrajAADecomp
 
     from egoallo.data.dataclass import EgoTrainingData
     from egoallo.data.dataclass_aadecomp import EgoTrainingDataAADecomp
