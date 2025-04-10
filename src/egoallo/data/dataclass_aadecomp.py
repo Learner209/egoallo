@@ -687,6 +687,9 @@ class EgoTrainingDataAADecomp(TensorDataclass):
                 self.metadata.original_invalid_joints.to(device),
             )
 
+        if self.visible_joints_mask is not None:
+            traj.visible_joints_mask = self.visible_joints_mask.to(device)
+
         traj.postprocess(
             height_from_floor=self.height_from_floor,
             initial_xy=self.metadata.initial_xy,

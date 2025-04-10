@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from egoallo.type_stubs import DenoiseTrajType
 
 from . import network
-from .data.dataclass import EgoTrainingData
+from .data.dataclass import EgoTrainingDataType
 from .sampling import CosineNoiseScheduleConstants
 from egoallo.transforms import SO3
 
@@ -157,7 +157,7 @@ class TrainingLossComputer:
         model: network.EgoDenoiser | DistributedDataParallel | OptimizedModule,
         unwrapped_model: network.EgoDenoiser,
         train_config: "EgoAlloTrainConfig",
-        train_batch: EgoTrainingData,
+        train_batch: EgoTrainingDataType,
     ) -> tuple[Tensor, dict[str, Tensor | float]]:
         """Compute a training loss for the EgoDenoiser model.
 

@@ -142,16 +142,6 @@ class AbsoluteDenoiseTrajAADecomp(BaseDenoiseTraj):
                 mask,
                 weight_t,
             ),
-            "joints_wrt_world": self._weight_and_mask_loss(
-                (self.joints_wrt_world - other.joints_wrt_world).reshape(
-                    batch,
-                    time,
-                    -1,
-                )
-                ** 2,
-                mask,
-                weight_t,
-            ),
             "contacts": self._weight_and_mask_loss(
                 (self.contacts - other.contacts).reshape(batch, time, -1) ** 2,
                 mask,
@@ -160,7 +150,27 @@ class AbsoluteDenoiseTrajAADecomp(BaseDenoiseTraj):
         }
 
         pred_joints = self.joints_wrt_world
-        # gt_joints = other.joints_wrt_world
+        gt_joints = other.joints_wrt_world
+
+        joint_loss = (pred_joints - gt_joints) ** 2  # (b, t, 22, 3)
+
+        if self.visible_joints_mask is not None:
+            occ_jts_loss = (
+                joint_loss * (~self.visible_joints_mask[..., None])
+            ).reshape(batch, time, -1)
+            occ_jts_loss = self._weight_and_mask_loss(occ_jts_loss, mask, weight_t)
+            vis_jts_loss = (joint_loss * (self.visible_joints_mask[..., None])).reshape(
+                batch,
+                time,
+                -1,
+            )
+            vis_jts_loss = self._weight_and_mask_loss(vis_jts_loss, mask, weight_t)
+        else:
+            logger.warning(
+                "No visible joints mask found, using all joints for loss calculation, there should be no scenarios when visible_joints_mask is None",
+            )
+            occ_jts_loss = torch.zeros((batch, time), device=device)
+            vis_jts_loss = self._weight_and_mask_loss(joint_loss, mask, weight_t)
 
         # Foot skating loss
         foot_indices = [7, 8, 10, 11]  # Indices for foot joints
@@ -194,7 +204,8 @@ class AbsoluteDenoiseTrajAADecomp(BaseDenoiseTraj):
 
         loss_terms.update(
             {
-                # empirically, invisible joints loss should be more important than visible joints loss.
+                "occ": occ_jts_loss,
+                "vis": vis_jts_loss,
                 "foot_skating": foot_skating_loss,
             },
         )
