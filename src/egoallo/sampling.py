@@ -294,6 +294,54 @@ def run_sampling_with_masked_data(
 
     post_pred_x_0.metadata = post_processed_batch.metadata
 
+    post_pred_posed = post_pred_x_0.apply_to_body(body_model)
+    num_joints = post_processed_batch.joints_wrt_world.shape[-2]
+
+    from egoallo.middleware.third_party.HybrIK.hybrik.models.layers.smpl.fncsmpl_aadecomp import (
+        SmplShapedAndPosedAADecomp,
+    )
+    from egoallo.middleware.third_party.HybrIK.hybrik.models.layers.smplh.fncsmplh import (
+        SmplhShapedAndPosed,
+    )
+
+    if isinstance(post_pred_posed, SmplhShapedAndPosed):
+        post_pred_jts_wrt_world = torch.cat(
+            [
+                post_pred_posed.T_world_root[..., None, :],
+                post_pred_posed.Ts_world_joint[..., : num_joints - 1, :],
+            ],
+            dim=-2,
+        )[..., 4:]
+    elif isinstance(post_pred_posed, SmplShapedAndPosedAADecomp):
+        post_pred_jts_wrt_world = post_pred_posed.pose_skeleton
+
+    input_jts_wrt_world = post_processed_batch.joints_wrt_world
+
+    assert input_jts_wrt_world.shape == post_pred_jts_wrt_world.shape
+
+    pred2gt_jts_offset = input_jts_wrt_world - post_pred_jts_wrt_world
+    vis_pred2_gt_jts_offset = torch.where(
+        post_processed_batch.visible_joints_mask.bool()
+        .unsqueeze(-1)
+        .expand(*post_processed_batch.visible_joints_mask.shape, 3),
+        pred2gt_jts_offset,
+        0,
+    )  # *batch, timesteps, jts, 3
+    vis_pred2_gt_jts_offset = vis_pred2_gt_jts_offset.sum(
+        dim=(-2),
+    ) / post_processed_batch.visible_joints_mask.sum(
+        dim=-1,
+        keepdim=True,
+    )  # *batch, timesteps, 3
+
+    from egoallo.denoising.abs_traj import AbsoluteDenoiseTraj
+    from egoallo.denoising.abs_aadecomp_traj import AbsoluteDenoiseTrajAADecomp
+
+    if isinstance(post_pred_x_0, AbsoluteDenoiseTraj):
+        post_pred_x_0.t_world_root += vis_pred2_gt_jts_offset
+    elif isinstance(post_pred_x_0, AbsoluteDenoiseTrajAADecomp):
+        post_pred_x_0.joints_wrt_world += vis_pred2_gt_jts_offset[..., None, :]
+
     duration = time.time() - start_time
     logger.info(
         f"RUNTIME: {duration:.6f}, SEQ_LEN: {seq_len:2d}, FPS: {seq_len / duration:.2f}",
