@@ -26,6 +26,7 @@ if TYPE_CHECKING:
 from egoallo.transforms import SE3, SO3
 from egoallo.utils.setup_logger import setup_logger
 from .base_traj import BaseDenoiseTraj
+from egoallo.mapping import SMPL_PARENTS as smpl_parent_indices
 
 local_config_file = CONFIG_FILE
 CFG = make_cfg(config_name="defaults", config_file=local_config_file, cli_args=[])
@@ -137,11 +138,11 @@ class AbsoluteDenoiseTrajAADecomp(BaseDenoiseTraj):
                 mask,
                 weight_t,
             ),
-            "body_twists": self._weight_and_mask_loss(
-                (self.cos_sin_phis - other.cos_sin_phis).reshape(batch, time, -1) ** 2,
-                mask,
-                weight_t,
-            ),
+            # "body_twists": self._weight_and_mask_loss(
+            #     (self.cos_sin_phis - other.cos_sin_phis).reshape(batch, time, -1) ** 2,
+            #     mask,
+            #     weight_t,
+            # ),
             "contacts": self._weight_and_mask_loss(
                 (self.contacts - other.contacts).reshape(batch, time, -1) ** 2,
                 mask,
@@ -171,6 +172,25 @@ class AbsoluteDenoiseTrajAADecomp(BaseDenoiseTraj):
             )
             occ_jts_loss = torch.zeros((batch, time), device=device)
             vis_jts_loss = self._weight_and_mask_loss(joint_loss, mask, weight_t)
+
+        pred_t_parent_joint = (
+            pred_joints[..., 1:, :]
+            - pred_joints[..., 1:, :][..., smpl_parent_indices[1:], :]
+        )
+        gt_t_parent_joint = (
+            gt_joints[..., 1:, :]
+            - gt_joints[..., 1:, :][..., smpl_parent_indices[1:], :]
+        )
+        jts_relative_loss = ((pred_t_parent_joint - gt_t_parent_joint) ** 2).reshape(
+            batch,
+            time,
+            -1,
+        )
+        jts_relative_loss = self._weight_and_mask_loss(
+            jts_relative_loss,
+            mask,
+            weight_t,
+        )
 
         # Foot skating loss
         foot_indices = [7, 8, 10, 11]  # Indices for foot joints
@@ -207,6 +227,7 @@ class AbsoluteDenoiseTrajAADecomp(BaseDenoiseTraj):
                 "occ": occ_jts_loss,
                 "vis": vis_jts_loss,
                 "foot_skating": foot_skating_loss,
+                "jts_relative": jts_relative_loss,
             },
         )
 

@@ -627,8 +627,8 @@ SMPL_PARENTS = [
     7,
     8,
     9,
-    12,
-    12,
+    9,
+    9,
     12,
     13,
     14,
@@ -636,6 +636,8 @@ SMPL_PARENTS = [
     17,
     18,
     19,
+    20,
+    21,
 ]
 
 # chosen virtual mocap markers that are "keypoints" to work with
@@ -1115,8 +1117,8 @@ SMPLH_KINTREE = [
     7,
     8,
     9,
-    12,
-    12,
+    9,
+    9,
     12,
     13,
     14,

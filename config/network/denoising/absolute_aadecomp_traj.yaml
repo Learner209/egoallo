@@ -12,4 +12,4 @@ loss_weights:
   foot_skating: 0.3
   occ: 100.0
   vis: 50.0
-  velocity: 0.1
+  jts_relative: 30
