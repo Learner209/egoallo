@@ -483,7 +483,7 @@ class AbsoluteDenoiseTraj(BaseDenoiseTraj):
             )
             .parameters()
             .to(device),
-            body_quats=SO3.from_matrix(other.body_rotmats).wxyz.to(device),
+            body_quats=SO3.from_matrix(other.body_rotmats(body_model)).wxyz.to(device),
         )
         pred_shaped = body_model.with_shape(self.betas)
         pred_posed = pred_shaped.with_pose_decomposed(
@@ -493,7 +493,7 @@ class AbsoluteDenoiseTraj(BaseDenoiseTraj):
             )
             .parameters()
             .to(device),
-            body_quats=SO3.from_matrix(self.body_rotmats).wxyz.to(device),
+            body_quats=SO3.from_matrix(self.body_rotmats(body_model)).wxyz.to(device),
         )
 
         num_samples, num_timesteps = self.betas.shape[:-1]
