@@ -29,7 +29,7 @@ smpl_family_model_basedir:
   _target_: pathlib.Path
   _args_:
     - assets/smpl_based_model/
-smpl_family_meta_model_name: SmplhModelAADecomp
+smpl_family_meta_model_name: SmplModelAADecomp
 
 use_fourier_in_masked_joints: true
 use_joint_embeddings: true

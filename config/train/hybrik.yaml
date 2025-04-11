@@ -4,11 +4,11 @@ experiment_name: Mar_16
 dataset_hdf5_path:
   _target_: pathlib.Path
   _args_:
-    - ./data/amass_rich_hps/processed_amass_rich_hps_correct_axis_aadecomp.hdf5
+    - ./data/amass_rich_hps/processed_amass_rich_hps_aa_decomp.hdf5
 dataset_files_path:
   _target_: pathlib.Path
   _args_:
-    - ./data/amass_rich_hps/processed_amass_rich_hps_correct_axis_aadecomp.txt
+    - ./data/amass_rich_hps/processed_amass_rich_hps_aa_decomp.txt
 
 spatial_mask_ratio: 0.75
 temporal_mask_ratio: 0.3
@@ -16,6 +16,7 @@ temporal_mask_ratio: 0.3
 joint_cond_mode: absolute
 
 ego_training_data_name: EgoTrainingDataAADecomp
+smpl_family_meta_model_name: SmplModelAADecomp
 
 splits:
   - train
