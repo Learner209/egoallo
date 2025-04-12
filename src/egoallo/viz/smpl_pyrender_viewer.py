@@ -58,6 +58,7 @@ class SMPLViewer(SMPLBaseViewer):
         traj: "DenoiseTrajType",
         output_path: str = "output.mp4",
         online_render: bool = False,
+        **kwargs,
     ):
         # Choose rendering platform based on rendering mode
         if online_render:
@@ -158,9 +159,7 @@ class SMPLViewer(SMPLBaseViewer):
 
         posed = traj.apply_to_body(
             SmplFamilyMetaModelZoo[self.smpl_family_meta_model_name]
-            .load(
-                self.smpl_family_model_basedir,
-            )
+            .load(self.smpl_family_model_basedir, gender=kwargs.get("gender", "male"))
             .to(device),
         )
 

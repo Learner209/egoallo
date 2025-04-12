@@ -210,6 +210,8 @@ class EgoTrainingData(TensorDataclass):
         assert raw_fields["contacts"].shape == (timesteps, 52) or raw_fields[
             "contacts"
         ].shape == (timesteps, 22)
+        if raw_fields["joints"].shape == (timesteps, 52, 3):
+            raw_fields["joints"] = raw_fields["joints"][:, :22]
         assert raw_fields["joints"].shape == (timesteps, 22, 3)
         if raw_fields["betas"].shape[0] == 10:
             raw_fields["betas"] = torch.cat([raw_fields["betas"], torch.zeros(6)])
@@ -232,9 +234,6 @@ class EgoTrainingData(TensorDataclass):
 
         window_size = 30000
 
-        smpl_model_path = smpl_family_model_basedir / "smplh" / gender / "model.npz"
-        assert smpl_model_path.exists()
-
         for i in range(0, timesteps, window_size):
             end_idx = min(i + window_size, timesteps)
             batch_size = end_idx - i
@@ -247,7 +246,7 @@ class EgoTrainingData(TensorDataclass):
             body_model = (
                 SmplFamilyMetaModelZoo[smpl_family_meta_model_name]
                 .load(
-                    smpl_model_path,
+                    smpl_family_model_basedir,
                 )
                 .to(device)
             )
@@ -344,6 +343,7 @@ class EgoTrainingData(TensorDataclass):
             data,
             output_path,
             online_render=online_render,
+            **kwargs,
         )
 
     @jaxtyped(typechecker=typeguard.typechecked)

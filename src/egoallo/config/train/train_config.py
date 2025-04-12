@@ -9,6 +9,10 @@ from egoallo.type_stubs import DatasetSplit
 from egoallo.type_stubs import DatasetType
 from egoallo.type_stubs import JointCondMode
 from egoallo.type_stubs import SmplFamilyModelTypeLiteral
+from egoallo.type_stubs import EgoTrainingDataType
+from egoallo.constants import EgoTrainingDataZoo
+
+from egoallo.utilities import get_class_from_path
 
 
 @dataclasses.dataclass
@@ -40,7 +44,7 @@ class EgoAlloTrainConfig:
 
     random_sample_mask_ratio: bool = True
 
-    joint_cond_mode: JointCondMode = "absrel"
+    joint_cond_mode: JointCondMode = "absolute"
 
     # Dataset arguments.
     batch_size: int = 256
@@ -100,12 +104,18 @@ class EgoAlloTrainConfig:
     # traj_aug_num_samples: int = 10
     # """Number of samples the aug rotation is sampled uniformly along the unit circle."""
 
-    # Misc
-    ts_keys: tuple[str, ...] = tuple(
-        [
-            field.name
-            for field in dataclasses.fields(EgoTrainingData)
-            if field.name not in ("betas", "metadata")
-        ],
-    )
-    """Keys that contain time-series data in the `EgoTrainingData` dataclass."""
+    ts_keys: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        # Misc
+        DataClass: EgoTrainingDataType = get_class_from_path(
+            EgoTrainingDataZoo[self.ego_training_data_name],
+        )
+
+        self.ts_keys = tuple(
+            [
+                field.name
+                for field in dataclasses.fields(DataClass)
+                if field.name not in ("betas", "metadata")
+            ],
+        )

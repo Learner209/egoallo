@@ -3,7 +3,6 @@
 import queue
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import h5py
 import torch.cuda
@@ -17,9 +16,8 @@ from egoallo import training_utils
 from egoallo.constants import EgoTrainingDataZoo
 from egoallo.type_stubs import EgoTrainingDataTypeLiteral, SmplFamilyModelTypeLiteral
 
-if TYPE_CHECKING:
-    from egoallo.type_stubs import EgoTrainingDataType
-    from egoallo.type_stubs import DenoiseTrajTypeLiteral
+from egoallo.type_stubs import EgoTrainingDataType
+from egoallo.type_stubs import DenoiseTrajTypeLiteral
 from egoallo import network
 from egoallo.utilities import get_class_from_path
 
@@ -32,13 +30,13 @@ os.environ["NUMEXPR_NUM_THREADS"] = "1"
 
 def main(
     smpl_family_model_basedir: Path = Path("assets/smpl_based_model"),
-    smpl_family_meta_model_name: "SmplFamilyModelTypeLiteral" = "SmplhModel",
+    smpl_family_meta_model_name: SmplFamilyModelTypeLiteral = "SmplhModel",
     data_npz_dirs: list[Path] = [Path("")],
     output_file: Path = Path(""),
     output_list_file: Path = Path(""),
     include_hands: bool = True,
-    ego_training_data_name: "EgoTrainingDataTypeLiteral" = "EgoTrainingDataAADecomp",
-    denoising_mode: "DenoiseTrajTypeLiteral" = "AbsoluteDenoiseTraj",
+    ego_training_data_name: EgoTrainingDataTypeLiteral = "EgoTrainingDataAADecomp",
+    denoising_mode: DenoiseTrajTypeLiteral = "AbsoluteDenoiseTraj",
     visualize: bool = False,
 ) -> None:
     assert torch.cuda.is_available()
@@ -101,6 +99,7 @@ def main(
                         smpl_family_meta_model_name=smpl_family_meta_model_name,
                         online_render=True,
                         output_path="./test.mp4",
+                        gender=test_data.metadata.gender,
                     )
 
                 for data_npz_dir in data_npz_dirs:

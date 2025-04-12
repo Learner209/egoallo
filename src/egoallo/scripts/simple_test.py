@@ -78,7 +78,7 @@ if __name__ == "__main__":
         ascii=" >=",
     ):
         preprocessed_batch = copy.deepcopy(batch)
-        post_processed_batch = batch.postprocess()
+        post_processed_batch: EgoTrainingDataType = batch.postprocess()
         seq_len = 128
 
         window_data = []
@@ -174,8 +174,11 @@ if __name__ == "__main__":
         for start_t, end_t, win_data, overlap_weights_slice in window_data:
             pred_x_0_window = copy.deepcopy(pred_x_0[:, start_t:end_t])
 
-            win_data = win_data.postprocess()
-            post_pred_x_0_window = win_data.postprocess_denoise_traj(pred_x_0_window)
+            win_data: EgoTrainingDataType = win_data.postprocess()
+            post_pred_x_0_window = win_data.postprocess_denoise_traj(
+                pred_x_0_window,
+                unmask=False,
+            )
 
             post_pred_x_0[:, start_t:end_t] = post_pred_x_0_window
 
@@ -221,22 +224,21 @@ if __name__ == "__main__":
             keepdim=True,
         )  # *batch, timesteps, 3
 
+        x_0 = runtime_config.denoising.from_ego_data(
+            ego_data=preprocessed_batch,
+            smpl_family_model_basedir=runtime_config.smpl_family_model_basedir,
+            include_hands=runtime_config.model.include_hands,
+        )
         if isinstance(post_pred_x_0, AbsoluteDenoiseTraj):
             post_pred_x_0.t_world_root += vis_pred2_gt_jts_offset
         elif isinstance(post_pred_x_0, AbsoluteDenoiseTrajAADecomp):
             post_pred_x_0.joints_wrt_world += vis_pred2_gt_jts_offset[..., None, :]
 
-            x_0 = runtime_config.denoising.from_ego_data(
-                ego_data=preprocessed_batch,
-                smpl_family_model_basedir=runtime_config.smpl_family_model_basedir,
-                include_hands=runtime_config.model.include_hands,
-            )
             body_twists = torch.zeros_like(post_processed_batch.body_twists)
             cos_sin_phis = torch.cat(
                 [torch.cos(body_twists), torch.sin(body_twists)],
                 dim=-1,
             )
-            x_0 = post_processed_batch.postprocess_denoise_traj(x_0)
             post_pred_x_0.cos_sin_phis = cos_sin_phis
 
             ps_vis = False
@@ -257,12 +259,18 @@ if __name__ == "__main__":
                 )
                 viewer.show()
 
-        save_dir_name = "test_data_on_train_exp_Apr_10_vanilla/Apr_11_hybrik"
+        post_x_0 = post_processed_batch.postprocess_denoise_traj(x_0, unmask=True)
+        metrics = post_pred_x_0._compute_metrics(
+            other=post_x_0,
+            body_model=body_model,
+            device=device,
+        )
         # breakpoint()
         DataClass: EgoTrainingDataType = get_class_from_path(
             EgoTrainingDataZoo[runtime_config.ego_training_data_name],
         )
 
+        # vis using pyrender
         for i in range(bs):
             output_path = (
                 Path("exp")
@@ -275,4 +283,63 @@ if __name__ == "__main__":
                 smpl_family_model_basedir=runtime_config.smpl_family_model_basedir,
                 smpl_family_meta_model_name=runtime_config.smpl_family_meta_model_name,
                 output_path=str(output_path),
+                gender=post_pred_x_0.metadata.gender,
             )
+
+        # Visualize using Open3D
+        import open3d as o3d
+
+        for i in range(bs):
+            output_path = (
+                Path("exp")
+                / save_dir_name
+                / f"{post_processed_batch.metadata.take_name[i][0]}.mp4"
+            )
+            output_path.parent.mkdir(exist_ok=True, parents=True)
+
+            post_pred_lbs = post_pred_posed.lbs()
+            post_gt_posed = post_x_0.apply_to_body(body_model)
+            post_gt_lbs = post_gt_posed.lbs()
+
+            gt_verts, gt_faces = post_gt_lbs.vertices[i], post_gt_lbs.faces[i]
+            pred_verts, pred_faces = post_pred_lbs.vertices[i], post_pred_lbs.faces[i]
+
+            assert (
+                gt_faces.shape == pred_faces.shape
+                and pred_verts.shape == gt_verts.shape
+            )
+
+            # Create Open3D visualization window
+            vis = o3d.visualization.Visualizer()
+            vis.create_window()
+
+            # Create mesh objects
+            gt_mesh = o3d.geometry.TriangleMesh()
+            pred_mesh = o3d.geometry.TriangleMesh()
+
+            for t in range(gt_verts.shape[0]):
+                # Update meshes
+                gt_mesh.vertices = o3d.utility.Vector3dVector(gt_verts[t].cpu().numpy())
+                gt_mesh.triangles = o3d.utility.Vector3iVector(
+                    gt_faces[t].cpu().numpy(),
+                )
+                gt_mesh.compute_vertex_normals()
+                gt_mesh.paint_uniform_color([0, 1, 0])  # Green for ground truth
+
+                pred_mesh.vertices = o3d.utility.Vector3dVector(
+                    pred_verts[t].cpu().numpy(),
+                )
+                pred_mesh.triangles = o3d.utility.Vector3iVector(
+                    pred_faces[t].cpu().numpy(),
+                )
+                pred_mesh.compute_vertex_normals()
+                pred_mesh.paint_uniform_color([1, 0, 0])  # Red for prediction
+
+                # Clear and update visualization
+                vis.clear_geometries()
+                vis.add_geometry(gt_mesh)
+                vis.add_geometry(pred_mesh)
+                vis.poll_events()
+                vis.update_renderer()
+
+            vis.destroy_window()

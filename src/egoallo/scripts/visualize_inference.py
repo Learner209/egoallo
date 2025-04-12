@@ -59,6 +59,7 @@ def visualize_saved_trajectory(
             smpl_family_model_basedir=smpl_family_model_basedir,
             smpl_family_meta_model_name=smpl_family_meta_model_name,
             output_path=str(gt_path),
+            gender=gt_traj.metadata.gender,
             online_render=config.online_render,
         )
 
@@ -67,6 +68,7 @@ def visualize_saved_trajectory(
             smpl_family_model_basedir=smpl_family_model_basedir,
             smpl_family_meta_model_name=smpl_family_meta_model_name,
             output_path=str(pred_path),
+            gender=pred_traj.metadata.gender,
             online_render=config.online_render,
         )
     elif dataset_type in ("AriaDataset", "AriaInferenceDataset", "EgoExoDataset"):
@@ -107,6 +109,7 @@ def visualize_saved_trajectory(
             smpl_family_meta_model_name=smpl_family_meta_model_name,
             output_path=str(pred_path),
             scene_obj=pc_container,
+            gender=pred_traj.metadata.gender,
             online_render=config.online_render,
         )
         # Save frames as video

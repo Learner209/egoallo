@@ -41,6 +41,7 @@ class SMPLBaseViewer:
         config: Optional[RendererConfig] = None,
         smpl_family_model_basedir: Path | None = None,
         smpl_family_meta_model_name: SmplFamilyModelTypeLiteral = "SmplhModel",
+        **kwargs,
     ):
         """
         Initialize the SMPL viewer.

@@ -42,6 +42,7 @@ def main():
             smpl_family_model_basedir=smpl_family_model_basedir,
             smpl_family_meta_model_name="SmplhModel",
             output_path=output_path,
+            gender="male",
         )
         print(f"Rendering complete. Output saved to {output_path}")
 
