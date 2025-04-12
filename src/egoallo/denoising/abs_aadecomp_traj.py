@@ -603,13 +603,17 @@ class AbsoluteDenoiseTrajAADecomp(BaseDenoiseTraj):
         return metrics
 
     @jaxtyped(typechecker=typeguard.typechecked)
-    def _rotate(self, radian: Tensor) -> Self:
+    def _rotate(self, radian: Float[Tensor, "*batch 1"]) -> Self:
         assert self.metadata.stage == "preprocessed", (
             "Only preprocessed data is supported for rotation. since preprocessing aligns data's xy to zeros. and rotation is applied only on yaw(rpy zyx convention.)"
         )
 
+        batch_dims = radian.shape[:-1]
         so3_rot = SO3.from_z_radians(radian)
-        expanded_rot = SO3(wxyz=so3_rot.wxyz.unsqueeze(-2))
+        expanded_rot = SO3(
+            wxyz=so3_rot.wxyz[..., None, :, :],
+        )  # [*batch, 1, 3, 3], expand rotation to this shape to be compatible with [*batch, timesteps, 22, 3], the SO3.apply func better has target param and SO3 instance has the same shape.
+        assert self.joints_wrt_world.shape[:-3] == batch_dims
         self.joints_wrt_world = expanded_rot.apply(
             self.joints_wrt_world,
         )  # [*batch, timesteps, 22, 3]
@@ -621,7 +625,7 @@ class AbsoluteDenoiseTrajAADecomp(BaseDenoiseTraj):
         self,
         height_from_floor: Float[Tensor, "*batch timesteps 1"],
         initial_xy: Float[Tensor, "*batch 1 2"],
-        rotate_radian: Optional[Float[Tensor, "1"]] = None,
+        rotate_radian: Optional[Float[Tensor, "*batch 1"]] = None,
     ) -> "AbsoluteDenoiseTrajAADecomp":
         assert self.metadata.stage == "preprocessed"
 
@@ -629,7 +633,6 @@ class AbsoluteDenoiseTrajAADecomp(BaseDenoiseTraj):
         dtype = self.joints_wrt_world.dtype
 
         if rotate_radian is not None:
-            # rad = SO3(self.metadata.rotate_radian.to(dtype=dtype, device=device)).inverse().
             self._rotate(
                 rotate_radian.to(dtype=dtype, device=device) * -1,
             )
