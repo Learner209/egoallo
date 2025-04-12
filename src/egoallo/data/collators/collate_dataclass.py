@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+from pathlib import Path
 
 
 def collate_dataclass[T](batch: list[T]) -> T:
@@ -81,11 +82,31 @@ def collate_tensor_only_dataclass[T](batch: list[T]) -> T:
                 collated[key] = collate_tensor_only_dataclass(valid_values)
             else:
                 collated[key] = None
+        elif isinstance(ref_val, (str, int, float, bool, Path)):
+            valid_values = [v for v in values if v is not None]
+            if valid_values:
+                if all(v == ref_val for v in valid_values):
+                    collated[key] = ref_val
+                else:
+                    collated[key] = tuple(valid_values)
+            else:
+                collated[key] = None
 
-        elif key == "take_name":
-            collated[key] = tuple(values)
+        elif isinstance(ref_val, list):
+            assert all(isinstance(v, list) for v in values)
+            valid_values = [v for v in values if v is not None]
+            if valid_values:
+                collated[key] = sum(valid_values, [])
+            else:
+                collated[key] = None
+        elif isinstance(ref_val, tuple):
+            assert all(isinstance(v, tuple) for v in values)
+            valid_values = [v for v in values if v is not None]
+            if valid_values:
+                collated[key] = sum(valid_values, ())
+            else:
+                collated[key] = None
         else:
-            # For non-tensor fields, keep first item's value
             collated[key] = values[0]
 
     return type(first)(**collated)
