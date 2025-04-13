@@ -510,11 +510,11 @@ class AbsoluteDenoiseTraj(BaseDenoiseTraj):
         metrics["R_world_joints_error"] = float(
             BodyEvaluator.compute_masked_error(
                 gt=other.R_world_joints.reshape(
-                    *other.R_world_joints.shape[:-3],
+                    *other.R_world_joints.shape[:-2],
                     -1,
                 ),  # N, T, 207
                 pred=self.R_world_joints.reshape(
-                    *self.R_world_joints.shape[:-3],
+                    *self.R_world_joints.shape[:-2],
                     -1,
                 ),  # N, T, 207
                 device=device,
@@ -525,11 +525,11 @@ class AbsoluteDenoiseTraj(BaseDenoiseTraj):
         metrics["root_rot6d_error"] = float(
             BodyEvaluator.compute_masked_error(
                 gt=other.root_rot6d.reshape(
-                    *other.root_rot6d.shape[:-2],
+                    *other.root_rot6d.shape[:-1],
                     -1,
                 ),  # N, T, 9
                 pred=self.root_rot6d.reshape(
-                    *self.root_rot6d.shape[:-2],
+                    *self.root_rot6d.shape[:-1],
                     -1,
                 ),  # N, T, 9
                 device=device,
