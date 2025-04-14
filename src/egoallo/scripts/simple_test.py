@@ -57,9 +57,16 @@ if __name__ == "__main__":
         )
     )
 
+    all_post_pred_x_0_list = []
+    all_post_gt_x_0_list = []
+    all_metrics = {}
+
     runtime_config.splits = ("test",)
     runtime_config.temporal_mask_ratio = 0.0
-    runtime_config.batch_size = 32
+    runtime_config.batch_size = 1
+    runtime_config.dataset_slice_strategy = "full_sequence"
+
+    runtime_config.dataset_type = "AriaInferenceDataset"
 
     dataloader = torch.utils.data.DataLoader(
         dataset=build_dataset(cfg=runtime_config)(config=runtime_config),
@@ -77,18 +84,81 @@ if __name__ == "__main__":
         desc="Enumerating test loader",
         ascii=" >=",
     ):
+        assert batch.joints_wrt_world.shape[0] == 1
+        batch = batch.to(device)
         preprocessed_batch = copy.deepcopy(batch)
         post_processed_batch: EgoTrainingDataType = batch.postprocess()
+        seq_len = batch.joints_wrt_world.shape[1]
+        window_size = runtime_config.subseq_len
+        overlap_size = int(window_size / 4)
+
+        window_size = 128
+        overlap_size = 0
         seq_len = 128
 
+        x_t_packed = torch.randn(
+            (
+                bs,
+                seq_len,
+                runtime_config.denoising.d_state,
+            ),
+            device=device,
+        )
+
+        # canonical_overlap_weights = (
+        #     torch.from_numpy(
+        #         np.minimum(
+        #             overlap_size,
+        #             np.minimum(
+        #                 np.arange(1, seq_len + 1),
+        #                 np.arange(1, seq_len + 1)[::-1],
+        #             ),
+        #         )
+        #         / overlap_size,
+        #     )
+        #     .to(device)
+        #     .to(torch.float32)
+        # )
+
+        # Prepare window data in advance
         window_data = []
-        for start_t in range(0, seq_len, win_size):
-            end_t = min(start_t + win_size, seq_len)
-            overlap_weights = torch.ones((1, seq_len, 1)).to(device)
+        overlap_weights = torch.zeros((1, seq_len, 1), device=x_t_packed.device)
+
+        # for start_t in range(0, seq_len, window_size - overlap_size):
+        #     end_t = min(start_t + window_size, seq_len)
+        #     overlap_weights_slice = canonical_overlap_weights[
+        #         None,
+        #         : end_t - start_t,
+        #         None,
+        #     ]
+        #     overlap_weights[:, start_t:end_t, :] += overlap_weights_slice
+
+        #     win_data = copy.deepcopy(post_processed_batch[:, start_t:end_t])
+        #     # FIXME: this is a hack to follow the state machine of EgoTrainingData dataclass.
+        #     win_data.metadata.stage = "raw"
+        #     win_data = win_data.preprocess()
+
+        #     window_data.append((start_t, end_t, win_data, overlap_weights_slice))
+
+        post_processed_batch = post_processed_batch[:, :seq_len]
+        preprocessed_batch = preprocessed_batch[:, :seq_len]
+        overlap_weights = torch.ones((1, seq_len, 1), device=x_t_packed.device)
+        for start_t in range(0, seq_len, window_size - overlap_size):
+            end_t = min(start_t + window_size, seq_len)
+
             win_data = copy.deepcopy(post_processed_batch[:, start_t:end_t])
+            # FIXME: this is a hack to follow the state machine of EgoTrainingData dataclass.
             win_data.metadata.stage = "raw"
             win_data = win_data.preprocess()
-            window_data.append((start_t, end_t, win_data, overlap_weights))
+
+            window_data.append(
+                (
+                    start_t,
+                    end_t,
+                    win_data,
+                    torch.ones_like(overlap_weights[:, start_t:end_t, :]),
+                ),
+            )
 
         ts = quadratic_ts(timesteps=1000)
         x_t_packed = torch.randn(
@@ -232,7 +302,7 @@ if __name__ == "__main__":
         if isinstance(post_pred_x_0, AbsoluteDenoiseTraj):
             post_pred_x_0.t_world_root += vis_pred2_gt_jts_offset
         elif isinstance(post_pred_x_0, AbsoluteDenoiseTrajAADecomp):
-            post_pred_x_0.joints_wrt_world += vis_pred2_gt_jts_offset[..., None, :]
+            # post_pred_x_0.joints_wrt_world += vis_pred2_gt_jts_offset[..., None, :]
 
             body_twists = torch.zeros_like(post_processed_batch.body_twists)
             cos_sin_phis = torch.cat(
@@ -260,12 +330,18 @@ if __name__ == "__main__":
                 viewer.show()
 
         post_x_0 = post_processed_batch.postprocess_denoise_traj(x_0, unmask=True)
-        metrics = post_pred_x_0._compute_metrics(
-            other=post_x_0,
-            body_model=body_model,
-            device=device,
-        )
-        # breakpoint()
+
+        for i in range(bs):
+            metrics = post_pred_x_0[i : i + 1]._compute_metrics(
+                other=post_x_0[i : i + 1],
+                body_model=body_model,
+                device=device,
+            )
+            all_metrics[post_pred_x_0.metadata.take_name[i]] = metrics
+
+        all_post_pred_x_0_list.append(post_pred_x_0)
+        all_post_gt_x_0_list.append(post_x_0)
+
         DataClass: EgoTrainingDataType = get_class_from_path(
             EgoTrainingDataZoo[runtime_config.ego_training_data_name],
         )
@@ -275,71 +351,28 @@ if __name__ == "__main__":
             output_path = (
                 Path("exp")
                 / save_dir_name
-                / f"{post_processed_batch.metadata.take_name[i][0]}.mp4"
+                / f"{post_processed_batch.metadata.take_name[i]}.mp4"
             )
             output_path.parent.mkdir(exist_ok=True, parents=True)
-            DataClass.visualize_ego_training_data(
-                data=post_pred_x_0[i],
+
+            from egoallo.viz.smpl_pyrender_viewer import SMPLViewer
+
+            viewer = SMPLViewer(
                 smpl_family_model_basedir=runtime_config.smpl_family_model_basedir,
                 smpl_family_meta_model_name=runtime_config.smpl_family_meta_model_name,
-                output_path=str(output_path),
                 gender=post_pred_x_0.metadata.gender,
             )
-
-        # Visualize using Open3D
-        import open3d as o3d
-
-        for i in range(bs):
-            output_path = (
-                Path("exp")
-                / save_dir_name
-                / f"{post_processed_batch.metadata.take_name[i][0]}.mp4"
-            )
-            output_path.parent.mkdir(exist_ok=True, parents=True)
-
-            post_pred_lbs = post_pred_posed.lbs()
-            post_gt_posed = post_x_0.apply_to_body(body_model)
-            post_gt_lbs = post_gt_posed.lbs()
-
-            gt_verts, gt_faces = post_gt_lbs.vertices[i], post_gt_lbs.faces[i]
-            pred_verts, pred_faces = post_pred_lbs.vertices[i], post_pred_lbs.faces[i]
-
-            assert (
-                gt_faces.shape == pred_faces.shape
-                and pred_verts.shape == gt_verts.shape
+            viewer.render_list_sequences(
+                [post_pred_x_0[i], post_x_0[i]],
+                output_path,
+                online_render=False,
             )
 
-            # Create Open3D visualization window
-            vis = o3d.visualization.Visualizer()
-            vis.create_window()
-
-            # Create mesh objects
-            gt_mesh = o3d.geometry.TriangleMesh()
-            pred_mesh = o3d.geometry.TriangleMesh()
-
-            for t in range(gt_verts.shape[0]):
-                # Update meshes
-                gt_mesh.vertices = o3d.utility.Vector3dVector(gt_verts[t].cpu().numpy())
-                gt_mesh.triangles = o3d.utility.Vector3iVector(
-                    gt_faces[t].cpu().numpy(),
-                )
-                gt_mesh.compute_vertex_normals()
-                gt_mesh.paint_uniform_color([0, 1, 0])  # Green for ground truth
-
-                pred_mesh.vertices = o3d.utility.Vector3dVector(
-                    pred_verts[t].cpu().numpy(),
-                )
-                pred_mesh.triangles = o3d.utility.Vector3iVector(
-                    pred_faces[t].cpu().numpy(),
-                )
-                pred_mesh.compute_vertex_normals()
-                pred_mesh.paint_uniform_color([1, 0, 0])  # Red for prediction
-
-                # Clear and update visualization
-                vis.clear_geometries()
-                vis.add_geometry(gt_mesh)
-                vis.add_geometry(pred_mesh)
-                vis.poll_events()
-                vis.update_renderer()
-
-            vis.destroy_window()
+    pickle.dump(
+        {
+            "all_post_pred_x_0_list": all_post_pred_x_0_list,
+            "all_post_gt_x_0_list": all_post_gt_x_0_list,
+            "all_metrics": all_metrics,
+        },
+        open(str(Path("exp") / Path(save_dir_name) / "all_pred_and_gt_traj.pkl"), "wb"),
+    )
