@@ -218,17 +218,21 @@ if __name__ == "__main__":
         if take_idx > 0:
             break
         print(take)
-        traj_paths = InferenceTrajectoryPaths.find(Path(take))
-        if traj_paths.splat_path is not None:
-            print("Found splat at", traj_paths.splat_path)
-        else:
-            print("No scene splat found.")
-        pc_container, points_data, floor_z = load_point_cloud_and_find_ground(
-            points_path=traj_paths.points_path,
-            cache_files=True,
-            return_points="filtered",
-        )
-        gt_height_dict[Path(take).stem] = floor_z
+        try:
+            traj_paths = InferenceTrajectoryPaths.find(Path(take))
+            if traj_paths.splat_path is not None:
+                print("Found splat at", traj_paths.splat_path)
+            else:
+                print("No scene splat found.")
+            pc_container, points_data, floor_z = load_point_cloud_and_find_ground(
+                points_path=traj_paths.points_path,
+                cache_files=True,
+                return_points="filtered",
+            )
+            gt_height_dict[Path(take).stem] = floor_z
+        except AssertionError as e:
+            print(f"Error processing {take}: {e}")
+            continue
 
     with open("gt_height_dict.json", "w") as f:
         json.dump(gt_height_dict, f)
