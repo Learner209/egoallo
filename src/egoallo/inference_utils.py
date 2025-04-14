@@ -93,32 +93,25 @@ class InferenceTrajectoryPaths:
     hamer_outputs: Path | None
     wrist_and_palm_poses_csv: Path | None
     splat_path: Path | None
-    ego_preview_path: Path | None
 
     @staticmethod
     def find(traj_root: Path) -> InferenceTrajectoryPaths:
-        vrs_files = sorted(tuple(traj_root.glob("**/*aria*.vrs")))
-        assert len(vrs_files) >= 1, f"Found {len(vrs_files)} VRS files!"
+        vrs_files = tuple(
+            path
+            for path in traj_root.glob("**/*.vrs")
+            if not path.stem.endswith("noimagestreams")
+        )
+        assert len(vrs_files) == 1, f"Found {len(vrs_files)} VRS files!"
 
-        points_paths = sorted(tuple(traj_root.glob("**/semidense_points.csv.gz")))
+        points_paths = tuple(traj_root.glob("**/semidense_points.csv.gz"))
         assert len(points_paths) <= 1, f"Found multiple points files! {points_paths}"
         if len(points_paths) == 0:
-            points_paths = sorted(tuple(traj_root.glob("**/global_points.csv.gz")))
+            points_paths = tuple(traj_root.glob("**/global_points.csv.gz"))
         assert len(points_paths) == 1, f"Found {len(points_paths)} files!"
-
-        if output_dir is not None and output_dir.exists() and soft_link:
-            points_path = output_dir / points_paths[0].name
-            if not points_path.exists():
-                points_path.symlink_to(points_paths[0])
 
         hamer_outputs = traj_root / "hamer_outputs.pkl"
         if not hamer_outputs.exists():
             hamer_outputs = None
-        elif output_dir is not None and output_dir.exists() and soft_link:
-            hamer_outputs = output_dir / hamer_outputs.name
-            if not hamer_outputs.exists():
-                hamer_outputs.symlink_to(hamer_outputs)
-        hamer_outputs = None
 
         wrist_and_palm_poses_csv = tuple(traj_root.glob("**/wrist_and_palm_poses.csv"))
         if len(wrist_and_palm_poses_csv) == 0:
@@ -132,15 +125,10 @@ class InferenceTrajectoryPaths:
         if not splat_path.exists():
             splat_path = traj_root / "scene.splat"
         if not splat_path.exists():
-            logger.warning("No scene splat found.")
+            print("No scene splat found.")
             splat_path = None
         else:
-            logger.info(f"Found splat at {splat_path}")
-
-        ego_preview_path = traj_root / "ego_preview.mp4"
-        assert ego_preview_path.exists(), (
-            f" Should found ego preview at {ego_preview_path}"
-        )
+            print("Found splat at", splat_path)
 
         return InferenceTrajectoryPaths(
             vrs_file=vrs_files[0],
@@ -151,7 +139,6 @@ class InferenceTrajectoryPaths:
             if wrist_and_palm_poses_csv
             else None,
             splat_path=splat_path,
-            ego_preview_path=ego_preview_path,
         )
 
 

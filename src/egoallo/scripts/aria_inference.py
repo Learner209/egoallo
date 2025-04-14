@@ -5,6 +5,7 @@ from pathlib import Path
 
 import os
 import cv2
+import json
 
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 
@@ -21,7 +22,6 @@ from egoallo.inference_utils import (
     InferenceTrajectoryPaths,
 )
 from egoallo.transforms import SE3, SO3
-from egoallo.training_utils import ipdb_safety_net
 from egoallo.config.inference.defaults import InferenceConfig
 from egoallo.utils.setup_logger import setup_logger
 
@@ -210,7 +210,28 @@ def main(
 
 
 if __name__ == "__main__":
-    import tyro
+    from glob import glob
 
-    ipdb_safety_net()
-    tyro.cli(main)
+    gt_height_dict = {}
+    takes = glob("./data/egoexo-default/takes/*", recursive=False)
+    for take_idx, take in enumerate(sorted(takes)):
+        if take_idx > 0:
+            break
+        print(take)
+        traj_paths = InferenceTrajectoryPaths.find(Path(take))
+        if traj_paths.splat_path is not None:
+            print("Found splat at", traj_paths.splat_path)
+        else:
+            print("No scene splat found.")
+        pc_container, points_data, floor_z = load_point_cloud_and_find_ground(
+            points_path=traj_paths.points_path,
+            cache_files=True,
+            return_points="filtered",
+        )
+        gt_height_dict[Path(take).stem] = floor_z
+
+    with open("gt_height_dict.json", "w") as f:
+        json.dump(gt_height_dict, f)
+
+    # ipdb_safety_net()
+    # tyro.cli(main)
