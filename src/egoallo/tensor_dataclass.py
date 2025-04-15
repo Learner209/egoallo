@@ -324,7 +324,7 @@ class TensorDataclass:
                     raise IndexError(
                         f"Invalid index {idx} for tensor of shape {val.shape}",
                     ) from e
-            elif isinstance(val, TensorDataclass):
+            elif isinstance(val, TensorDataclass) or dataclasses.is_dataclass(val):
                 return type(val)(**_getitem_impl(vars(val), idx))
             elif isinstance(val, (list, tuple)):
                 return type(val)(_getitem_impl(v, idx) for v in val)
