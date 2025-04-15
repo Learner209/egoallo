@@ -8,22 +8,15 @@ import numpy.typing as npt
 import torch
 import trimesh
 import viser
-import viser.transforms as vtf
-from jaxtyping import Float
 from plyfile import PlyData
-from torch import Tensor
 
-from .middleware.third_party.HybrIK.hybrik.models.layers.smplh.fncsmplh import (
-    fncsmplh as fncsmpl,
-)
+from typing import Literal
+from egoallo.type_stubs import DenoiseTrajType
 
-from egoallo.denoising.abs_traj import AbsoluteDenoiseTraj
 from .hand_detection_structs import CorrespondedAriaHandWristPoseDetections
 from .hand_detection_structs import CorrespondedHamerDetections
 from egoallo.transforms import SE3
 from egoallo.transforms import SO3
-import typeguard
-from jaxtyping import jaxtyped
 
 
 class SplatArgs(TypedDict):
@@ -61,7 +54,7 @@ def load_splat_file(splat_path: Path, center: bool = False) -> SplatArgs:
     )
     scales = splat_uint8[:, 12:24].copy().view(np.float32)
     wxyzs = splat_uint8[:, 28:32] / 255.0 * 2.0 - 1.0
-    Rs = vtf.SO3(wxyzs).as_matrix()
+    Rs = SO3(wxyzs).as_matrix()
     covariances = np.einsum(
         "nij,njk,nlk->nil",
         Rs,
@@ -98,7 +91,7 @@ def load_ply_file(ply_file_path: Path, center: bool = False) -> SplatArgs:
     colors = 0.5 + SH_C0 * np.stack([v["f_dc_0"], v["f_dc_1"], v["f_dc_2"]], axis=1)
     opacities = 1.0 / (1.0 + np.exp(-v["opacity"][:, None]))
 
-    Rs = vtf.SO3(wxyzs).as_matrix()
+    Rs = SO3(wxyzs).as_matrix()
     covariances = np.einsum(
         "nij,njk,nlk->nil",
         Rs,
@@ -142,12 +135,11 @@ def add_splat_to_viser(
     )
 
 
-@jaxtyped(typechecker=typeguard.typechecked)
 def visualize_traj_and_hand_detections(
     server: viser.ViserServer,
-    T_world_root: Float[Tensor, "timesteps 7"],
-    traj: AbsoluteDenoiseTraj | None,
-    body_model: fncsmpl.SmplhModel,
+    traj: DenoiseTrajType,
+    smpl_family_model_basedir: Path,
+    gender: Literal["male", "female"],
     hamer_detections: CorrespondedHamerDetections | None = None,
     aria_detections: CorrespondedAriaHandWristPoseDetections | None = None,
     points_data: np.ndarray | None = None,
@@ -155,11 +147,58 @@ def visualize_traj_and_hand_detections(
     floor_z: float = 0.0,
     show_joints: bool = False,
     get_ego_video: Callable[[int, int, float], bytes] | None = None,
+    device: torch.device = torch.device("cuda"),
 ) -> Callable[[], int]:
     """Visualization function for trajectories and hand detections.
     Returns a callback that should be called repeatedly in a loop."""
 
-    timesteps = T_world_root.shape[0]
+    assert traj.joints_wrt_world.dim() == 4, (
+        "There should be only one batch size when visualizing."
+    )
+    assert traj.metadata.stage == "postprocessed", (
+        "The trajectory should be postprocessed before visualization."
+    )
+
+    from egoallo.constants import SmplFamilyMetaModelZoo
+
+    smpl_family_meta_model_name = "SmplModelAADecomp"
+    smpl_aadecomp_model = (
+        SmplFamilyMetaModelZoo[smpl_family_meta_model_name]
+        .load(smpl_family_model_basedir, gender=gender, num_joints=24)
+        .to(device)
+    )
+
+    posed = traj.apply_to_body(smpl_aadecomp_model)
+
+    sample_count = traj.joints_wrt_world.shape[0]
+    timesteps = posed.pose_skeleton.shape[-3]
+    num_joints = posed.pose_skeleton.shape[-2]
+
+    verts_zero, joints_zero = smpl_aadecomp_model.verts_zero_and_jts_zero(
+        betas=traj.betas.mean(dim=-2),
+        num_joints=num_joints,
+    )
+    assert verts_zero.shape == (sample_count, 6890, 3)
+    assert joints_zero.shape == (sample_count, 23, 3)
+
+    Rs_world_joint_with_root = (
+        SE3(posed.Ts_world_joint_with_root).rotation().as_matrix()
+    )  # (sample_count, timesteps, num_joints, 3, 3)
+    assert Rs_world_joint_with_root.shape == (sample_count, timesteps, num_joints, 3, 3)
+
+    joint_positions = posed.pose_skeleton[
+        ...,
+        1:,
+        :,
+    ]  # (sample_count, timesteps, num_joints-1, 3)
+    T_world_root = SE3.from_rotation_and_translation(
+        rotation=SO3.from_matrix(Rs_world_joint_with_root[..., 0, :, :]),
+        translation=posed.pose_skeleton[..., 0, :3],
+    )
+    T_world_cpf = SE3.from_rotation_and_translation(
+        rotation=SO3.from_matrix(Rs_world_joint_with_root[..., 15, :, :]),
+        translation=posed.pose_skeleton[..., 15, :3],
+    )
 
     server.scene.add_grid(
         "/ground",
@@ -195,36 +234,6 @@ def visualize_traj_and_hand_detections(
     if splat_path is not None:
         add_splat_to_viser(splat_path, server)  # , z_offset=-floor_z)
 
-    if traj is not None:
-        # import ipdb; ipdb.set_trace()
-        betas = traj.betas
-        timesteps = betas.shape[1]
-        sample_count = betas.shape[0]
-        assert betas.shape == (sample_count, timesteps, 16)
-        body_quats = SO3.from_matrix(traj.body_rotmats).wxyz
-        assert body_quats.shape == (sample_count, timesteps, 21, 4)
-
-        traj.hand_rotmats = None
-        if traj.hand_rotmats is not None:
-            hand_quats = SO3.from_matrix(traj.hand_rotmats).wxyz
-            left_hand_quats = hand_quats[..., :15, :]
-            right_hand_quats = hand_quats[..., 15:30, :]
-        else:
-            left_hand_quats = None
-            right_hand_quats = None
-
-        shaped = body_model.with_shape(torch.mean(betas, dim=1, keepdim=True))
-        fk_outputs: fncsmpl.SmplhShapedAndPosed = shaped.with_pose_decomposed(
-            T_world_root=T_world_root[None, ...],
-            body_quats=body_quats,
-            left_hand_quats=left_hand_quats,
-            right_hand_quats=right_hand_quats,
-        )
-    else:
-        shaped = None
-        fk_outputs = None
-        sample_count = 0
-
     glasses_mesh = trimesh.load("./data/glasses.stl")
     assert isinstance(glasses_mesh, trimesh.Trimesh)
     glasses_mesh.visual.face_colors = [10, 20, 20, 255]  # type: ignore
@@ -237,30 +246,25 @@ def visualize_traj_and_hand_detections(
     )
     server.scene.add_mesh_trimesh("/cpf/glasses", glasses_mesh, scale=0.001 * 1.05)
 
-    # TODO: remove
-    # hamer_detections = None
-    # aria_detections = None
-
     joint_position_handles: list[viser.SceneNodeHandle] = []
     timestep_handles: list[viser.FrameHandle] = []
     hamer_handles: list[viser.MeshHandle | viser.PointCloudHandle] = []
     aria_handles: list[viser.SceneNodeHandle] = []
-    for t in range(T_world_root.shape[0]):
+    for t in range(timesteps):
         timestep_handles.append(
             server.scene.add_frame(f"/timesteps/{t}", show_axes=False),
         )
 
         # Joints.
-        if show_joints and fk_outputs is not None:
-            assert traj is not None
+        if show_joints and posed is not None:
             for j in range(sample_count):
-                joints_colors = np.zeros((21, 3))
+                joints_colors = np.zeros((num_joints, 3))
                 joints_colors[:, 0] = traj.contacts[j, t, :].numpy(force=True)
                 joints_colors[:, 2] = 1.0 - traj.contacts[j, t, :].numpy(force=True)
                 joint_position_handles.append(
                     server.scene.add_point_cloud(
                         f"/timesteps/{t}/joints",
-                        points=fk_outputs.Ts_world_joint[j, t, :21, 4:7].numpy(
+                        points=posed.pose_skeleton[j, t, :num_joints, :3].numpy(
                             force=True,
                         ),
                         colors=joints_colors,
@@ -268,60 +272,6 @@ def visualize_traj_and_hand_detections(
                         point_size=0.02,
                     ),
                 )
-
-        # Visualize HaMeR outputs.
-        if hamer_detections is not None:
-            T_world_cam = SE3(T_world_root[t]) @ SE3(hamer_detections.T_cpf_cam)
-            server.scene.add_frame(
-                f"/timesteps/{t}/cpf/cam",
-                show_axes=True,
-                axes_length=0.025,
-                axes_radius=0.003,
-                wxyz=T_world_cam.wxyz_xyz[..., :4].numpy(force=True),
-                position=T_world_cam.wxyz_xyz[..., 4:7].numpy(force=True),
-            )
-            hands_l = hamer_detections.detections_left_tuple[t]
-            hands_r = hamer_detections.detections_right_tuple[t]
-            if hands_l is not None:
-                for j in range(hands_l["verts"].shape[0]):
-                    hamer_handles.append(
-                        server.scene.add_mesh_simple(
-                            f"/timesteps/{t}/cpf/cam/left_hand{j}",
-                            vertices=hands_l["verts"][j],
-                            faces=hamer_detections.mano_faces_left.numpy(force=True),
-                            visible=False,
-                        ),
-                    )
-                    hamer_handles.append(
-                        server.scene.add_point_cloud(
-                            f"/timesteps/{t}/cpf/cam/lefft_keypoints3d",
-                            points=hands_l["keypoints_3d"][j],
-                            colors=(255, 127, 0),
-                            point_size=0.008,
-                            point_shape="square",
-                            visible=False,
-                        ),
-                    )
-            if hands_r is not None:
-                for j in range(hands_r["verts"].shape[0]):
-                    hamer_handles.append(
-                        server.scene.add_mesh_simple(
-                            f"/timesteps/{t}/cpf/cam/right_hand{j}",
-                            vertices=hands_r["verts"][j],
-                            faces=hamer_detections.mano_faces_right.numpy(force=True),
-                            visible=False,
-                        ),
-                    )
-                    hamer_handles.append(
-                        server.scene.add_point_cloud(
-                            f"/timesteps/{t}/cpf/cam/right_keypoints3d",
-                            points=hands_r["keypoints_3d"][j],
-                            colors=(0, 127, 255),
-                            point_size=0.008,
-                            point_shape="square",
-                            visible=False,
-                        ),
-                    )
 
         # Visualize Aria detections.
         if aria_detections is not None:
@@ -354,27 +304,27 @@ def visualize_traj_and_hand_detections(
         [
             server.scene.add_mesh_skinned(
                 f"/persons/{i}",
-                vertices=shaped.verts_zero[i, 0, :, :].numpy(force=True),
-                faces=body_model.faces.numpy(force=True),
-                bone_wxyzs=vtf.SO3.identity(
-                    batch_axes=(body_model.get_num_joints() + 1,),
-                ).wxyz,
+                vertices=verts_zero[i, :, :].numpy(force=True),
+                faces=smpl_aadecomp_model.model.faces_tensor.numpy(force=True),
+                bone_wxyzs=SO3.identity(device=device, dtype=traj.betas.dtype)
+                .wxyz.repeat(num_joints, 1)
+                .numpy(force=True),
                 bone_positions=np.concatenate(
                     [
                         np.zeros((1, 3)),
                         # Indices are (batch, time, joint, positions).
-                        shaped.joints_zero[i, :, :, :]
-                        .numpy(force=True)
-                        .squeeze(axis=0),
+                        joints_zero[i, :, :].numpy(force=True),
                     ],
                     axis=0,
                 ),
                 color=(152, 93, 229),
-                skin_weights=body_model.weights.numpy(force=True),
+                skin_weights=smpl_aadecomp_model.model.lbs_weights.numpy(
+                    force=True,
+                ),  # (6890, 23+1)
             )
             for i in range(sample_count)
         ]
-        if shaped is not None
+        if posed is not None
         else []
     )
 
@@ -515,38 +465,44 @@ def visualize_traj_and_hand_detections(
     def _(_) -> None:
         gui_framerate.value = int(gui_framerate_options.value)
 
-    T_world_root_numpy = T_world_root.numpy(force=True)
-
     def do_update() -> None:
         t = gui_timestep.value
-        cpf_handle.wxyz = T_world_root_numpy[t, :4]
-        cpf_handle.position = T_world_root_numpy[t, 4:7]
+
+        _wxyz = T_world_cpf.rotation().wxyz[0, t]
+        cpf_handle.wxyz = _wxyz.numpy(force=True)
+        cpf_handle.position = T_world_cpf.translation()[0, t].numpy(force=True)
 
         if gui_attach.value:
+            # buggy.
             for client in server.get_clients().values():
                 client.camera.wxyz = (
-                    vtf.SO3(cpf_handle.wxyz) @ vtf.SO3.from_z_radians(np.pi)
-                ).wxyz
-                client.camera.position = cpf_handle.position - vtf.SO3(
-                    cpf_handle.wxyz,
-                ) @ np.array([0.0, 0.0, gui_attach_dist.value])
+                    SO3(_wxyz) @ SO3.from_z_radians(torch.tensor(np.pi).to(device))
+                ).wxyz.numpy(force=True)
+                client.camera.position = cpf_handle.position - SO3(
+                    _wxyz,
+                ).as_matrix().numpy(force=True) @ np.array(
+                    [0.0, 0.0, gui_attach_dist.value],
+                )
 
-        if fk_outputs is not None:
+        if posed is not None:
             for i in range(sample_count):
                 for b, bone_handle in enumerate(body_handles[i].bones):
                     if b == 0:
-                        bone_transform = fk_outputs.T_world_root[i, t].numpy(force=True)
-                    else:
-                        bone_transform = fk_outputs.Ts_world_joint[i, t, b - 1].numpy(
+                        # Root bone
+                        bone_handle.wxyz = (
+                            T_world_root.rotation().wxyz[i, t].numpy(force=True)
+                        )
+                        bone_handle.position = T_world_root.translation()[i, t].numpy(
                             force=True,
                         )
-                    # Check if the destination array is writable
-                    # if not bone_handle.wxyz.flags["WRITEABLE"]:
-                    #     bone_handle.wxyz.setflags(write=True)  # Make it writable
-                    bone_handle.wxyz = bone_transform[:4]
-                    # if not bone_handle.position.flags["WRITEABLE"]:
-                    #     bone_handle.position.setflags(write=True)  # Make it writable
-                    bone_handle.position = bone_transform[4:7]
+                    else:
+                        # Other bones
+                        bone_handle.wxyz = SO3.from_matrix(
+                            Rs_world_joint_with_root[i, t, b, :, :],
+                        ).wxyz.numpy(force=True)
+                        bone_handle.position = joint_positions[i, t, b - 1].numpy(
+                            force=True,
+                        )
 
         for ii, timestep_frame in enumerate(timestep_handles):
             timestep_frame.visible = t == ii
@@ -616,3 +572,18 @@ def visualize_traj_and_hand_detections(
             return gui_timestep.value
 
     return loop_cb
+
+
+if __name__ == "__main__":
+    device = torch.device("cuda")
+    traj = torch.load("assets/toy_examples/infer_traj.pt").to(device)
+    loop_cb = visualize_traj_and_hand_detections(
+        server=viser.ViserServer(),
+        traj=traj,
+        smpl_family_model_basedir=Path("assets/smpl_based_model/"),
+        gender="male",
+        device=device,
+    )
+
+    while True:
+        loop_cb()
