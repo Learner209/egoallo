@@ -198,7 +198,7 @@ class SMPL_layer(nn.Module):
         self,
         pose_axis_angle: Float[torch.Tensor, "batch 23 3"],
         betas: Optional[Float[torch.Tensor, "batch 10"]] = None,
-        global_orient: Optional[Float[torch.Tensor, "batch 3"]] = None,
+        global_orient: Optional[Float[torch.Tensor, "batch 1 3"]] = None,
         transl: Optional[Float[torch.Tensor, "batch 3"]] = None,
         return_verts: bool = True,
     ):
