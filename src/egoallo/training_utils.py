@@ -16,6 +16,8 @@ from typing import Optional
 from typing import overload
 from typing import Protocol
 from typing import Sized
+from typing import Callable
+import numpy as np
 
 import torch
 from accelerate import Accelerator
@@ -254,3 +256,36 @@ def get_git_diff(cwd: Path | None = None) -> str:
         .decode("ascii")
         .strip()
     )
+
+
+class EarlyStopping:
+    def __init__(self, patience=7, verbose=False, delta=0):
+        self.patience = patience
+        self.verbose = verbose
+        self.counter = 0
+        self.best_score = None
+        self.early_stop = False
+        self.val_loss_min = np.Inf
+        self.delta = delta
+        self.best_model = None
+
+    def __call__(self, val_loss, save_ckpt_fn: Callable) -> bool:
+        """
+        Returns True if the model should be saved, False otherwise.
+        """
+        score = -val_loss
+        if self.best_score is None:
+            self.best_score = score
+            save_ckpt_fn()
+            return True
+        elif score < self.best_score + self.delta:
+            self.counter += 1
+            print(f"EarlyStopping counter: {self.counter} out of {self.patience}")
+            if self.counter >= self.patience:
+                self.early_stop = True
+            return False
+        else:
+            self.best_score = score
+            save_ckpt_fn()
+            self.counter = 0
+            return True

@@ -68,7 +68,27 @@ class EgoAlloTrainConfig:
     learning_rate: float = 1e-4
     weight_decay: float = 1e-4
     warmup_steps: int = 1000
-    max_grad_norm: float = 1.0
+    max_grad_norm: float = 5.0
+
+    # use CosineAnnealingLR as default scheduler.
+    lr_scheduler: Literal[
+        "linear",
+        "cosine",
+        "cosine_with_restarts",
+        "polynomial",
+        "constant",
+        "constant_with_warmup",
+        "piecewise_constant",
+    ] = "cosine"
+    num_epochs: int = 1800
+
+    # whether to use ema.
+    use_ema: bool = True
+    ema_update_after_step: int = 0
+    ema_inv_gamma: float = 1.0
+    ema_power: float = 0.75
+    ema_min_value: float = 0.0
+    ema_max_value: float = 0.9999
 
     # Network arch.
     use_fourier_in_masked_joints: bool = True
@@ -84,6 +104,14 @@ class EgoAlloTrainConfig:
     detect_loss_spike_start_step: int = 2000
     # discard loss spikes backward after this step.
     discard_loss_spike_start_step: int = 8000
+
+    # eval every this step.
+    eval_every_step: int = 2000
+    early_stopping_patience: int = 10
+    early_stopping_delta: float = 0
+
+    # test every this step.
+    test_every_step: int = 10000
 
     # restore training from previous ckpt.
     restore_checkpoint_dir: Path | None = None

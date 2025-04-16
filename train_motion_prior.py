@@ -4,6 +4,7 @@ import os
 
 
 from egoallo.inference_utils import load_runtime_config
+from egoallo.scripts.simple_test import test_fn
 
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
@@ -15,7 +16,10 @@ import dataclasses
 import shutil
 from pathlib import Path
 import time
+import copy
 
+import pickle
+import cv2
 
 import torch.optim.lr_scheduler
 import torch.utils.data
@@ -26,8 +30,6 @@ from loguru import logger
 
 from hydra.utils import instantiate
 
-# Install hook before importing any modules you want to typecheck
-# with install_import_hook("egoallo", "typeguard.typechecked"):
 from egoallo import network, training_loss, training_utils
 from egoallo.data import make_batch_collator, build_dataset
 from egoallo.config.train.train_config import EgoAlloTrainConfig
@@ -37,8 +39,9 @@ from torch.amp import autocast
 import datetime
 import tempfile
 from egoallo.config.inference.defaults import InferenceConfig
-from egoallo.scripts.test import TestRunner
 import numpy as np
+from egoallo.utils.optimization import get_scheduler
+from egoallo.utils.ema_model import EMAModel
 
 
 def get_experiment_dir(experiment_name: str, version: int = 0) -> Path:
@@ -64,9 +67,6 @@ def run_training(
     train_cfg: EgoAlloTrainConfig,
     inference_cfg: InferenceConfig,
 ) -> None:
-    # Set up experiment directory + HF accelerate.
-    # We're getting to manage logging, checkpoint directories, etc manually,
-    # and just use `accelerate` for distibuted training.
     restore_checkpoint_dir = (
         Path(train_cfg.restore_checkpoint_dir)
         if train_cfg.restore_checkpoint_dir
@@ -81,14 +81,10 @@ def run_training(
 
     if restore_checkpoint_dir:
         train_cfg: EgoAlloTrainConfig = load_runtime_config(restore_checkpoint_dir)
-        train_cfg.batch_size = 64  # FIXME: this is a temporary fix to distill a large model trained on thecluster to local machine.
-        # experiment_dir =  restore_checkpoint_dir.parent
         experiment_dir = get_experiment_dir(train_cfg.experiment_name)
     else:
         experiment_dir = get_experiment_dir(train_cfg.experiment_name)
         assert not experiment_dir.exists()
-
-    train_cfg.experiment_dir = experiment_dir
 
     accelerator = Accelerator(
         project_config=ProjectConfiguration(project_dir=str(experiment_dir)),
@@ -157,6 +153,18 @@ def run_training(
         ),
     )
 
+    if train_cfg.use_ema:
+        ema_model = EMAModel(
+            copy.deepcopy(model),
+            update_after_step=train_cfg.ema_update_after_step,
+            inv_gamma=train_cfg.ema_inv_gamma,
+            power=train_cfg.ema_power,
+            min_value=train_cfg.ema_min_value,
+            max_value=train_cfg.ema_max_value,
+        )
+        ema_model: EMAModel = accelerator.prepare(ema_model)
+
+    train_cfg.splits = ("train",)
     train_loader = torch.utils.data.DataLoader(
         dataset=build_dataset(cfg=train_cfg)(config=train_cfg),
         batch_size=train_cfg.batch_size,
@@ -168,14 +176,31 @@ def run_training(
         drop_last=True,
     )
 
+    val_cfg = dataclasses.replace(train_cfg, splits=("val",))
+    val_loader = torch.utils.data.DataLoader(
+        dataset=build_dataset(cfg=val_cfg)(config=val_cfg),
+        batch_size=train_cfg.batch_size,
+        shuffle=False,
+        num_workers=train_cfg.num_workers,
+        persistent_workers=train_cfg.num_workers > 0,
+        pin_memory=True,
+        collate_fn=make_batch_collator(val_cfg),
+        drop_last=True,
+    )
+
     optim = torch.optim.AdamW(  # type: ignore
         model.parameters(),
         lr=train_cfg.learning_rate,
         weight_decay=train_cfg.weight_decay,
     )
-    scheduler = torch.optim.lr_scheduler.LambdaLR(
-        optim,
-        lr_lambda=lambda step: min(1.0, step / train_cfg.warmup_steps),
+    scheduler = get_scheduler(
+        train_cfg.lr_scheduler,
+        optimizer=optim,
+        num_warmup_steps=train_cfg.warmup_steps,
+        num_training_steps=len(train_loader) * train_cfg.num_epochs,
+        # pytorch assumes stepping LRScheduler every epoch
+        # however huggingface diffusers steps it every batch
+        last_epoch=-1,
     )
 
     # HF accelerate setup. We use this for parallelism, etc!
@@ -209,8 +234,16 @@ def run_training(
     epoch_time = time.time() - epoch_start_time
     epoch = 0
 
+    # Initialize early stopping
+    early_stopping = training_utils.EarlyStopping(
+        patience=train_cfg.early_stopping_patience,
+        verbose=True,
+        delta=train_cfg.early_stopping_delta,
+    )
+
     # Track previous loss for spike detection
     previous_loss = None
+    prev_ckpt_path = None
 
     while True:
         for idx, train_batch in enumerate(train_loader):
@@ -247,6 +280,22 @@ def run_training(
                     and current_loss > previous_loss * spike_threshold
                 ):
                     if accelerator.is_main_process:
+                        # Find and delete any existing spike checkpoints
+                        existing_spike_checkpoints = list(
+                            experiment_dir.glob("checkpoints_*_loss_spike_*"),
+                        )
+                        for checkpoint in existing_spike_checkpoints:
+                            if checkpoint.is_dir():
+                                # Delete anomaly batch file if it exists
+                                anomaly_batch = checkpoint / "anomaly_train_batch.pt"
+                                if anomaly_batch.exists():
+                                    anomaly_batch.unlink()
+                                # Delete checkpoint directory
+                                shutil.rmtree(checkpoint)
+                                logger.info(
+                                    f"Deleted previous spike checkpoint: {checkpoint}",
+                                )
+
                         spike_checkpoint_path = (
                             experiment_dir
                             / f"checkpoints_{step}_loss_spike_{previous_loss:.6f}_{current_loss:.6f}"
@@ -315,6 +364,9 @@ def run_training(
                 scheduler.step()
                 optim.zero_grad(set_to_none=True)
 
+                if train_cfg.use_ema:
+                    ema_model.step(model)
+
             if not accelerator.is_main_process:
                 continue
 
@@ -374,49 +426,65 @@ def run_training(
                         term_name = key.split("/")[-1]
                         wandb.log({f"losses/{term_name}": value}, step=step)
 
-            # Checkpointing
-            steps_to_save = 1e4
-            if step % steps_to_save == 0:
-                # Save checkpoint.
-                checkpoint_path = experiment_dir / f"checkpoints_{step}"
-                accelerator.save_state(str(checkpoint_path))
-                logger.info(f"Saved checkpoint to {checkpoint_path}")
+            steps_to_eval = train_cfg.eval_every_step
+            if step % steps_to_eval == 0:
+                # Compute validation loss
+                if not train_cfg.use_ema:
+                    model.eval()
+                    eval_model = model
+                else:
+                    ema_model.eval()
+                    eval_model = ema_model
 
-            # Evaluation
-            steps_to_eval = 1e4
-            # if step % steps_to_eval == 0:
-            if step % steps_to_eval == 0 and step != 0:
-                # Create temporary directory for evaluation outputs
-                with tempfile.TemporaryDirectory() as temp_dir:
-                    # Create inference config for evaluation
-                    inference_cfg.checkpoint_dir = (
-                        experiment_dir / f"checkpoints_{step}"
+                total_val_loss = 0.0
+                num_val_batches = 0
+                with torch.no_grad():
+                    for val_batch in val_loader:
+                        with autocast(device_type=device.type, dtype=torch.float32):
+                            val_loss, _ = loss_helper.compute_denoising_loss(
+                                eval_model,
+                                unwrapped_model=accelerator.unwrap_model(eval_model),
+                                train_config=train_cfg,
+                                train_batch=val_batch,
+                            )
+                        total_val_loss += val_loss.item()
+                        num_val_batches += 1
+
+                avg_val_loss = total_val_loss / num_val_batches
+
+                eval_model.train()
+
+                # Log validation loss
+                if accelerator.is_main_process:
+                    wandb.log({"val/loss": avg_val_loss}, step=step)
+                    logger.info(f"Validation loss at step {step}: {avg_val_loss:.6f}")
+
+                # Check early stopping
+                if accelerator.is_main_process:
+                    checkpoint_path = experiment_dir / f"checkpoints_{step}"
+                    save_ckpt_flag = early_stopping(
+                        avg_val_loss,
+                        lambda: accelerator.save_state(str(checkpoint_path)),
                     )
-                    inference_cfg.output_dir = Path(temp_dir)
+                    if save_ckpt_flag:
+                        prev_ckpt_path = checkpoint_path
+                    if early_stopping.early_stop:
+                        logger.info("Early stopping triggered")
+                        break
 
-                    # Run evaluatin
-                    try:
-                        test_runner = TestRunner(inference_cfg)
-                        metrics = test_runner.run()
-
-                        assert metrics is not None
-
-                        for metric_name, metric_stats in metrics.summary.items():
-                            for stat_name, stat_value in metric_stats.items():
-                                wandb.log(
-                                    {f"eval/{metric_name}/{stat_name}": stat_value},
-                                    step=step,
-                                )
-                                logger.info(
-                                    f"Step {step}, Loss: {log_outputs['train_loss']:.6f}, Eval: {metric_name} {stat_name}: {stat_value:.4f}",
-                                )
+            steps_to_test = train_cfg.test_every_step
+            if step % steps_to_test == 0:
+                try:
+                    with tempfile.TemporaryDirectory() as temp_dir:
+                        inference_cfg.checkpoint_dir = prev_ckpt_path
+                        inference_cfg.output_dir = Path(temp_dir)
+                        test_fn(inference_cfg, device)
 
                         persistent_output_dir = Path(
                             experiment_dir / f"evaluation_{step}",
                         )
                         persistent_output_dir.mkdir(parents=True, exist_ok=True)
 
-                        # Move contents from temp dir to persistent dir, overwriting existing files
                         for item in Path(temp_dir).glob("*"):
                             dest = persistent_output_dir / item.name
                             if dest.exists():
@@ -426,20 +494,84 @@ def run_training(
                                     shutil.rmtree(dest)
                             shutil.move(str(item), str(dest))
 
-                    except Exception as e:
-                        logger.error(f"Evaluation failed at step {step}: {str(e)}")
-                        logger.exception("Detailed error:")
+                        metrics_file = (
+                            persistent_output_dir
+                            / "all_pred_and_gt_traj_and_metrics.pkl"
+                        )
+                        if metrics_file.exists():
+                            with open(metrics_file, "rb") as f:
+                                metrics_data = pickle.load(f)
+                                agg_metrics = metrics_data["agg_metrics"]
 
-                del checkpoint_path
+                                # Log aggregated metrics to wandb
+                                for metric_name, metric_value in agg_metrics.items():
+                                    wandb.log(
+                                        {f"test/{metric_name}": metric_value},
+                                        step=step,
+                                    )
+
+                                # Log visualization videos
+                                for i, (take_name, _) in enumerate(
+                                    metrics_data["all_metrics"].items(),
+                                ):
+                                    if i >= 10:  # Only log first 10 takes
+                                        break
+
+                                    video_path = (
+                                        persistent_output_dir / f"{take_name}.mp4"
+                                    )
+                                    if video_path.exists():
+                                        # Read video using OpenCV
+                                        cap = cv2.VideoCapture(str(video_path))
+                                        frames = []
+
+                                        while True:
+                                            ret, frame = cap.read()
+                                            if not ret:
+                                                break
+                                            # Convert BGR to RGB
+                                            frame = cv2.cvtColor(
+                                                frame,
+                                                cv2.COLOR_BGR2RGB,
+                                            )
+                                            frames.append(frame)
+
+                                        cap.release()
+
+                                        if frames:
+                                            # Convert to numpy array and reshape for wandb.Video
+                                            video_array = np.array(frames)
+                                            video_array = np.transpose(
+                                                video_array,
+                                                (0, 3, 1, 2),
+                                            )  # (timesteps, channel, H, W)
+                                            # implemetn some kind of downsampling to ensure proper rendering on wandb website panel.
+                                            # timesteps = video_array.shape[0]
+                                            # video_array = video_array[::timesteps//30, :, :2, :2]
+
+                                            wandb.log(
+                                                {
+                                                    f"test/media/{take_name}": wandb.Video(
+                                                        video_array,
+                                                        fps=30,
+                                                    ),
+                                                },
+                                                step=step,
+                                            )
+
+                except Exception as e:
+                    logger.error(f"Evaluation failed at step {step}: {str(e)}")
+                    logger.exception("Detailed error:")
 
         if step >= train_cfg.max_steps:
             break
 
-        # End of epoch
+        if early_stopping.early_stop and accelerator.is_main_process:
+            accelerator.save_state(str(experiment_dir / f"val_best_checkpoints_{step}"))
+            break
+
         epoch += 1
         epoch_time = time.time() - epoch_start_time
-        # if accelerator.is_main_process:
-        #     logger.info(f"Epoch {epoch} completed in {epoch_time:.1f} seconds")
         epoch_start_time = time.time()
 
     # Finish wandb run
