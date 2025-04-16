@@ -11,37 +11,53 @@ from egoallo.middleware.third_party.HybrIK.hybrik.models.layers.smplh import fnc
 from . import transforms
 import typeguard
 from jaxtyping import jaxtyped
+from egoallo.middleware.third_party.HybrIK.hybrik.models.layers.smpl import (
+    fncsmpl_aadecomp,
+)
+from egoallo.transforms import SO3, SE3
 
 
 @jaxtyped(typechecker=typeguard.typechecked)
-def get_T_world_cpf(mesh: fncsmplh.SmplhMesh) -> Float[Tensor, "*batch 7"]:
+def get_T_world_cpf(
+    mesh: fncsmpl_aadecomp.SmplMeshAADecomp,
+) -> Float[Tensor, "*batch 7"]:
     """Get the central pupil frame from a mesh. This assumes that we're using the SMPL-H model."""
 
     assert mesh.vertices.shape[-2:] == (6890, 3), "Not using SMPL-H model!"
     right_eye = (mesh.vertices[..., 6260, :] + mesh.vertices[..., 6262, :]) / 2.0
     left_eye = (mesh.vertices[..., 2800, :] + mesh.vertices[..., 2802, :]) / 2.0
 
+    Rs_world_joint_with_root = (
+        SE3(mesh.posed_model.Ts_world_joint_with_root).rotation().as_matrix()
+    )  # (*bss, num_joints, 3, 3)
+
     # CPF is between the two eyes.
     cpf_pos = (right_eye + left_eye) / 2.0
     # Get orientation from head.
-    cpf_orientation = mesh.posed_model.Ts_world_joint[..., 14, :4]
+    cpf_orientation = SO3.from_matrix(Rs_world_joint_with_root[..., 15, :, :]).wxyz
 
     return torch.cat([cpf_orientation, cpf_pos], dim=-1)
 
 
 @jaxtyped(typechecker=typeguard.typechecked)
-def get_T_head_cpf(shaped: fncsmplh.SmplhShaped) -> Float[Tensor, "*batch 7"]:
+def get_T_head_cpf(
+    shaped: fncsmpl_aadecomp.SmplShapedAADecomp,
+    num_joints: int,
+) -> Float[Tensor, "*batch 7"]:
     """Get the central pupil frame with respect to the head (joint 14). This
     assumes that we're using the SMPL-H model."""
 
-    verts_zero = shaped.verts_zero
+    verts_zero, joints_zero = shaped.body_model.verts_zero_and_jts_zero(
+        betas=shaped.betas,
+        num_joints=num_joints,
+    )
 
     assert verts_zero.shape[-2:] == (6890, 3), "Not using SMPL-H model!"
     right_eye = (verts_zero[..., 6260, :] + verts_zero[..., 6262, :]) / 2.0
     left_eye = (verts_zero[..., 2800, :] + verts_zero[..., 2802, :]) / 2.0
 
     # CPF is between the two eyes.
-    cpf_pos_wrt_head = (right_eye + left_eye) / 2.0 - shaped.joints_zero[..., 14, :]
+    cpf_pos_wrt_head = (right_eye + left_eye) / 2.0 - joints_zero[..., 14, :]
 
     return fncsmplh.broadcasting_cat(
         [

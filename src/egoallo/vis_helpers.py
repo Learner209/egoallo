@@ -17,6 +17,7 @@ from .hand_detection_structs import CorrespondedAriaHandWristPoseDetections
 from .hand_detection_structs import CorrespondedHamerDetections
 from egoallo.transforms import SE3
 from egoallo.transforms import SO3
+from egoallo import fncsmpl_extensions_library
 
 
 class SplatArgs(TypedDict):
@@ -169,6 +170,8 @@ def visualize_traj_and_hand_detections(
     )
 
     posed = traj.apply_to_body(smpl_aadecomp_model)
+    lbs_posed = posed.lbs()
+    T_world_cpf = SE3(fncsmpl_extensions_library.get_T_world_cpf(lbs_posed))
 
     sample_count = traj.joints_wrt_world.shape[0]
     timesteps = posed.pose_skeleton.shape[-3]
@@ -194,10 +197,6 @@ def visualize_traj_and_hand_detections(
     T_world_root = SE3.from_rotation_and_translation(
         rotation=SO3.from_matrix(Rs_world_joint_with_root[..., 0, :, :]),
         translation=posed.pose_skeleton[..., 0, :3],
-    )
-    T_world_cpf = SE3.from_rotation_and_translation(
-        rotation=SO3.from_matrix(Rs_world_joint_with_root[..., 15, :, :]),
-        translation=posed.pose_skeleton[..., 15, :3],
     )
 
     server.scene.add_grid(
@@ -576,7 +575,7 @@ def visualize_traj_and_hand_detections(
 
 if __name__ == "__main__":
     device = torch.device("cuda")
-    traj = torch.load("assets/toy_examples/infer_traj.pt").to(device)
+    traj = torch.load("assets/toy_examples/post_gt_x_0.pt").to(device)
     loop_cb = visualize_traj_and_hand_detections(
         server=viser.ViserServer(),
         traj=traj,
