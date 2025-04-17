@@ -197,9 +197,10 @@ class TrainingLossComputer:
         )
         alpha_bar_t = self.noise_constants.alpha_bar_t[t, None, None]
         assert alpha_bar_t.shape == (batch, 1, 1)
-        x_t_packed = (
-            torch.sqrt(alpha_bar_t) * x_0_packed + torch.sqrt(1.0 - alpha_bar_t) * eps
-        )
+
+        # Use masked noise addition instead of uniform noise
+        x_t_packed = x_0.add_masked_noise(eps, alpha_bar_t)
+
         x_t_unpacked: DenoiseTrajType = train_config.denoising.unpack_traj(
             x_t_packed,
             metadata=dataclasses.replace(train_batch.metadata),

@@ -377,6 +377,114 @@ class AbsoluteDenoiseTrajAADecomp(BaseDenoiseTraj):
             metadata=metadata,
         )
 
+    @jaxtyped(typechecker=typeguard.typechecked)
+    def add_masked_noise(
+        self,
+        noise: Float[Tensor, "batch timesteps d_state"],
+        alpha_bar_t: Float[Tensor, "batch 1 1"],
+    ) -> Float[Tensor, "batch timesteps d_state"]:
+        """Add noise to the packed tensor while respecting visibility mask.
+
+        Args:
+            noise: Random noise tensor with same shape as packed tensor
+            alpha_bar_t: Alpha bar values for noise schedule
+
+        Returns:
+            Noisy tensor with visible joints preserved
+        """
+        (*batch, time, num_joints, _) = self.joints_wrt_world.shape
+
+        # Unpack the noise tensor to get noise for each modality
+        if self.hand_rotmats is not None:
+            (
+                betas_noise,
+                cos_sin_phis_noise,
+                contacts_noise,
+                joints_noise_flat,
+                hand_rotmats_noise_flat,
+            ) = torch.split(
+                noise,
+                [
+                    10,
+                    (num_joints - 1) * 2,
+                    num_joints,
+                    num_joints * 3,
+                    30 * 9,
+                ],
+                dim=-1,
+            )
+        else:
+            (
+                betas_noise,
+                cos_sin_phis_noise,
+                contacts_noise,
+                joints_noise_flat,
+            ) = torch.split(
+                noise,
+                [10, (num_joints - 1) * 2, num_joints, num_joints * 3],
+                dim=-1,
+            )
+
+        # Reshape joint noise to match joints_wrt_world shape
+        joints_noise = joints_noise_flat.reshape((*batch, time, num_joints, 3))
+
+        occluded_mask = (
+            (~self.visible_joints_mask).unsqueeze(-1).repeat(1, 1, 1, 3)
+        )  # BS, T, J, 3
+
+        jts = self.joints_wrt_world.clone()
+        noisy_joints = (
+            torch.sqrt(alpha_bar_t).unsqueeze(-1) * jts
+            + torch.sqrt(1.0 - alpha_bar_t).unsqueeze(-1) * joints_noise
+        )
+        noisy_joints = torch.where(occluded_mask, noisy_joints, jts)
+
+        noisy_joints_flat = noisy_joints.reshape((*batch, time, -1))
+
+        noisy_betas = (
+            torch.sqrt(alpha_bar_t) * self.betas.reshape((*batch, time, -1))
+            + torch.sqrt(1.0 - alpha_bar_t) * betas_noise
+        )
+
+        noisy_cos_sin_phis = (
+            torch.sqrt(alpha_bar_t) * self.cos_sin_phis.reshape((*batch, time, -1))
+            + torch.sqrt(1.0 - alpha_bar_t) * cos_sin_phis_noise
+        )
+
+        noisy_contacts = (
+            torch.sqrt(alpha_bar_t) * self.contacts.reshape((*batch, time, -1))
+            + torch.sqrt(1.0 - alpha_bar_t) * contacts_noise
+        )
+
+        # Pack everything back together
+        if self.hand_rotmats is not None:
+            noisy_hand_rotmats = torch.sqrt(alpha_bar_t) * self.hand_rotmats.reshape(
+                (*batch, time, -1),
+            ) + torch.sqrt(1.0 - alpha_bar_t) * hand_rotmats_noise_flat.reshape(
+                (*batch, time, 30, 3, 3),
+            )
+            noisy_hand_rotmats_flat = noisy_hand_rotmats.reshape((*batch, time, -1))
+            return torch.cat(
+                [
+                    noisy_betas.reshape((*batch, time, -1)),
+                    noisy_cos_sin_phis.reshape((*batch, time, -1)),
+                    noisy_contacts.reshape((*batch, time, -1)),
+                    noisy_joints_flat,
+                    noisy_hand_rotmats_flat,
+                ],
+                dim=-1,
+            )
+        else:
+            return torch.cat(
+                [
+                    noisy_betas.reshape((*batch, time, -1)),
+                    noisy_cos_sin_phis.reshape((*batch, time, -1)),
+                    noisy_contacts.reshape((*batch, time, -1)),
+                    noisy_joints_flat,
+                ],
+                dim=-1,
+            )
+
     def encode(
         self,
         encoders: nn.ModuleDict,
