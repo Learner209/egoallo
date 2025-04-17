@@ -1,8 +1,10 @@
 from __future__ import annotations
+import pickle
 
 import copy
 from pathlib import Path
 from typing import TYPE_CHECKING
+import numpy as np
 
 import torch.utils.data
 from tqdm import tqdm
@@ -10,8 +12,6 @@ from tqdm import tqdm
 from egoallo.denoising.abs_aadecomp_traj import AbsoluteDenoiseTrajAADecomp
 from egoallo.type_stubs import EgoTrainingDataType
 from egoallo.sampling import quadratic_ts
-from egoallo.utilities import get_class_from_path
-from egoallo.constants import EgoTrainingDataZoo
 
 if TYPE_CHECKING:
     pass
@@ -25,22 +25,42 @@ from egoallo.inference_utils import (
 from egoallo.denoising.abs_traj import AbsoluteDenoiseTraj
 from egoallo.constants import SmplFamilyMetaModelZoo
 from egoallo.sampling import CosineNoiseScheduleConstants
-from egoallo.viz.hybrik_twist_angle_visualizer import InteractiveSMPLViewer
+from egoallo.config.inference.defaults import InferenceConfig
+from egoallo.config.inference.egoexo import EgoExoInferenceConfig
+from typing import Union
+from egoallo.setup_logger import setup_logger
+import dataclasses
+from egoallo import training_utils
 
-if __name__ == "__main__":
-    checkpoint_dir = Path("experiments/Apr_11_hybrik/v1/checkpoints_10000")
-    device = torch.device("cpu")
+logger = setup_logger(output=None, name=__name__)
+
+
+def test_fn(
+    inference_config: Union[InferenceConfig, EgoExoInferenceConfig],
+    device: torch.device,
+):
+    checkpoint_dir = inference_config.checkpoint_dir
+    save_dir_name = inference_config.output_dir
     runtime_config: EgoAlloTrainConfig = load_runtime_config(
         checkpoint_dir,
     )
+
+    # ! Override runtime config with inference config values
+    for field in dataclasses.fields(type(inference_config)):
+        if hasattr(runtime_config, field.name):
+            setattr(
+                runtime_config,
+                field.name,
+                getattr(inference_config, field.name),
+            )
+
     denoiser, model_config = load_denoiser(
         checkpoint_dir,
         runtime_config,
     )
     denoiser = denoiser.to(device)
 
-    bs = 32
-    win_size = runtime_config.subseq_len
+    bs = 1
     noise_constants = CosineNoiseScheduleConstants.compute(timesteps=1000).to(
         device=device,
     )
@@ -57,17 +77,11 @@ if __name__ == "__main__":
         )
     )
 
-    all_post_pred_x_0_list = []
-    all_post_gt_x_0_list = []
+    all_post_pred_x_0_dict = {}
+    all_post_gt_x_0_dict = {}
     all_metrics = {}
 
-    runtime_config.splits = ("test",)
     runtime_config.temporal_mask_ratio = 0.0
-    runtime_config.batch_size = 1
-    runtime_config.dataset_slice_strategy = "full_sequence"
-
-    runtime_config.dataset_type = "AriaInferenceDataset"
-
     dataloader = torch.utils.data.DataLoader(
         dataset=build_dataset(cfg=runtime_config)(config=runtime_config),
         batch_size=bs,
@@ -84,6 +98,12 @@ if __name__ == "__main__":
         desc="Enumerating test loader",
         ascii=" >=",
     ):
+        if (
+            inference_config.debug_max_iters
+            and batch_idx > inference_config.debug_max_iters - 1
+        ):
+            break
+
         assert batch.joints_wrt_world.shape[0] == 1
         batch = batch.to(device)
         preprocessed_batch = copy.deepcopy(batch)
@@ -91,10 +111,6 @@ if __name__ == "__main__":
         seq_len = batch.joints_wrt_world.shape[1]
         window_size = runtime_config.subseq_len
         overlap_size = int(window_size / 4)
-
-        window_size = 128
-        overlap_size = 0
-        seq_len = 128
 
         x_t_packed = torch.randn(
             (
@@ -105,60 +121,60 @@ if __name__ == "__main__":
             device=device,
         )
 
-        # canonical_overlap_weights = (
-        #     torch.from_numpy(
-        #         np.minimum(
-        #             overlap_size,
-        #             np.minimum(
-        #                 np.arange(1, seq_len + 1),
-        #                 np.arange(1, seq_len + 1)[::-1],
-        #             ),
-        #         )
-        #         / overlap_size,
-        #     )
-        #     .to(device)
-        #     .to(torch.float32)
-        # )
+        canonical_overlap_weights = (
+            torch.from_numpy(
+                np.minimum(
+                    overlap_size,
+                    np.minimum(
+                        np.arange(1, seq_len + 1),
+                        np.arange(1, seq_len + 1)[::-1],
+                    ),
+                )
+                / overlap_size,
+            )
+            .to(device)
+            .to(torch.float32)
+        )
 
         # Prepare window data in advance
-        window_data = []
         overlap_weights = torch.zeros((1, seq_len, 1), device=x_t_packed.device)
 
-        # for start_t in range(0, seq_len, window_size - overlap_size):
-        #     end_t = min(start_t + window_size, seq_len)
-        #     overlap_weights_slice = canonical_overlap_weights[
-        #         None,
-        #         : end_t - start_t,
-        #         None,
-        #     ]
-        #     overlap_weights[:, start_t:end_t, :] += overlap_weights_slice
-
-        #     win_data = copy.deepcopy(post_processed_batch[:, start_t:end_t])
-        #     # FIXME: this is a hack to follow the state machine of EgoTrainingData dataclass.
-        #     win_data.metadata.stage = "raw"
-        #     win_data = win_data.preprocess()
-
-        #     window_data.append((start_t, end_t, win_data, overlap_weights_slice))
-
-        post_processed_batch = post_processed_batch[:, :seq_len]
-        preprocessed_batch = preprocessed_batch[:, :seq_len]
-        overlap_weights = torch.ones((1, seq_len, 1), device=x_t_packed.device)
+        window_data = []
         for start_t in range(0, seq_len, window_size - overlap_size):
             end_t = min(start_t + window_size, seq_len)
+            overlap_weights_slice = canonical_overlap_weights[
+                None,
+                : end_t - start_t,
+                None,
+            ]
+            overlap_weights[:, start_t:end_t, :] += overlap_weights_slice
 
             win_data = copy.deepcopy(post_processed_batch[:, start_t:end_t])
             # FIXME: this is a hack to follow the state machine of EgoTrainingData dataclass.
             win_data.metadata.stage = "raw"
             win_data = win_data.preprocess()
 
-            window_data.append(
-                (
-                    start_t,
-                    end_t,
-                    win_data,
-                    torch.ones_like(overlap_weights[:, start_t:end_t, :]),
-                ),
-            )
+            window_data.append((start_t, end_t, win_data, overlap_weights_slice))
+
+        # post_processed_batch = post_processed_batch[:, :seq_len]
+        # preprocessed_batch = preprocessed_batch[:, :seq_len]
+        # overlap_weights = torch.ones((1, seq_len, 1), device=x_t_packed.device)
+        # for start_t in range(0, seq_len, window_size - overlap_size):
+        #     end_t = min(start_t + window_size, seq_len)
+
+        #     win_data = copy.deepcopy(post_processed_batch[:, start_t:end_t])
+        #     # FIXME: this is a hack to follow the state machine of EgoTrainingData dataclass.
+        #     win_data.metadata.stage = "raw"
+        #     win_data = win_data.preprocess()
+
+        #     window_data.append(
+        #         (
+        #             start_t,
+        #             end_t,
+        #             win_data,
+        #             torch.ones_like(overlap_weights[:, start_t:end_t, :]),
+        #         ),
+        #     )
 
         ts = quadratic_ts(timesteps=1000)
         x_t_packed = torch.randn(
@@ -178,12 +194,21 @@ if __name__ == "__main__":
 
                 # Process each window
                 for start_t, end_t, win_data, overlap_weights_slice in window_data:
+                    x_t_unpacked = runtime_config.denoising.unpack_traj(
+                        x_t_packed[:, start_t:end_t, :],
+                        metadata=win_data.metadata,
+                        include_hands=runtime_config.model.include_hands,
+                    )
+                    occ_mask = (
+                        (~win_data.visible_joints_mask).unsqueeze(-1).repeat(1, 1, 1, 3)
+                    )
+                    x_t_unpacked.joints_wrt_world = torch.where(
+                        occ_mask,
+                        x_t_unpacked.joints_wrt_world,
+                        win_data.joints_wrt_world,
+                    )
                     post_pred_x_0 = denoiser.forward(
-                        x_t_unpacked=runtime_config.denoising.unpack_traj(
-                            x_t_packed[:, start_t:end_t, :],
-                            metadata=win_data.metadata,
-                            include_hands=runtime_config.model.include_hands,
-                        ),
+                        x_t_unpacked=x_t_unpacked,
                         t=torch.tensor([t], device=device).expand((bs,)),
                         joints=win_data.joints_wrt_world,
                         visible_joints_mask=win_data.visible_joints_mask,
@@ -311,24 +336,6 @@ if __name__ == "__main__":
             )
             post_pred_x_0.cos_sin_phis = cos_sin_phis
 
-            ps_vis = False
-            if ps_vis:
-                ind = 0
-                batch_ind = 0
-                viewer = InteractiveSMPLViewer(
-                    smpl_aadecomp_model=body_model,
-                    pose_skeleton=post_pred_x_0.joints_wrt_world[batch_ind, ind] * 1,
-                    betas=post_pred_x_0.betas[batch_ind, ind],
-                    transl=None,
-                    initial_phis=post_pred_x_0.cos_sin_phis[batch_ind, ind],
-                    global_orient=None,
-                    device=device,
-                    num_hybrik_joints=24,  # Standard for SMPL output from hybrik
-                    leaf_thetas=None,
-                    coordinate_transform=True,
-                )
-                viewer.show()
-
         post_x_0 = post_processed_batch.postprocess_denoise_traj(x_0, unmask=True)
 
         for i in range(bs):
@@ -338,41 +345,66 @@ if __name__ == "__main__":
                 device=device,
             )
             all_metrics[post_pred_x_0.metadata.take_name[i]] = metrics
+            all_post_pred_x_0_dict[post_pred_x_0.metadata.take_name[i]] = post_pred_x_0
+            all_post_gt_x_0_dict[post_x_0.metadata.take_name[i]] = post_x_0
 
-        all_post_pred_x_0_list.append(post_pred_x_0)
-        all_post_gt_x_0_list.append(post_x_0)
+        if inference_config.visualize_traj:
+            if batch_idx > 20:
+                continue
 
-        DataClass: EgoTrainingDataType = get_class_from_path(
-            EgoTrainingDataZoo[runtime_config.ego_training_data_name],
-        )
+            for i in range(bs):
+                output_path = (
+                    save_dir_name / f"{post_processed_batch.metadata.take_name[i]}.mp4"
+                )
+                output_path.parent.mkdir(exist_ok=True, parents=True)
 
-        # vis using pyrender
-        for i in range(bs):
-            output_path = (
-                Path("exp")
-                / save_dir_name
-                / f"{post_processed_batch.metadata.take_name[i]}.mp4"
-            )
-            output_path.parent.mkdir(exist_ok=True, parents=True)
+                from egoallo.viz.smpl_pyrender_viewer import SMPLViewer
 
-            from egoallo.viz.smpl_pyrender_viewer import SMPLViewer
+                viewer = SMPLViewer(
+                    smpl_family_model_basedir=runtime_config.smpl_family_model_basedir,
+                    smpl_family_meta_model_name=runtime_config.smpl_family_meta_model_name,
+                    gender=post_pred_x_0.metadata.gender,
+                )
+                viewer.render_list_sequences(
+                    [post_pred_x_0[i], post_x_0[i]],
+                    output_path,
+                    online_render=inference_config.online_render,
+                )
 
-            viewer = SMPLViewer(
-                smpl_family_model_basedir=runtime_config.smpl_family_model_basedir,
-                smpl_family_meta_model_name=runtime_config.smpl_family_meta_model_name,
-                gender=post_pred_x_0.metadata.gender,
-            )
-            viewer.render_list_sequences(
-                [post_pred_x_0[i], post_x_0[i]],
-                output_path,
-                online_render=False,
-            )
+    # Aggregate metrics across all takes by computing mean for each metric type
+    agg_metrics = {}
+    for take_metrics in all_metrics.values():
+        for metric_name, metric_value in take_metrics.items():
+            if metric_name not in agg_metrics:
+                agg_metrics[metric_name] = []
+            agg_metrics[metric_name].append(metric_value)
+    agg_metrics = {
+        metric: sum(values) / len(values) for metric, values in agg_metrics.items()
+    }
 
     pickle.dump(
         {
-            "all_post_pred_x_0_list": all_post_pred_x_0_list,
-            "all_post_gt_x_0_list": all_post_gt_x_0_list,
+            "all_post_pred_x_0_dict": all_post_pred_x_0_dict,
+            "all_post_gt_x_0_dict": all_post_gt_x_0_dict,
             "all_metrics": all_metrics,
+            "agg_metrics": agg_metrics,
         },
-        open(str(Path("exp") / Path(save_dir_name) / "all_pred_and_gt_traj.pkl"), "wb"),
+        open(str(Path(save_dir_name) / "all_pred_and_gt_traj_and_metrics.pkl"), "wb"),
     )
+
+
+if __name__ == "__main__":
+    import hydra
+    from omegaconf import DictConfig
+    from hydra.utils import instantiate
+
+    training_utils.ipdb_safety_net()
+
+    @hydra.main(version_base="1.3", config_path="../../../config")
+    def test(cfg: DictConfig) -> None:
+        inference_config: Union[InferenceConfig, EgoExoInferenceConfig] = instantiate(
+            cfg.inference,
+        )
+        test_fn(inference_config, device=torch.device("cuda"))
+
+    test()
