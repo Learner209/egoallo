@@ -153,17 +153,6 @@ def run_training(
         ),
     )
 
-    if train_cfg.use_ema:
-        ema_model = EMAModel(
-            copy.deepcopy(model),
-            update_after_step=train_cfg.ema_update_after_step,
-            inv_gamma=train_cfg.ema_inv_gamma,
-            power=train_cfg.ema_power,
-            min_value=train_cfg.ema_min_value,
-            max_value=train_cfg.ema_max_value,
-        )
-        ema_model: EMAModel = accelerator.prepare(ema_model)
-
     train_cfg.splits = ("train",)
     train_loader = torch.utils.data.DataLoader(
         dataset=build_dataset(cfg=train_cfg)(config=train_cfg),
@@ -211,6 +200,17 @@ def run_training(
         scheduler,
     )
     accelerator.register_for_checkpointing(scheduler)
+
+    if train_cfg.use_ema:
+        ema_model = EMAModel(
+            copy.deepcopy(accelerator.unwrap_model(model)),
+            update_after_step=train_cfg.ema_update_after_step,
+            inv_gamma=train_cfg.ema_inv_gamma,
+            power=train_cfg.ema_power,
+            min_value=train_cfg.ema_min_value,
+            max_value=train_cfg.ema_max_value,
+        )
+        accelerator.register_for_checkpointing(ema_model.averaged_model)
 
     # Restore an existing model checkpoint.
     if restore_checkpoint_dir is not None:
@@ -365,7 +365,7 @@ def run_training(
                 optim.zero_grad(set_to_none=True)
 
                 if train_cfg.use_ema:
-                    ema_model.step(model)
+                    ema_model.step(accelerator.unwrap_model(model))
 
             if not accelerator.is_main_process:
                 continue
@@ -430,11 +430,10 @@ def run_training(
             if step % steps_to_eval == 0:
                 # Compute validation loss
                 if not train_cfg.use_ema:
-                    model.eval()
                     eval_model = model
                 else:
-                    ema_model.eval()
-                    eval_model = ema_model
+                    eval_model = ema_model.averaged_model
+                eval_model.eval()
 
                 total_val_loss = 0.0
                 num_val_batches = 0
