@@ -39,8 +39,8 @@ def test_fn(
     inference_config: Union[InferenceConfig, EgoExoInferenceConfig],
     device: torch.device,
 ):
-    checkpoint_dir = inference_config.checkpoint_dir
-    save_dir_name = inference_config.output_dir
+    checkpoint_dir = Path(inference_config.checkpoint_dir)
+    save_dir_name = Path(inference_config.output_dir)
     runtime_config: EgoAlloTrainConfig = load_runtime_config(
         checkpoint_dir,
     )
@@ -349,7 +349,7 @@ def test_fn(
             all_post_gt_x_0_dict[post_x_0.metadata.take_name[i]] = post_x_0
 
         if inference_config.visualize_traj:
-            if batch_idx > 20:
+            if batch_idx > 10:
                 continue
 
             for i in range(bs):
