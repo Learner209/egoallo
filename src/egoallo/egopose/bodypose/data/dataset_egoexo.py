@@ -32,7 +32,6 @@ random.seed(1)
 
 class Dataset_EgoExo(Dataset):
     def __init__(self, config: Dict[str, Any]):
-        raise NotImplementedError("Dataset_EgoExo is poorly implemented yet.")
         super(Dataset_EgoExo, self).__init__()
 
         self.root = config["dataset_path"]
@@ -740,23 +739,13 @@ class Dataset_EgoExo(Dataset):
         take_name = f"name_{take_name}_uid_{take_uid}_t{continuous_frames[0]}_{continuous_frames[-1]}"
 
         from egoallo.data.dataclass import EgoTrainingData
+        from egoallo.data.dataclass_aadecomp import EgoTrainingDataAADecomp
 
-        ret = EgoTrainingData(
+        ret = EgoTrainingDataAADecomp(
             joints_wrt_world=joints_world,  # Already computed above
-            joints_wrt_cpf=torch.zeros_like(joints_world),  # Same shape as joints_world
-            T_world_root=torch.zeros(
-                (seq_len, 7),
-            ),  # T x 7 for translation + quaternion
-            T_world_cpf=torch.zeros((seq_len, 7)),  # T x 7 for translation + quaternion
             visible_joints_mask=visible_mask,  # Already computed above
             mask=torch.ones(seq_len, dtype=torch.bool),  # T
             betas=torch.zeros((1, 16)),  # 1 x 16 for SMPL betas
-            body_quats=torch.zeros(
-                (seq_len, 21, 4),
-            ),  # T x 21 x 4 for body joint rotations
-            hand_quats=torch.zeros(
-                (seq_len, 30, 4),
-            ),  # T x 30 x 4 for hand joint rotations
             contacts=torch.zeros((seq_len, 22)),  # T x 22 for contact states
             height_from_floor=torch.full((seq_len, 1), gt_ground_height),  # T x 1
             metadata=EgoTrainingData.MetaData(  # raw data.
@@ -779,6 +768,7 @@ class Dataset_EgoExo(Dataset):
 
 class Dataset_EgoExo_inference(Dataset):
     def __init__(self, config: Dict[str, Any]):
+        raise NotImplementedError("Dataset_EgoExo is poorly implemented yet.")
         super(Dataset_EgoExo_inference, self).__init__()
 
         self.root = config["dataset_path"]
@@ -882,3 +872,18 @@ class Dataset_EgoExo_inference(Dataset):
 
     def __len__(self):
         return len(self.trajectories)
+
+
+if __name__ == "__main__":
+    from egoallo.config.inference.egoexo import EgoExoInferenceConfig
+    from omegaconf import DictConfig
+    import hydra
+    from hydra.utils import instantiate
+
+    @hydra.main(version_base="1.3", config_path="../../../../../config")
+    def main(cfg: DictConfig) -> None:
+        inference_config: EgoExoInferenceConfig = instantiate(cfg.inference)
+        dataset = Dataset_EgoExo(inference_config.egoexo)
+        print(len(dataset))
+
+    main()
