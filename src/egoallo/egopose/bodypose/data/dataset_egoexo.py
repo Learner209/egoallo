@@ -10,7 +10,9 @@ from jaxtyping import Float, Bool
 from torch import Tensor
 from egoallo.mapping import (
     EGOEXO4D_BODYPOSE_TO_SMPLH_INDICES,
+    EGOEXO4D_BODYPOSE_TO_SMPL_INDICES,
     SMPLH_KINTREE,
+    SMPL_PARENTS,
     EGOEXO4D_BODYPOSE_KINTREE_PARENTS,
 )
 from egoallo.utils.setup_logger import setup_logger
@@ -21,8 +23,11 @@ import numpy as np
 from scipy.signal import savgol_filter
 import typeguard
 from jaxtyping import jaxtyped
+import joblib
 
 from torch.utils.data import Dataset
+from egoallo.transforms import SO3
+from typing import Literal
 
 logger = setup_logger(output=None, name=__name__)
 
@@ -46,6 +51,7 @@ class Dataset_EgoExo(Dataset):
         )
         self.use_pseudo = config["use_pseudo"]
         self.coord = config["coord"]
+
         gt_ground_height_anno_dir = config["gt_ground_height_anno_dir"]
         self.gt_ground_height = json.load(
             open(
@@ -53,6 +59,7 @@ class Dataset_EgoExo(Dataset):
                 / f"ego_pose_gt_anno_{self.split}_public_height.json",
             ),
         )
+
         # self.slice_window =  config["window_size"]
         self.slice_window = 128
 
@@ -105,8 +112,8 @@ class Dataset_EgoExo(Dataset):
                 desc="takes_metadata",
                 ascii=" >=",
             ):
-                # if cnt > 50:
-                #     break
+                if cnt > 1:
+                    break
                 cnt += 1
                 if take_uid + ".json" in self.cameras:
                     camera_json = json.load(
@@ -310,9 +317,8 @@ class Dataset_EgoExo(Dataset):
         data: Float[Tensor, "timesteps 17 3"],
         vis: Float[Tensor, "timesteps 17"],
         ground_height: float = 0.0,
-        return_smplh_joints: bool = True,
+        return_smpl_family_jts: bool = True,
         num_joints: int = 22,
-        debug_vis: bool = False,
     ) -> Tuple[
         Float[Tensor, "timesteps {num_joints} 3"],
         Bool[Tensor, "timesteps {num_joints}"],
@@ -320,24 +326,32 @@ class Dataset_EgoExo(Dataset):
         """Process joint data from annotations.
 
         Args:
-            data: List of frame dictionaries containing body pose data
-            return_smplh_joints: If True, converts joints from EgoExo4D (17 joints) to SMPLH format (22 body joints).
-                Invalid mappings will be filled with zeros.
-            debug_vis: If True, visualize joints using polyscope (for debugging)
+                data: List of frame dictionaries containing body pose data
+                return_smplh_joints: If True, converts joints from EgoExo4D (17 joints) to SMPLH format (22 body joints).
+                        Invalid mappings will be filled with zeros.
+                debug_vis: If True, visualize joints using polyscope (for debugging)
 
         Returns:
-            Tuple of:
-            - joints_world: World coordinate joint positions (timesteps x J x 3) where J is 17 for EgoExo4D or 22 for SMPLH
-            - visible: Joint visibility mask (timesteps x J) where J is 17 for EgoExo4D or 22 for SMPLH
+                Tuple of:
+                - joints_world: World coordinate joint positions (timesteps x J x 3) where J is 17 for EgoExo4D or 22 for SMPLH
+                - visible: Joint visibility mask (timesteps x J) where J is 17 for EgoExo4D or 22 for SMPLH
         """
         # Initialize SMPLH tensors with NaN for positions and False for visibility
-        if return_smplh_joints:
-            T = data.shape[0]
-            smplh_world = torch.full((T, 22, 3), float("nan"), dtype=torch.float32)
-            smplh_visible = torch.zeros((T, 22), dtype=torch.bool)
+        if num_joints == 22:
+            indice_mapping = EGOEXO4D_BODYPOSE_TO_SMPLH_INDICES
+        elif num_joints == 24:
+            indice_mapping = EGOEXO4D_BODYPOSE_TO_SMPL_INDICES
 
-            # Map joints using EGOEXO4D_BODYPOSE_TO_SMPLH_INDICES
-            for smplh_idx, ego_idx in enumerate(EGOEXO4D_BODYPOSE_TO_SMPLH_INDICES):
+        if return_smpl_family_jts:
+            T = data.shape[0]
+            smplh_world = torch.full(
+                (T, num_joints, 3),
+                float("nan"),
+                dtype=torch.float32,
+            )
+            smplh_visible = torch.zeros((T, num_joints), dtype=torch.bool)
+
+            for smplh_idx, ego_idx in enumerate(indice_mapping):
                 if ego_idx != -1:
                     # Valid mapping - copy data
                     smplh_world[:, smplh_idx] = data[:, ego_idx]
@@ -353,6 +367,7 @@ class Dataset_EgoExo(Dataset):
         threshold: float = 3.0,
         window_size: int = 11,  # Odd number for centered window
         temporal_sigma: float = 2.0,  # For Gaussian weighting
+        smpl_family_name: Literal["smplh", "smpl"] = "smplh",
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Enhanced version with temporal awareness and smoothing:
@@ -465,7 +480,10 @@ class Dataset_EgoExo(Dataset):
             return joints
 
         # SMPLH kinematic tree (parent indices)
-        smplh_kintree = SMPLH_KINTREE
+        if smpl_family_name == "smplh":
+            smplh_kintree = SMPLH_KINTREE
+        elif smpl_family_name == "smpl":
+            smplh_kintree = SMPL_PARENTS
 
         # COCO kinematic tree (parent indices)
         coco_kintree = EGOEXO4D_BODYPOSE_KINTREE_PARENTS
@@ -487,12 +505,12 @@ class Dataset_EgoExo(Dataset):
         Applies kinematic constraints to joint positions to filter outliers and adjust positions based on expected distances.
 
         Args:
-            joints_world (torch.Tensor): SMPLH joint positions in world coordinates, shape (T, 22, 3)
-            joints_world_coco (torch.Tensor): COCO joint positions in world coordinates, shape (T, 17, 3)
-            threshold (float): Number of standard deviations for defining outlier thresholds
+                joints_world (torch.Tensor): SMPLH joint positions in world coordinates, shape (T, 22, 3)
+                joints_world_coco (torch.Tensor): COCO joint positions in world coordinates, shape (T, 17, 3)
+                threshold (float): Number of standard deviations for defining outlier thresholds
 
         Returns:
-            Tuple[torch.Tensor, torch.Tensor]: Adjusted SMPLH and COCO joints
+                Tuple[torch.Tensor, torch.Tensor]: Adjusted SMPLH and COCO joints
         """
         # Define kinematic trees for SMPLH and COCO
         smplh_kintree = SMPLH_KINTREE
@@ -591,11 +609,13 @@ class Dataset_EgoExo(Dataset):
             ),
         )
         take_name = camera_json["metadata"]["take_name"]
+
         gt_ground_height = (
             self.gt_ground_height[take_uid]
             if take_uid in self.gt_ground_height
             else 0.0
         )
+
         if self.use_pseudo and take_uid in self.pseudo_annotated_takes:
             pose_json = json.load(
                 open(os.path.join(self.root_poses, "automatic", take_uid + ".json")),
@@ -651,17 +671,15 @@ class Dataset_EgoExo(Dataset):
             skeletons_window,
             flags_window.float(),
             ground_height=float(gt_ground_height),
-            return_smplh_joints=True,
-            num_joints=22,
-            debug_vis=False,
+            return_smpl_family_jts=True,
+            num_joints=24,
         )
         joints_world_orig_coco, _ = self._process_joints(
             skeletons_window,
             flags_window.float(),
             ground_height=float(gt_ground_height),
-            return_smplh_joints=False,
+            return_smpl_family_jts=False,
             num_joints=17,
-            debug_vis=False,
         )
 
         # Import scipy interpolation
@@ -728,34 +746,45 @@ class Dataset_EgoExo(Dataset):
         joints_world, joints_world_coco = self.apply_kinematic_constraints_v2(
             joints_world=joints_world,
             joints_world_coco=joints_world_coco,
+            smpl_family_name="smpl",
         )
         # Create visibility mask based on non-nan values in world coordinates
         visible_mask = ~torch.isnan(joints_world).any(
             dim=-1,
         )  # shape: (seq_len, num_joints)
-        visible_mask_orig_coco = ~torch.isnan(joints_world_coco).any(
+        _visible_mask_orig_coco = ~torch.isnan(joints_world_coco).any(
             dim=-1,
         )  # shape: (seq_len, num_joints)
         take_name = f"name_{take_name}_uid_{take_uid}_t{continuous_frames[0]}_{continuous_frames[-1]}"
 
-        from egoallo.data.dataclass import EgoTrainingData
         from egoallo.data.dataclass_aadecomp import EgoTrainingDataAADecomp
+
+        body_twists = torch.zeros((seq_len, 23, 1), dtype=torch.float32)
+        body_quats = SO3.identity(
+            device=joints_world.device,
+            dtype=joints_world.dtype,
+        ).wxyz.expand(
+            (seq_len, 21, -1),
+        )
 
         ret = EgoTrainingDataAADecomp(
             joints_wrt_world=joints_world,  # Already computed above
             visible_joints_mask=visible_mask,  # Already computed above
             mask=torch.ones(seq_len, dtype=torch.bool),  # T
-            betas=torch.zeros((1, 16)),  # 1 x 16 for SMPL betas
-            contacts=torch.zeros((seq_len, 22)),  # T x 22 for contact states
+            betas=torch.zeros((1, 10)),  # 1 x 16 for SMPL betas
+            contacts=torch.zeros((seq_len, 52)),  # T x 22 for contact states
             height_from_floor=torch.full((seq_len, 1), gt_ground_height),  # T x 1
-            metadata=EgoTrainingData.MetaData(  # raw data.
+            body_quats=body_quats,
+            body_twists=body_twists,
+            hand_quats=None,
+            metadata=EgoTrainingDataAADecomp.MetaData(  # raw data.
                 take_name=(take_name,),
                 frame_keys=tuple(continuous_frames),  # Convert to tuple of ints
                 stage="raw",
                 scope="test",
                 dataset_type="AriaDataset",
-                aux_joints_wrt_world_placeholder=joints_world_coco,  # Placeholder for COCO joints
-                aux_visible_joints_mask_placeholder=visible_mask_orig_coco,  # Placeholder for COCO visibility
+                aux_joints_wrt_world_placeholder=None,  # Placeholder for COCO joints
+                aux_visible_joints_mask_placeholder=None,  # Placeholder for COCO visibility
             ),
         )
         ret = ret.preprocess()

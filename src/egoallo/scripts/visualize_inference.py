@@ -13,10 +13,11 @@ from egoallo.scripts.aria_inference import AriaInference
 from egoallo.type_stubs import DenoiseTrajType, DenoiseTrajTypeLiteral, DatasetType
 from egoallo.training_utils import ipdb_safety_net
 from egoallo.mapping import SMPLH_BODY_JOINTS
+from egoallo.config.inference.egoexo import EgoExoInferenceConfig
 
 
 def visualize_saved_trajectory(
-    config: InferenceConfig,
+    config: InferenceConfig | EgoExoInferenceConfig,
     trajectory_path: tuple[Path, ...],
     trajectory_type: DenoiseTrajTypeLiteral,
     dataset_type: DatasetType,
@@ -73,11 +74,11 @@ def visualize_saved_trajectory(
         )
     elif dataset_type in ("AriaDataset", "AriaInferenceDataset", "EgoExoDataset"):
         traj_root = config.egoexo.traj_root
-        from egoallo.network import AbsoluteDenoiseTraj
+        from egoallo.network import AbsoluteDenoiseTrajAADecomp
 
         pred_traj: DenoiseTrajType = torch.load(trajectory_path[1], map_location=device)
 
-        assert isinstance(pred_traj, AbsoluteDenoiseTraj), (
+        assert isinstance(pred_traj, AbsoluteDenoiseTrajAADecomp), (
             "Prediction trajectory should be AbsoluteDenoiseTraj for visualization."
         )
         assert pred_traj.metadata.stage == "postprocessed", (

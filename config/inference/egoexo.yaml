@@ -10,7 +10,7 @@ smpl_family_model_basedir:
   _target_: pathlib.Path
   _args_:
     - assets/smpl_based_model/
-smpl_family_meta_model_name: SmplhModel
+smpl_family_meta_model_name: SmplModelAADecomp
 output_dir:
   _target_: pathlib.Path
   _args_:
@@ -30,7 +30,7 @@ guidance_post: false
 guidance_inner: false
 guidance_mode: aria_hamer
 
-dataset_type: AriaInferenceDataset
+dataset_type: AriaDataset
 dataset_slice_strategy: full_sequence
 splits:
   - test
