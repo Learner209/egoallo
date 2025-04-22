@@ -72,7 +72,7 @@ class EgoTrainingDataAADecomp(TensorDataclass):
     class MetaData:
         """Metadata about the trajectory."""
 
-        smpl_family_model_basedir: Path = Path("./assets/smpl_base_model")
+        smpl_family_model_basedir: Path = Path("./assets/smpl_based_model")
         """Base directory of the smpl family model."""
 
         smpl_family_meta_model_name: SmplFamilyModelTypeLiteral = "SmplModelAADecomp"
