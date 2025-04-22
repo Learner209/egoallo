@@ -122,7 +122,7 @@ def load_point_cloud_and_find_ground(
         zs = np.sort(zs)[len(zs) // 10_000 : -len(zs) // 10_000]
 
         # Get bottom 10% or 15%.
-        alpha = 0.1 if filtered_points_data.shape[0] < 10_000 else 0.15
+        alpha = 0.05 if filtered_points_data.shape[0] < 10_000 else 0.10
         min_z = np.min(zs)
         max_z = np.max(zs)
 
@@ -130,7 +130,7 @@ def load_point_cloud_and_find_ground(
 
         best_inliers = 0
         best_z = 0.0
-        for i in range(10_000):
+        for i in range(10_0000):
             z = np.random.choice(zs)
             inliers_bool = np.abs(zs - z) < 0.01
             inliers = np.sum(inliers_bool)
