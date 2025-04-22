@@ -3397,6 +3397,54 @@ class ConvertPointsToHomogeneous(nn.Module):
         return convert_points_to_homogeneous(input)
 
 
+def kabsch_align(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
+    """
+    Aligns point set A to point set B using the Kabsch algorithm.
+
+    Args:
+        A (torch.Tensor): Predicted points, shape (..., N, 3)
+        B (torch.Tensor): Ground truth points, shape (..., N, 3)
+
+    Returns:
+        torch.Tensor: Homogeneous transformation matrix (..., 4, 4)
+    """
+    assert A.shape == B.shape
+    assert A.shape[-1] == 3, "Points must be 3D"
+
+    # Compute centroids
+    centroid_A = A.mean(dim=-2, keepdim=True)  # (..., 1, 3)
+    centroid_B = B.mean(dim=-2, keepdim=True)  # (..., 1, 3)
+
+    # Center the point sets
+    AA = A - centroid_A
+    BB = B - centroid_B
+
+    # Compute covariance matrix
+    H = torch.matmul(AA.transpose(-2, -1), BB)  # (..., 3, 3)
+
+    # SVD
+    U, S, Vt = torch.linalg.svd(H)
+    R = torch.matmul(Vt.transpose(-2, -1), U.transpose(-2, -1))  # (..., 3, 3)
+
+    # Reflection correction
+    det_R = torch.linalg.det(R)
+    Vt[..., -1, :] *= torch.sign(det_R).unsqueeze(-1)
+    R = torch.matmul(Vt.transpose(-2, -1), U.transpose(-2, -1))
+
+    # Translation
+    t = centroid_B.squeeze(-2) - torch.matmul(
+        R,
+        centroid_A.squeeze(-2).unsqueeze(-1),
+    ).squeeze(-1)
+
+    # Build homogeneous transformation matrix
+    T = torch.eye(4, device=A.device).expand(*R.shape[:-2], 4, 4).clone()
+    T[..., :3, :3] = R
+    T[..., :3, 3] = t
+
+    return T
+
+
 _import_module("_transformations", warn=False)
 
 if __name__ == "__main__":

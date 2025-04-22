@@ -13,6 +13,9 @@ from egoallo.scripts.aria_inference import AriaInference
 from egoallo.type_stubs import DenoiseTrajType, DenoiseTrajTypeLiteral, DatasetType
 from egoallo.training_utils import ipdb_safety_net
 from egoallo.mapping import SMPLH_BODY_JOINTS
+from egoallo.middleware.third_party.HybrIK.hybrik.models.layers.smpl.SMPL import (
+    SMPL_layer,
+)
 from egoallo.config.inference.egoexo import EgoExoInferenceConfig
 
 
@@ -93,7 +96,6 @@ def visualize_saved_trajectory(
         aria_inference_toolkit = AriaInference(
             config,
             traj_root,
-            output_path=output_dir,
             glasses_x_angle_offset=0.0,
         )
         rgb_frames = aria_inference_toolkit.extract_rgb_frames(
@@ -133,10 +135,10 @@ def visualize_saved_trajectory(
     assert pred_traj.visible_joints_mask is not None, (
         "visible_joints_mask is not present in the trajectory"
     )  # gt_traj can be unbound
-    # Get indices of joints that are masked in at least one frame
+
     masked_indices = torch.where(~pred_traj.visible_joints_mask.any(dim=0))[0]
-    # Map indices to joint names using SMPLH joint names
-    masked_joints = [SMPLH_BODY_JOINTS[idx] for idx in masked_indices]
+    smpl_body_jnt_names = SMPL_layer.JOINT_NAMES
+    masked_joints = [smpl_body_jnt_names[idx] for idx in masked_indices.tolist()]
 
     gt_video = cv2.VideoCapture(str(gt_path))
     pred_video = cv2.VideoCapture(str(pred_path))

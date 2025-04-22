@@ -40,7 +40,6 @@ class AriaInference:
         self,
         config: InferenceConfig,
         traj_root: Path,
-        output_path: Path,
         glasses_x_angle_offset: float = 0.0,
     ):
         self.config = config
@@ -205,15 +204,17 @@ def main(
     output_path: Path,
     glasses_x_angle_offset: float = 0.0,
 ) -> None:
-    inference = AriaInference(config, traj_root, output_path, glasses_x_angle_offset)
+    inference = AriaInference(config, traj_root, glasses_x_angle_offset)
     inference.extract_rgb_frames()
 
 
 if __name__ == "__main__":
-    from glob import glob
-
     gt_height_dict = {}
-    takes = glob("./data/egoexo-default/takes/*", recursive=False)
+    # takes = glob("./data/egoexo-default/takes/*", recursive=False)
+    takes = [
+        "data/egoexo-default/takes/cmu_bike11_2",
+        "data/egoexo-default/takes/cmu_bike01_2",
+    ]
     for take_idx, take in enumerate(sorted(takes)):
         if take_idx > 0:
             break

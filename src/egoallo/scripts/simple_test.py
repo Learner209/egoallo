@@ -12,6 +12,7 @@ from tqdm import tqdm
 from egoallo.denoising.abs_aadecomp_traj import AbsoluteDenoiseTrajAADecomp
 from egoallo.type_stubs import EgoTrainingDataType
 from egoallo.sampling import quadratic_ts
+from egoallo.scripts.aria_inference import AriaInference
 
 if TYPE_CHECKING:
     pass
@@ -31,6 +32,9 @@ from typing import Union
 from egoallo.setup_logger import setup_logger
 import dataclasses
 from egoallo import training_utils
+from egoallo.utils.transformation import kabsch_align
+from egoallo.mapping import SMPL_PARENTS
+import cv2
 
 logger = setup_logger(output=None, name=__name__)
 
@@ -82,8 +86,19 @@ def test_fn(
     all_metrics = {}
 
     runtime_config.temporal_mask_ratio = 0.0
+    runtime_config.fps_aug = False
+    runtime_config.traj_aug = False
+
+    ds_init_config = (
+        inference_config
+        if inference_config.dataset_type in ["AriaDataset"]
+        else runtime_config
+    )
+    if inference_config.dataset_type in ["FlexibleMaskingDataset"]:
+        ds_init_config.mask_scheme = inference_config.mask_scheme
+
     dataloader = torch.utils.data.DataLoader(
-        dataset=build_dataset(cfg=runtime_config)(config=runtime_config),
+        dataset=build_dataset(cfg=runtime_config)(config=ds_init_config),
         batch_size=bs,
         shuffle=False,
         num_workers=0,
@@ -304,20 +319,101 @@ def test_fn(
 
         assert input_jts_wrt_world.shape == post_pred_jts_wrt_world.shape
 
-        pred2gt_jts_offset = input_jts_wrt_world - post_pred_jts_wrt_world
-        vis_pred2_gt_jts_offset = torch.where(
-            post_processed_batch.visible_joints_mask.bool()
-            .unsqueeze(-1)
-            .expand(*post_processed_batch.visible_joints_mask.shape, 3),
-            pred2gt_jts_offset,
-            0,
-        )  # *batch, timesteps, jts, 3
-        vis_pred2_gt_jts_offset = vis_pred2_gt_jts_offset.sum(
-            dim=(-2),
-        ) / post_processed_batch.visible_joints_mask.sum(
-            dim=-1,
-            keepdim=True,
-        )  # *batch, timesteps, 3
+        vis_masks = (
+            post_processed_batch.visible_joints_mask
+        )  # shape: (bs, timestep, joints)
+
+        kabsch_align_jts = True
+        align_bone_length = True
+
+        for bs_idx in range(bs):
+            T_gt_pred = None
+            for timestep in range(input_jts_wrt_world.shape[1]):
+                if kabsch_align_jts:
+                    zero_vis_mask = vis_masks[bs_idx, timestep].sum() == 0
+                    assert not (zero_vis_mask and timestep == 0), (
+                        "The first frame should not be all masked."
+                    )
+
+                    if not zero_vis_mask:
+                        # align vis pred joints and gt joints with kasbch algorithm.
+                        pred_jts_bs_t = post_pred_x_0.joints_wrt_world[
+                            bs_idx,
+                            timestep,
+                        ]  # shape: (joints, 3)
+                        gt_jts_bs_t = input_jts_wrt_world[
+                            bs_idx,
+                            timestep,
+                        ]  # shape: (joints, 3)
+                        vis_mask_bs_t = vis_masks[bs_idx, timestep]  # shape: (joints,)
+
+                        vis_pred_jts_bs_t = pred_jts_bs_t[
+                            vis_mask_bs_t.bool()
+                        ]  # shape: (num_visible, 3)
+                        vis_gt_jts_bs_t = gt_jts_bs_t[
+                            vis_mask_bs_t.bool()
+                        ]  # shape: (num_visible, 3)
+
+                        T_gt_pred = kabsch_align(
+                            vis_pred_jts_bs_t,
+                            vis_gt_jts_bs_t,
+                        )  # shape: (4, 4)
+
+                    homo_pred_jts_bs_t = torch.cat(
+                        [pred_jts_bs_t, torch.ones_like(pred_jts_bs_t[:, :1])],
+                        dim=-1,
+                    )  # shape: (joints, 4)
+
+                    aligned_homo_jts = torch.matmul(homo_pred_jts_bs_t, T_gt_pred.t())
+                    post_pred_x_0.joints_wrt_world[bs_idx, timestep] = aligned_homo_jts[
+                        :,
+                        :3,
+                    ]
+
+                if align_bone_length:
+                    pred_jts_bs_t = post_pred_x_0.joints_wrt_world[bs_idx, timestep]
+                    gt_verts_zero, gt_jts_zero = body_model.verts_zero_and_jts_zero(
+                        betas=post_pred_x_0.betas[bs_idx, timestep],
+                        num_joints=24,
+                    )
+                    gt_jts = torch.cat(
+                        [torch.zeros_like(gt_jts_zero[0:1, :]), gt_jts_zero],
+                        dim=0,
+                    )
+                    assert gt_jts.shape == (24, 3) and pred_jts_bs_t.shape == (24, 3)
+                    parent_indices = SMPL_PARENTS
+                    gt_t_parent_child = (
+                        gt_jts[1:] - gt_jts[parent_indices[1:]]
+                    )  # 23 x 3
+                    pred_t_parent_child = (
+                        pred_jts_bs_t[1:] - pred_jts_bs_t[parent_indices[1:]]
+                    )  # 23 x 3
+                    gt_bone_length = gt_t_parent_child.norm(dim=-1)
+                    pred_bone_length = pred_t_parent_child.norm(dim=-1)
+
+                    bone_aligned_jts = pred_jts_bs_t.clone()
+                    for child_idx, parent_idx in enumerate(parent_indices):
+                        if parent_idx == -1:
+                            continue
+                        else:
+                            bone_aligned_jts[child_idx] = (
+                                bone_aligned_jts[parent_idx]
+                                + (
+                                    bone_aligned_jts[child_idx]
+                                    - bone_aligned_jts[parent_idx]
+                                )
+                                / pred_bone_length[child_idx - 1]
+                                * gt_bone_length[child_idx - 1]
+                            )
+                            if torch.isnan(bone_aligned_jts[child_idx]).any():
+                                import builtins
+
+                                builtins.breakpoint()
+
+                    post_pred_x_0.joints_wrt_world[bs_idx, timestep] = bone_aligned_jts[
+                        :,
+                        :3,
+                    ]
 
         x_0 = runtime_config.denoising.from_ego_data(
             ego_data=preprocessed_batch,
@@ -325,6 +421,20 @@ def test_fn(
             include_hands=runtime_config.model.include_hands,
         )
         if isinstance(post_pred_x_0, AbsoluteDenoiseTraj):
+            pred2gt_jts_offset = input_jts_wrt_world - post_pred_jts_wrt_world
+            vis_pred2_gt_jts_offset = torch.where(
+                post_processed_batch.visible_joints_mask.bool()
+                .unsqueeze(-1)
+                .expand(*post_processed_batch.visible_joints_mask.shape, 3),
+                pred2gt_jts_offset,
+                0,
+            )  # *batch, timesteps, jts, 3
+            vis_pred2_gt_jts_offset = vis_pred2_gt_jts_offset.sum(
+                dim=(-2),
+            ) / post_processed_batch.visible_joints_mask.sum(
+                dim=-1,
+                keepdim=True,
+            )  # *batch, timesteps, 3
             post_pred_x_0.t_world_root += vis_pred2_gt_jts_offset
         elif isinstance(post_pred_x_0, AbsoluteDenoiseTrajAADecomp):
             # post_pred_x_0.joints_wrt_world += vis_pred2_gt_jts_offset[..., None, :]
@@ -365,11 +475,138 @@ def test_fn(
                     smpl_family_meta_model_name=runtime_config.smpl_family_meta_model_name,
                     gender=post_pred_x_0.metadata.gender,
                 )
-                viewer.render_list_sequences(
-                    [post_pred_x_0[i], post_x_0[i]],
-                    output_path,
-                    online_render=inference_config.online_render,
-                )
+                if inference_config.dataset_type in ["AriaDataset"]:
+
+                    def extract_path_name_func(take_name):
+                        return (
+                            Path(inference_config.egoexo.dataset_path)
+                            / "takes"
+                            / Path(take_name.split("name_")[1].split("_uid_")[0])
+                        )  # noqa
+
+                    this_take_path = extract_path_name_func(
+                        post_processed_batch.metadata.take_name[i],
+                    )
+
+                    this_take_save_path = (
+                        save_dir_name / post_processed_batch.metadata.take_name[i]
+                    )
+                    this_take_save_path.mkdir(exist_ok=True, parents=True)
+
+                    frame_keys = (
+                        post_pred_x_0.metadata.frame_keys
+                        if post_pred_x_0.metadata.frame_keys
+                        and len(post_pred_x_0.metadata.frame_keys) > 0
+                        else None
+                    )
+                    aria_inference_toolkit = AriaInference(
+                        inference_config,
+                        this_take_path,
+                        glasses_x_angle_offset=0.0,
+                    )
+                    rgb_frames = aria_inference_toolkit.extract_rgb_frames(
+                        list(frame_keys),
+                        cache_files=True,
+                    )
+                    pc_container, points_data, floor_z = (
+                        aria_inference_toolkit.load_pc_and_find_ground()
+                    )
+                    pred_traj_path = this_take_save_path / "pred_traj.mp4"
+                    viewer.render_sequence(
+                        post_pred_x_0[i],
+                        pred_traj_path,
+                        online_render=inference_config.online_render,
+                        scene_obj=pc_container,
+                    )
+
+                    # Save frames as video
+                    ego_preview_path = this_take_save_path / "rgb_frames.mp4"
+
+                    if len(rgb_frames) > 0:
+                        first_frame = rgb_frames[0]
+                        height, width = first_frame.shape[:2]
+
+                        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+                        out = cv2.VideoWriter(
+                            str(ego_preview_path),
+                            fourcc,
+                            30.0,
+                            (width, height),
+                        )
+
+                        for frame in rgb_frames:
+                            out.write(cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
+
+                        out.release()
+
+                    # Create video writer for combined video
+                    combined_path = this_take_save_path / "combined.mp4"
+                    gt_video = cv2.VideoCapture(str(ego_preview_path))
+                    pred_video = cv2.VideoCapture(str(pred_traj_path))
+                    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+
+                    # Get video properties
+                    gt_width = int(gt_video.get(cv2.CAP_PROP_FRAME_WIDTH))
+                    gt_height = int(gt_video.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                    pred_width = int(pred_video.get(cv2.CAP_PROP_FRAME_WIDTH))
+                    pred_height = int(pred_video.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                    fps = gt_video.get(cv2.CAP_PROP_FPS)
+
+                    # Calculate dimensions for combined video
+                    max_width = max(gt_width, pred_width)
+                    total_height = gt_height + pred_height
+
+                    out = cv2.VideoWriter(
+                        str(combined_path),
+                        fourcc,
+                        fps,
+                        (max_width, total_height),
+                    )
+                    while True:
+                        ret1, frame1 = gt_video.read()
+                        ret2, frame2 = pred_video.read()
+
+                        if not ret1 or not ret2:
+                            break
+
+                        # Pad frames to match max width if needed
+                        if gt_width < max_width:
+                            pad_width = max_width - gt_width
+                            frame1 = cv2.copyMakeBorder(
+                                frame1,
+                                0,
+                                0,
+                                0,
+                                pad_width,
+                                cv2.BORDER_CONSTANT,
+                                value=[0, 0, 0],
+                            )
+                        if pred_width < max_width:
+                            pad_width = max_width - pred_width
+                            frame2 = cv2.copyMakeBorder(
+                                frame2,
+                                0,
+                                0,
+                                0,
+                                pad_width,
+                                cv2.BORDER_CONSTANT,
+                                value=[0, 0, 0],
+                            )
+
+                        combined_frame = np.vstack((frame1, frame2))
+                        out.write(combined_frame)
+
+                    # Release everything
+                    gt_video.release()
+                    pred_video.release()
+                    out.release()
+
+                else:
+                    viewer.render_list_sequences(
+                        [post_pred_x_0[i], post_x_0[i]],
+                        output_path,
+                        online_render=inference_config.online_render,
+                    )
 
     # Aggregate metrics across all takes by computing mean for each metric type
     agg_metrics = {}

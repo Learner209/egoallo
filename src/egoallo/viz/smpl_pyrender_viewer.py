@@ -4,7 +4,6 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
-from functools import reduce
 from contextlib import nullcontext
 
 import numpy as np
@@ -87,38 +86,14 @@ class SMPLViewer(SMPLBaseViewer):
             traj.t_world_root,
         ).parameters()
 
-        batch_size = reduce(lambda x, y: x * y, traj.betas.shape[:-1])
-
-        # Get keypoints data
-        if traj.metadata.dataset_type in ("AriaDataset", "EgoExoDataset"):
-            seq_len = traj.metadata.aux_joints_wrt_world_placeholder.shape[1]
-            jnts = (
-                traj.metadata.aux_joints_wrt_world_placeholder[0, :, :]
-                .cpu()
-                .numpy(force=True)
-            )
-            vis_masks = (
-                traj.metadata.aux_visible_joints_mask_placeholder.bool()[0, :]
-                .cpu()
-                .numpy(force=True)
-                if traj.metadata.aux_visible_joints_mask_placeholder is not None
-                else np.ones_like(jnts[..., 0], dtype=bool)
-            )
-            in_smplh_flag = False
-        elif traj.metadata.dataset_type in (
-            "AdaptiveAmassHdf5Dataset",
-            "VanillaAmassHdf5Dataset",
-        ):
-            seq_len = traj.joints_wrt_world.shape[0]
-            jnts = traj.joints_wrt_world.cpu().numpy(force=True)
-            vis_masks = (
-                traj.visible_joints_mask.bool().cpu().numpy(force=True)
-                if traj.visible_joints_mask is not None
-                else np.ones_like(jnts[..., 0], dtype=bool)
-            )
-            in_smplh_flag = True
-        else:
-            raise ValueError(f"Unknown dataset type: {traj.metadata.dataset_type}")
+        seq_len = traj.joints_wrt_world.shape[0]
+        jnts = traj.joints_wrt_world.cpu().numpy(force=True)
+        vis_masks = (
+            traj.visible_joints_mask.bool().cpu().numpy(force=True)
+            if traj.visible_joints_mask is not None
+            else np.ones_like(jnts[..., 0], dtype=bool)
+        )
+        in_smplh_flag = True
 
         # Create keypoint visualization data
         vis_kpts_seq = []
@@ -413,36 +388,14 @@ class SMPLViewer(SMPLBaseViewer):
                 traj.t_world_root,
             ).parameters()
 
-            # Get keypoints data
-            if traj.metadata.dataset_type in ("AriaDataset", "EgoExoDataset"):
-                seq_len = traj.metadata.aux_joints_wrt_world_placeholder.shape[1]
-                jnts = (
-                    traj.metadata.aux_joints_wrt_world_placeholder[0, :, :]
-                    .cpu()
-                    .numpy(force=True)
-                )
-                vis_masks = (
-                    traj.metadata.aux_visible_joints_mask_placeholder.bool()[0, :]
-                    .cpu()
-                    .numpy(force=True)
-                    if traj.metadata.aux_visible_joints_mask_placeholder is not None
-                    else np.ones_like(jnts[..., 0], dtype=bool)
-                )
-                in_smplh_flag = False
-            elif traj.metadata.dataset_type in (
-                "AdaptiveAmassHdf5Dataset",
-                "VanillaAmassHdf5Dataset",
-            ):
-                seq_len = traj.joints_wrt_world.shape[0]
-                jnts = traj.joints_wrt_world.cpu().numpy(force=True)
-                vis_masks = (
-                    traj.visible_joints_mask.bool().cpu().numpy(force=True)
-                    if traj.visible_joints_mask is not None
-                    else np.ones_like(jnts[..., 0], dtype=bool)
-                )
-                in_smplh_flag = True
-            else:
-                raise ValueError(f"Unknown dataset type: {traj.metadata.dataset_type}")
+            seq_len = traj.joints_wrt_world.shape[0]
+            jnts = traj.joints_wrt_world.cpu().numpy(force=True)
+            vis_masks = (
+                traj.visible_joints_mask.bool().cpu().numpy(force=True)
+                if traj.visible_joints_mask is not None
+                else np.ones_like(jnts[..., 0], dtype=bool)
+            )
+            in_smplh_flag = True
 
             max_seq_len = max(max_seq_len, seq_len)
 

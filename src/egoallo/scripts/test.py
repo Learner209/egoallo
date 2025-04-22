@@ -42,6 +42,7 @@ from egoallo.utils.setup_logger import setup_logger
 from egoallo.training_utils import ipdb_safety_net
 from egoallo.scripts.visualize_inference import main as visualize_inference_cli
 from egoallo.constants import SmplFamilyMetaModelZoo
+from egoallo.config.inference.egoexo import EgoExoInferenceConfig
 # from egoallo.egoexo import EGOEXO_UTILS_INST
 
 torch.multiprocessing.set_sharing_strategy("file_system")
@@ -156,7 +157,7 @@ class SequenceProcessor:
 class TestRunner:
     """Main class for running the test pipeline."""
 
-    def __init__(self, inference_config: InferenceConfig):
+    def __init__(self, inference_config: InferenceConfig | EgoExoInferenceConfig):
         self.inference_config = inference_config
         self.device = torch.device(inference_config.device)
         self._initialize_components()
@@ -186,7 +187,7 @@ class TestRunner:
         if runtime_config.dataset_type in ("AriaDataset", "AriaInferenceDataset"):
             # runtime_config.data_collate_fn = "DefaultBatchCollator"
             runtime_config.data_collate_fn = "TensorOnlyDataclassBatchCollator"
-            ds_init_config = self.inference_config.egoexo
+            ds_init_config = self.inference_config
         else:
             runtime_config.data_collate_fn = "TensorOnlyDataclassBatchCollator"
             ds_init_config = runtime_config
@@ -405,7 +406,7 @@ class TestRunner:
                 # TODO: the current implementation assumes that the leading `TensorDataClass` batch size dim() returns `1`.
                 gt_trajs.append(gt_traj)
                 denoised_trajs.append(denoised_traj)
-                ids.append(batch.metadata.take_name[0][0])
+                ids.append(batch.metadata.take_name[0])
 
                 torch.cuda.empty_cache()
 
@@ -498,7 +499,7 @@ class TestRunner:
             # Run visualizations using subprocess for each trajectory
             extract_path_name_funcs_dict = {
                 "AriaDataset": lambda take_name: Path(
-                    self.inference_config.egoexo.egoexo_dataset_path,
+                    self.inference_config.egoexo.dataset_path,
                 )
                 / "takes"
                 / Path(take_name.split("name_")[1].split("_uid_")[0]),
@@ -528,7 +529,7 @@ class TestRunner:
                         self.inference_config.dataset_type
                     ](id)
                     if self.inference_config.dataset_type == "AriaDataset":
-                        self.inference_config.egoexo.traj_root = str(this_take_path)
+                        self.inference_config.egoexo.traj_root = this_take_path
 
                     visualize_inference_cli(
                         config=self.inference_config,
@@ -601,7 +602,7 @@ if __name__ == "__main__":
     @hydra.main(version_base="1.3", config_path="../../../config")
     def test(cfg: DictConfig) -> None:
         inference_config: InferenceConfig = instantiate(cfg.inference)
-        # main(inference_config)
-        main(inference_config, debug=True)
+        main(inference_config)
+        # main(inference_config, debug=True)
 
     test()
