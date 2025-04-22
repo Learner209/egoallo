@@ -17,7 +17,6 @@ from egoallo.mapping import (
 )
 from egoallo.utils.setup_logger import setup_logger
 from egoallo.utilities import find_numerical_key_in_dict
-from pathlib import Path
 import torch
 import numpy as np
 from scipy.signal import savgol_filter
@@ -28,6 +27,10 @@ import joblib
 from torch.utils.data import Dataset
 from egoallo.transforms import SO3
 from typing import Literal
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from egoallo.config.inference.egoexo import EgoExoInferenceConfig
 
 logger = setup_logger(output=None, name=__name__)
 
@@ -36,32 +39,29 @@ random.seed(1)
 
 
 class Dataset_EgoExo(Dataset):
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: "EgoExoInferenceConfig"):
         super(Dataset_EgoExo, self).__init__()
 
-        self.root = config["dataset_path"]
+        self.root = config.egoexo.dataset_path
         self.root_takes = os.path.join(self.root, "takes")
-        self.split = config["split"]
-        self.root_poses = os.path.join(
-            self.root,
-            "annotations",
-            "ego_pose",
-            self.split,
-            "body",
-        )
-        self.use_pseudo = config["use_pseudo"]
-        self.coord = config["coord"]
+        self.split = config.egoexo.split
+        self.root_poses = self.root / "annotations" / "ego_pose" / self.split / "body"
 
-        gt_ground_height_anno_dir = config["gt_ground_height_anno_dir"]
-        self.gt_ground_height = json.load(
-            open(
-                Path(gt_ground_height_anno_dir)
-                / f"ego_pose_gt_anno_{self.split}_public_height.json",
-            ),
-        )
+        self.use_pseudo = config.egoexo.use_pseudo
+        self.coord = config.egoexo.coord
+        self.config = config
 
-        # self.slice_window =  config["window_size"]
-        self.slice_window = 128
+        # gt_ground_height_anno_dir = config["gt_ground_height_anno_dir"]
+
+        # self.gt_ground_height = json.load(
+        #     open(
+        #         Path(gt_ground_height_anno_dir)
+        #         / f"ego_pose_gt_anno_{self.split}_public_height.json",
+        #     ),
+        # )
+
+        self.slice_window = config.subseq_len
+        self.traj_root = self.root / "takes"
 
         manually_annotated_takes = os.listdir(
             os.path.join(self.root_poses, "annotation"),
@@ -77,7 +77,7 @@ class Dataset_EgoExo(Dataset):
                 take.split(".")[0] for take in pseudo_annotated_takes
             ]
 
-        self.cameras = os.listdir(self.root_poses.replace("body", "camera_pose"))
+        self.cameras = os.listdir(str(self.root_poses).replace("body", "camera_pose"))
         self.metadata = json.load(open(os.path.join(self.root, "takes.json")))
 
         self.takes_uids = (
@@ -112,14 +112,14 @@ class Dataset_EgoExo(Dataset):
                 desc="takes_metadata",
                 ascii=" >=",
             ):
-                if cnt > 1:
-                    break
+                # if cnt > 20:
+                #     break
                 cnt += 1
                 if take_uid + ".json" in self.cameras:
                     camera_json = json.load(
                         open(
                             os.path.join(
-                                self.root_poses.replace("body", "camera_pose"),
+                                str(self.root_poses).replace("body", "camera_pose"),
                                 take_uid + ".json",
                             ),
                         ),
@@ -316,7 +316,6 @@ class Dataset_EgoExo(Dataset):
         self,
         data: Float[Tensor, "timesteps 17 3"],
         vis: Float[Tensor, "timesteps 17"],
-        ground_height: float = 0.0,
         return_smpl_family_jts: bool = True,
         num_joints: int = 22,
     ) -> Tuple[
@@ -598,23 +597,32 @@ class Dataset_EgoExo(Dataset):
         return joints_world, joints_world_coco
 
     def __getitem__(self, index):
+        from egoallo.scripts.aria_inference import AriaInference
+
         take_uid = self.valid_take_uids[index]
 
         camera_json = json.load(
             open(
                 os.path.join(
-                    self.root_poses.replace("body", "camera_pose"),
+                    str(self.root_poses).replace("body", "camera_pose"),
                     take_uid + ".json",
                 ),
             ),
         )
         take_name = camera_json["metadata"]["take_name"]
 
-        gt_ground_height = (
-            self.gt_ground_height[take_uid]
-            if take_uid in self.gt_ground_height
-            else 0.0
-        )
+        # gt_ground_height = (
+        #     self.gt_ground_height[take_uid]
+        #     if take_uid in self.gt_ground_height
+        #     else 0.0
+        # )
+
+        # gt_ground_height = 0.0
+
+        traj_root = self.traj_root / take_name
+        inference_cls = AriaInference(self.config, traj_root, 0.0)
+        pc_container, points_data, floor_z = inference_cls.load_pc_and_find_ground()
+        gt_ground_height = floor_z
 
         if self.use_pseudo and take_uid in self.pseudo_annotated_takes:
             pose_json = json.load(
@@ -670,14 +678,12 @@ class Dataset_EgoExo(Dataset):
         joints_world_orig, visible_mask_orig = self._process_joints(
             skeletons_window,
             flags_window.float(),
-            ground_height=float(gt_ground_height),
             return_smpl_family_jts=True,
             num_joints=24,
         )
         joints_world_orig_coco, _ = self._process_joints(
             skeletons_window,
             flags_window.float(),
-            ground_height=float(gt_ground_height),
             return_smpl_family_jts=False,
             num_joints=17,
         )
@@ -748,6 +754,29 @@ class Dataset_EgoExo(Dataset):
             joints_world_coco=joints_world_coco,
             smpl_family_name="smpl",
         )
+
+        visualize = False
+        if visualize:
+            ts_world_joints = joints_world_coco[None, ...].clone()
+            *bs, t, j, _ = ts_world_joints.shape
+            Rs_world_joints = (
+                torch.eye(3)
+                .expand(*bs, t, j, 3, 3)
+                .to(
+                    dtype=ts_world_joints.dtype,
+                    device=ts_world_joints.device,
+                )
+            )
+            from egoallo.viz.utils import visualize_smpl_skeleton_with_rotation
+            from egoallo.mapping import EGOEXO4D_BODYPOSE_KINTREE_PARENTS
+
+            visualize_smpl_skeleton_with_rotation(
+                Rs_world_joints=Rs_world_joints,
+                ts_world_joints=ts_world_joints,
+                batch_idx=0,
+                parent_indices=EGOEXO4D_BODYPOSE_KINTREE_PARENTS,
+            )
+
         # Create visibility mask based on non-nan values in world coordinates
         visible_mask = ~torch.isnan(joints_world).any(
             dim=-1,
