@@ -93,6 +93,7 @@ class InferenceTrajectoryPaths:
     hamer_outputs: Path | None
     wrist_and_palm_poses_csv: Path | None
     splat_path: Path | None
+    ego_preview_path: Path
 
     @staticmethod
     def find(traj_root: Path) -> InferenceTrajectoryPaths:
@@ -108,6 +109,11 @@ class InferenceTrajectoryPaths:
         if len(points_paths) == 0:
             points_paths = tuple(traj_root.glob("**/global_points.csv.gz"))
         assert len(points_paths) == 1, f"Found {len(points_paths)} files!"
+
+        ego_preview_paths = tuple(traj_root.glob("**/ego_preview.mp4"))
+        assert len(ego_preview_paths) == 1, (
+            f"Found {len(ego_preview_paths)} ego preview files! {ego_preview_paths}"
+        )
 
         hamer_outputs = traj_root / "hamer_outputs.pkl"
         if not hamer_outputs.exists():
@@ -134,6 +140,7 @@ class InferenceTrajectoryPaths:
             vrs_file=vrs_files[0],
             slam_root_dir=points_paths[0].parent,
             points_path=points_paths[0],
+            ego_preview_path=ego_preview_paths[0],
             hamer_outputs=hamer_outputs,
             wrist_and_palm_poses_csv=wrist_and_palm_poses_csv[0]
             if wrist_and_palm_poses_csv
