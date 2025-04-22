@@ -34,10 +34,8 @@ def merge_bn(model):
     """
     prev_m = None
     for k, m in list(model.named_children()):
-        if (isinstance(m, nn.BatchNorm2d) or isinstance(m, nn.BatchNorm1d)) and (
-            isinstance(prev_m, nn.Conv2d)
-            or isinstance(prev_m, nn.Linear)
-            or isinstance(prev_m, nn.ConvTranspose2d)
+        if (isinstance(m, nn.BatchNorm1d | nn.BatchNorm2d)) and (
+            isinstance(prev_m, nn.Conv2d | nn.ConvTranspose2d | nn.Linear)
         ):
             w = prev_m.weight.data
 
@@ -70,11 +68,7 @@ def merge_bn(model):
 def add_bn(model):
     """Kai Zhang, 11/Jan/2019."""
     for k, m in list(model.named_children()):
-        if (
-            isinstance(m, nn.Conv2d)
-            or isinstance(m, nn.Linear)
-            or isinstance(m, nn.ConvTranspose2d)
-        ):
+        if isinstance(m, nn.Conv2d | nn.ConvTranspose2d | nn.Linear):
             b = nn.BatchNorm2d(m.out_channels, momentum=0.1, affine=True)
             b.weight.data.fill_(1)
             new_m = nn.Sequential(model._modules[k], b)

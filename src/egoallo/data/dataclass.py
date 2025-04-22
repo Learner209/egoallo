@@ -207,9 +207,7 @@ class EgoTrainingData(TensorDataclass):
         assert raw_fields["root_orient"].shape == (timesteps, 3)
         assert raw_fields["pose_body"].shape == (timesteps, 63)
         assert raw_fields["pose_hand"].shape == (timesteps, 90)
-        assert raw_fields["contacts"].shape == (timesteps, 52) or raw_fields[
-            "contacts"
-        ].shape == (timesteps, 22)
+        assert raw_fields["contacts"].shape in ((timesteps, 52), (timesteps, 22))
         if raw_fields["joints"].shape == (timesteps, 52, 3):
             raw_fields["joints"] = raw_fields["joints"][:, :22]
         assert raw_fields["joints"].shape == (timesteps, 22, 3)
