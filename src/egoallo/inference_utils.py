@@ -110,7 +110,7 @@ class InferenceTrajectoryPaths:
             points_paths = tuple(traj_root.glob("**/global_points.csv.gz"))
         assert len(points_paths) == 1, f"Found {len(points_paths)} files!"
 
-        ego_preview_paths = tuple(traj_root.glob("**/ego_preview.mp4"))
+        ego_preview_paths = tuple(traj_root.glob("ego_preview.mp4"))
         assert len(ego_preview_paths) == 1, (
             f"Found {len(ego_preview_paths)} ego preview files! {ego_preview_paths}"
         )
