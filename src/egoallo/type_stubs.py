@@ -96,6 +96,7 @@ DatasetType = Literal[
     "EgoExoDataset",
     "AriaDataset",
     "AriaInferenceDataset",
+    "FlexibleMaskingDataset",
 ]
 
 DatasetSliceStrategy = Literal[

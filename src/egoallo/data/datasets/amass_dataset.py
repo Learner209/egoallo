@@ -22,6 +22,8 @@ from egoallo.utils.setup_logger import setup_logger
 import typeguard
 from jaxtyping import jaxtyped
 from egoallo.constants import EgoTrainingDataZoo
+from typing import Tuple
+from torch import Tensor
 
 local_config_file = CONFIG_FILE
 CFG = make_cfg(config_name="defaults", config_file=local_config_file, cli_args=[])
@@ -477,6 +479,66 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingDataType]):
             for g in self._groups
         ]
 
+    def _make_masks(
+        self,
+        *,
+        seq_len: int,
+        num_joints: int,
+        device: torch.device,
+    ) -> Tuple[Tensor, Tensor, Tensor]:
+        # Get spatial mask ratio and temporal mask ratio
+        spatial_mask_ratio = self._get_mask_ratio(mask_type="spatial")
+        num_masked = int(num_joints * spatial_mask_ratio)
+
+        # Create initial visible joints mask
+        spatial_mask = torch.ones(
+            (seq_len, num_joints),
+            dtype=torch.bool,
+            device=device,
+        )
+
+        # Create temporal patch mask
+        patch_size = self.config.temporal_patch_size
+        # Pad sequence length to be divisible by patch size
+        pad_len = (patch_size - seq_len % patch_size) % patch_size
+        padded_seq_len = seq_len + pad_len
+
+        # Create padded mask and rearrange into patches
+        temporal_mask = torch.ones((padded_seq_len,), dtype=torch.bool, device=device)
+        temporal_patches = rearrange(temporal_mask, "(n p) -> n p", p=patch_size)
+
+        # Randomly mask temporal patches
+        temporal_mask_ratio = self._get_mask_ratio(mask_type="temporal")
+        num_patches = temporal_patches.shape[0]
+        num_masked_patches = int(num_patches * temporal_mask_ratio)
+
+        # prevent corner cases.
+        if num_masked_patches >= num_patches - 1:
+            logger.warning(
+                f"num_masked_patches >= num_patches - 1: {num_patches}, {num_masked_patches}",
+            )
+        if num_masked_patches == 0 and temporal_mask_ratio > 0:
+            logger.warning(f"num_masked_patches == 0: {num_masked_patches}")
+
+        # Generate random indices excluding the first patch
+        # NOTE: this is to prevent the first patch from being masked, since the first patch should be visible for all batch for the **preprocessing** process to work as fine.
+        patch_indices = torch.randperm(num_patches - 1)[:(num_masked_patches)] + 1
+        temporal_patches[patch_indices] = False
+
+        # Rearrange back and trim padding
+        temporal_mask = rearrange(temporal_patches, "n p -> (n p)")[:seq_len]  # (T,)
+
+        # Apply both spatial and temporal masks
+        # First apply spatial masking
+        rand_indices = torch.randperm(num_joints)
+        masked_indices = rand_indices[:num_masked]
+        spatial_mask[:, masked_indices] = False  # (T,J)
+
+        # Then apply temporal patch mask
+        visible_joints_mask = spatial_mask & temporal_mask.unsqueeze(-1)
+
+        return visible_joints_mask, temporal_mask, spatial_mask
+
     def __getitem__(self, index: int) -> EgoTrainingDataType:
         """Retrieve an item from the dataset.
 
@@ -585,57 +647,6 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingDataType]):
 
         kwargs["mask"] = torch.ones(seq_len, dtype=torch.bool, device=device)
 
-        # Get spatial mask ratio and temporal mask ratio
-        spatial_mask_ratio = self._get_mask_ratio(mask_type="spatial")
-        num_masked = int(num_joints * spatial_mask_ratio)
-
-        # Create initial visible joints mask
-        visible_joints_mask = torch.ones(
-            (seq_len, num_joints),
-            dtype=torch.bool,
-            device=device,
-        )
-
-        # Create temporal patch mask
-        patch_size = self.config.temporal_patch_size
-        # Pad sequence length to be divisible by patch size
-        pad_len = (patch_size - seq_len % patch_size) % patch_size
-        padded_seq_len = seq_len + pad_len
-
-        # Create padded mask and rearrange into patches
-        temporal_mask = torch.ones((padded_seq_len,), dtype=torch.bool, device=device)
-        temporal_patches = rearrange(temporal_mask, "(n p) -> n p", p=patch_size)
-
-        # Randomly mask temporal patches
-        temporal_mask_ratio = self._get_mask_ratio(mask_type="temporal")
-        num_patches = temporal_patches.shape[0]
-        num_masked_patches = int(num_patches * temporal_mask_ratio)
-
-        # prevent corner cases.
-        if num_masked_patches >= num_patches - 1:
-            logger.warning(
-                f"num_masked_patches >= num_patches - 1: {num_patches}, {num_masked_patches}",
-            )
-        if num_masked_patches == 0 and temporal_mask_ratio > 0:
-            logger.warning(f"num_masked_patches == 0: {num_masked_patches}")
-
-        # Generate random indices excluding the first patch
-        # NOTE: this is to prevent the first patch from being masked, since the first patch should be visible for all batch for the **preprocessing** process to work as fine.
-        patch_indices = torch.randperm(num_patches - 1)[:(num_masked_patches)] + 1
-        temporal_patches[patch_indices] = False
-
-        # Rearrange back and trim padding
-        temporal_mask = rearrange(temporal_patches, "n p -> (n p)")[:seq_len]
-
-        # Apply both spatial and temporal masks
-        # First apply spatial masking
-        rand_indices = torch.randperm(num_joints)
-        masked_indices = rand_indices[:num_masked]
-        visible_joints_mask[:, masked_indices] = False
-
-        # Then apply temporal patch mask
-        visible_joints_mask = visible_joints_mask & temporal_mask.unsqueeze(-1)
-
         assert kwargs["joints_wrt_world"].shape == (
             seq_len,
             num_joints,
@@ -645,6 +656,11 @@ class AdaptiveAmassHdf5Dataset(torch.utils.data.Dataset[EgoTrainingDataType]):
         )
 
         # Update kwargs with new MAE-style masking tensors
+        visible_joints_mask, temporal_mask, spatial_mask = self._make_masks(
+            seq_len=seq_len,
+            num_joints=num_joints,
+            device=device,
+        )
         kwargs["visible_joints_mask"] = visible_joints_mask
 
         metadata = DataClass.MetaData(
