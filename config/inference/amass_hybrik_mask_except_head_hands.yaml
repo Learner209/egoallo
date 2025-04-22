@@ -1,0 +1,44 @@
+_target_: egoallo.config.inference.defaults.InferenceConfig
+
+start_index: 0
+traj_length: 128
+num_samples: 1
+batch_size: 1
+smpl_family_model_basedir:
+  _target_: pathlib.Path
+  _args_:
+    - assets/smpl_based_model/
+smpl_family_meta_model_name: SmplModelAADecomp
+output_dir:
+  _target_: pathlib.Path
+  _args_:
+    - experiments/Apr_19_hybrik_traj_aug/v0/checkpoints_70000
+device: cuda
+annotation_path: ./data/egoexo-default-gt-output
+checkpoint_dir:
+  _target_: pathlib.Path
+  _args_:
+    - experiments/Apr_19_hybrik_traj_aug/v0/checkpoints_70000
+
+visualize_traj: true
+random_visualize: true
+online_render: false
+
+guidance_post: false
+guidance_inner: false
+guidance_mode: aria_hamer
+
+dataset_type: FlexibleMaskingDataset
+dataset_slice_strategy: full_sequence
+splits:
+  - test
+mask_scheme:
+  spatial:
+    name: head_hands
+  temporal:
+    name: patch
+    kwargs:
+      ratio: 0.0
+      patch_size: 12
+
+debug_max_iters: null

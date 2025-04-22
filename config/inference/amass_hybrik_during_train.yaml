@@ -10,7 +10,6 @@ smpl_family_model_basedir:
     - assets/smpl_based_model/
 smpl_family_meta_model_name: SmplModelAADecomp
 device: cuda
-annotation_path: ./data/egoexo-default-gt-output
 
 visualize_traj: false
 random_visualize: false

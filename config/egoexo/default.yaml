@@ -3,8 +3,11 @@ _target_: egoallo.config.data.egoexo.defaults.EgoExoConfig
 traj_root:
   _target_: pathlib.Path
   _args_:
-    - data/egoexo-default/takes
-dataset_path: data/egoexo-default
+    - data/egoexo-default-mount/takes
+dataset_path:
+  _target_: pathlib.Path
+  _args_:
+    - data/egoexo-default-mount
 
 bodypose_anno_dir: ./data/egoexo-default-gt-output/annotation/manual
 
