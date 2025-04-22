@@ -44,6 +44,14 @@ class EgoAlloTrainConfig:
 
     random_sample_mask_ratio: bool = True
 
+    mask_scheme: dict[str, dict] = dataclasses.field(
+        default_factory=lambda: {
+            "spatial": {"name": "random_joints", "kwargs": {}},
+            "temporal": {"name": "patch", "kwargs": {"ratio": 0.3}},
+        },
+    )
+    """Masking scheme for training data."""
+
     joint_cond_mode: JointCondMode = "absolute"
 
     # Dataset arguments.

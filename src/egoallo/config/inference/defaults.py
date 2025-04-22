@@ -87,3 +87,11 @@ class InferenceConfig:
 
     debug_max_iters: Optional[int] = None
     """Maximum number of iterations for debugging"""
+
+    mask_scheme: dict[str, dict] = dataclasses.field(
+        default_factory=lambda: {
+            "spatial": {"name": "random_joints", "kwargs": {}},
+            "temporal": {"name": "patch", "kwargs": {"ratio": 0.3}},
+        },
+    )
+    """Masking scheme for training data."""

@@ -13,6 +13,7 @@ from egoallo.egopose.bodypose.data.dataset_egoexo import Dataset_EgoExo as AriaD
 from egoallo.egopose.bodypose.data.dataset_egoexo import (
     Dataset_EgoExo_inference as AriaInferenceDataset,
 )
+from .datasets.flexible_masking_dataset import FlexibleMaskingDataset
 from egoallo.utils.setup_logger import setup_logger
 
 logger = setup_logger(output=None, name=__name__)
@@ -32,5 +33,7 @@ def build_dataset(
         return AriaDataset
     elif cfg.dataset_type == "AriaInferenceDataset":
         return AriaInferenceDataset
+    elif cfg.dataset_type == "FlexibleMaskingDataset":
+        return FlexibleMaskingDataset
     else:
         assert_never(cfg.dataset_type)
