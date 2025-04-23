@@ -11,8 +11,8 @@ smpl_family_model_basedir:
 smpl_family_meta_model_name: SmplModelAADecomp
 device: cuda
 
-visualize_traj: false
-random_visualize: false
+visualize_traj: true
+random_visualize: false # not used.
 online_render: false
 
 guidance_post: false

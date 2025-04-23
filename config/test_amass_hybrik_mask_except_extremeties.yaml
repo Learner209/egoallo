@@ -1,5 +1,5 @@
 defaults:
-  - inference: amass_hybrik_except_extremeties
+  - inference: amass_hybrik_mask_except_extremeties
   - _self_
 
 hydra:
