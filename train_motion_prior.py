@@ -40,7 +40,8 @@ import datetime
 import tempfile
 from egoallo.config.inference.defaults import InferenceConfig
 import numpy as np
-from egoallo.utils.optimization import get_scheduler
+from egoallo.utils.sched_factory import get_scheduler
+from egoallo.utils.optim_factory import get_optimizer
 from egoallo.utils.ema_model import EMAModel
 
 
@@ -177,8 +178,21 @@ def run_training(
         drop_last=True,
     )
 
-    optim = torch.optim.AdamW(  # type: ignore
-        model.parameters(),
+    test_cfg = dataclasses.replace(train_cfg, splits=("test",))
+    val_loader = torch.utils.data.DataLoader(
+        dataset=build_dataset(cfg=test_cfg)(config=test_cfg),
+        batch_size=1,
+        shuffle=False,
+        num_workers=train_cfg.num_workers,
+        persistent_workers=train_cfg.num_workers > 0,
+        pin_memory=True,
+        collate_fn=make_batch_collator(val_cfg),
+        drop_last=True,
+    )
+
+    optim = get_optimizer(
+        name=train_cfg.sched_name,
+        params=[p for p in model.parameters() if p.requires_grad],
         lr=train_cfg.learning_rate,
         weight_decay=train_cfg.weight_decay,
     )
@@ -285,16 +299,14 @@ def run_training(
                             experiment_dir.glob("checkpoints_*_loss_spike_*"),
                         )
                         for checkpoint in existing_spike_checkpoints:
-                            if checkpoint.is_dir():
-                                # Delete anomaly batch file if it exists
-                                anomaly_batch = checkpoint / "anomaly_train_batch.pt"
-                                if anomaly_batch.exists():
-                                    anomaly_batch.unlink()
-                                # Delete checkpoint directory
-                                shutil.rmtree(checkpoint)
-                                logger.info(
-                                    f"Deleted previous spike checkpoint: {checkpoint}",
-                                )
+                            anomaly_batch = checkpoint / "anomaly_train_batch.pt"
+                            if anomaly_batch.exists():
+                                anomaly_batch.unlink()
+                            # Delete checkpoint directory
+                            shutil.rmtree(checkpoint)
+                            logger.info(
+                                f"Deleted previous spike checkpoint: {checkpoint}",
+                            )
 
                         spike_checkpoint_path = (
                             experiment_dir
@@ -435,34 +447,80 @@ def run_training(
                     eval_model = ema_model.averaged_model
                 eval_model.eval()
 
-                total_val_loss = 0.0
-                num_val_batches = 0
+                # Initialize validation metrics aggregator
+                total_val_metrics = {}
+                total_val_batches = 0
+
                 with torch.no_grad():
                     for val_batch in val_loader:
                         with autocast(device_type=device.type, dtype=torch.float32):
-                            val_loss, _ = loss_helper.compute_denoising_loss(
-                                eval_model,
-                                unwrapped_model=accelerator.unwrap_model(eval_model),
-                                train_config=train_cfg,
-                                train_batch=val_batch,
+                            val_loss, val_log_outputs = (
+                                loss_helper.compute_denoising_loss(
+                                    eval_model,
+                                    unwrapped_model=accelerator.unwrap_model(
+                                        eval_model,
+                                    ),
+                                    train_config=train_cfg,
+                                    train_batch=val_batch,
+                                )
                             )
-                        total_val_loss += val_loss.item()
-                        num_val_batches += 1
 
-                avg_val_loss = total_val_loss / num_val_batches
+                            # Aggregate all metrics including main loss
+                            total_val_metrics["loss"] = (
+                                total_val_metrics.get("loss", 0.0) + val_loss.item()
+                            )
 
-                eval_model.train()
+                            # Aggregate individual loss terms
+                            for key, value in val_log_outputs.items():
+                                total_val_metrics[key] = (
+                                    total_val_metrics.get(key, 0.0) + value
+                                )
 
-                # Log validation loss
+                        total_val_batches += 1
+
+                # Compute means of all metrics
+                mean_val_metrics = {
+                    k: v / total_val_batches for k, v in total_val_metrics.items()
+                }
+
+                # Log validation metrics
                 if accelerator.is_main_process:
-                    wandb.log({"val/loss": avg_val_loss}, step=step)
-                    logger.info(f"Validation loss at step {step}: {avg_val_loss:.6f}")
+                    # Construct log message for console
+                    log_msg = f"Validation metrics at step {step}:"
+                    log_msg += f" loss: {mean_val_metrics['loss']:.6f}"
 
-                # Check early stopping
+                    # Add other metrics to log message
+                    for key, value in mean_val_metrics.items():
+                        if key != "loss":  # Skip main loss as it's already added
+                            metric_name = key.split("/")[-1] if "/" in key else key
+                            log_msg += f" {metric_name}: {value:.6f}"
+
+                    logger.info(log_msg)
+
+                    # Log to wandb
+                    wandb_metrics = {
+                        "val/loss": mean_val_metrics["loss"],
+                        "val/step": step,
+                    }
+
+                    # Add other metrics with proper prefixing
+                    for key, value in mean_val_metrics.items():
+                        if key != "loss":  # Skip main loss as it's already added
+                            if key.startswith("loss_term/"):
+                                # Keep the existing loss_term structure but under val/
+                                metric_name = f"val/{key}"
+                            else:
+                                # Add val/ prefix to other metrics
+                                metric_name = f"val/{key}"
+                            wandb_metrics[metric_name] = value
+
+                    wandb.log(wandb_metrics, step=step)
+
+                # Update early stopping with mean validation loss
                 if accelerator.is_main_process:
                     checkpoint_path = experiment_dir / f"checkpoints_{step}"
                     save_ckpt_flag = early_stopping(
-                        avg_val_loss,
+                        mean_val_metrics["loss"],
                         lambda: accelerator.save_state(str(checkpoint_path)),
                     )
                     if save_ckpt_flag:
@@ -471,8 +529,86 @@ def run_training(
                         logger.info("Early stopping triggered")
                         break
 
+                eval_model.train()
+
             steps_to_test = train_cfg.test_every_step
             if step % steps_to_test == 0:
+                # Compute validation loss
+                if not train_cfg.use_ema:
+                    eval_model = model
+                else:
+                    eval_model = ema_model.averaged_model
+                eval_model.eval()
+
+                # Initialize validation metrics aggregator
+                total_test_metrics = {}
+                total_test_batches = 0
+
+                with torch.no_grad():
+                    for test_batch in test_loader:
+                        with autocast(device_type=device.type, dtype=torch.float32):
+                            test_loss, test_log_outputs = (
+                                loss_helper.compute_denoising_loss(
+                                    eval_model,
+                                    unwrapped_model=accelerator.unwrap_model(
+                                        eval_model,
+                                    ),
+                                    train_config=train_cfg,
+                                    train_batch=test_batch,
+                                )
+                            )
+
+                            # Aggregate all metrics including main loss
+                            total_test_metrics["loss"] = (
+                                total_test_metrics.get("loss", 0.0) + test_loss.item()
+                            )
+
+                            # Aggregate individual loss terms
+                            for key, value in test_log_outputs.items():
+                                total_test_metrics[key] = (
+                                    total_test_metrics.get(key, 0.0) + value
+                                )
+
+                        total_test_batches += 1
+
+                # Compute means of all metrics
+                mean_test_metrics = {
+                    k: v / total_test_batches for k, v in total_test_metrics.items()
+                }
+
+                # Log validation metrics
+                if accelerator.is_main_process:
+                    # Construct log message for console
+                    log_msg = f"Test metrics at step {step}:"
+                    log_msg += f" loss: {mean_test_metrics['loss']:.6f}"
+
+                    # Add other metrics to log message
+                    for key, value in mean_test_metrics.items():
+                        if key != "loss":  # Skip main loss as it's already added
+                            metric_name = key.split("/")[-1] if "/" in key else key
+                            log_msg += f" {metric_name}: {value:.6f}"
+
+                    logger.info(log_msg)
+
+                    # Log to wandb
+                    wandb_metrics = {
+                        "test/loss": mean_test_metrics["loss"],
+                        "test/step": step,
+                    }
+
+                    # Add other metrics with proper prefixing
+                    for key, value in mean_test_metrics.items():
+                        if key != "loss":  # Skip main loss as it's already added
+                            if key.startswith("loss_term/"):
+                                # Keep the existing loss_term structure but under test/
+                                metric_name = f"test/{key}"
+                            else:
+                                # Add test/ prefix to other metrics
+                                metric_name = f"test/{key}"
+                            wandb_metrics[metric_name] = value
+
+                    wandb.log(wandb_metrics, step=step)
+
                 try:
                     with tempfile.TemporaryDirectory() as temp_dir:
                         inference_cfg.checkpoint_dir = prev_ckpt_path

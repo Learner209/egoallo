@@ -73,6 +73,7 @@ class EgoAlloTrainConfig:
     bodypose_anno_dir: Path | None = None
 
     # Optimizer options.
+    sched_name: str = "adamw"
     learning_rate: float = 1e-4
     weight_decay: float = 1e-4
     warmup_steps: int = 1000
