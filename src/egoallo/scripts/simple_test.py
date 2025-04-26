@@ -64,7 +64,7 @@ def test_fn(
     )
     denoiser = denoiser.to(device)
 
-    bs = 1
+    bs = inference_config.batch_size
     noise_constants = CosineNoiseScheduleConstants.compute(timesteps=1000).to(
         device=device,
     )
@@ -119,7 +119,7 @@ def test_fn(
         ):
             break
 
-        assert batch.joints_wrt_world.shape[0] == 1
+        assert batch.joints_wrt_world.shape[0] == bs
         batch = batch.to(device)
         preprocessed_batch = copy.deepcopy(batch)
         post_processed_batch: EgoTrainingDataType = batch.postprocess()
@@ -162,6 +162,8 @@ def test_fn(
                 : end_t - start_t,
                 None,
             ]
+            if end_t != seq_len:
+                overlap_weights_slice[:, -overlap_size:, :] = 0.0
             overlap_weights[:, start_t:end_t, :] += overlap_weights_slice
 
             win_data = copy.deepcopy(post_processed_batch[:, start_t:end_t])
