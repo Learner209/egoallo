@@ -9,7 +9,7 @@ d_noise_emb: 1024
 num_heads: 4
 encoder_layers: 6
 decoder_layers: 6
-dropout_p: 0.0
+dropout_p: 0.15
 
 # MAE parameters
 include_hands: false
