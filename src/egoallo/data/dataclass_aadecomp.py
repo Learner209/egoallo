@@ -606,6 +606,7 @@ class EgoTrainingDataAADecomp(TensorDataclass):
             self._rotate(
                 self.metadata.rotate_radian.to(dtype=dtype, device=device) * -1,
             )
+            self.metadata.rotate_radian = None
 
         self.joints_wrt_world = torch.cat(
             [
